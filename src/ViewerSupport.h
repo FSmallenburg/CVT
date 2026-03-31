@@ -49,7 +49,6 @@ struct ViewerState
     float particleSizeScale = 1.0f;
     bool wrapParticlesToBox = true;
     std::unordered_set<uint32_t> selectedIds;
-    std::unordered_set<uint32_t> overlapIds;
     std::unordered_set<uint32_t> hiddenIds;
     bool pendingHideSelected = false;
     bool pendingRevealAll = false;

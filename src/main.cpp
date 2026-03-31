@@ -257,9 +257,9 @@ float scaledParticleRadius(const Particle &particle, float particleSizeScale)
 void findOverlappingSphereParticles(const ParticleSystem &particleSystem,
                                     const SimulationBox &simulationBox,
                                     float particleSizeScale,
-                                    std::unordered_set<uint32_t> &overlapIds)
+                                    std::unordered_set<uint32_t> &selectedIds)
 {
-    overlapIds.clear();
+    selectedIds.clear();
 
     const std::vector<Particle> &particles = particleSystem.particles();
     for (size_t firstIndex = 0; firstIndex < particles.size(); ++firstIndex)
@@ -290,8 +290,8 @@ void findOverlappingSphereParticles(const ParticleSystem &particleSystem,
                                                                  particleSizeScale);
             if (bx::length(displacement) < overlapDistance)
             {
-                overlapIds.insert(firstParticle.id);
-                overlapIds.insert(secondParticle.id);
+                selectedIds.insert(firstParticle.id);
+                selectedIds.insert(secondParticle.id);
             }
         }
     }
@@ -747,7 +747,6 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         currentFrame = requestedFrame;
         viewerState.previousRawPositions = std::move(previousRawPositions);
         viewerState.hasPreviousFramePositions = true;
-        viewerState.overlapIds.clear();
         applyHiddenParticles(particleSystem, viewerState.hiddenIds);
         markPickBufferDirty(viewerState);
         return;
@@ -792,14 +791,11 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         if (particleFileType == TrajectoryReader::FileType::Sphere)
         {
+            viewerState.selectedIds.clear();
             findOverlappingSphereParticles(particleSystem, simulationBox,
                                            particleSizeScale,
-                                           viewerState.overlapIds);
+                                           viewerState.selectedIds);
             markPickBufferDirty(viewerState);
-        }
-        else
-        {
-            viewerState.overlapIds.clear();
         }
         viewerState.pendingOverlapCheck = false;
     }
@@ -1226,7 +1222,6 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    viewerState.overlapIds.clear();
                     applyHiddenParticles(particleSystem, viewerState.hiddenIds);
                     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
                 }
@@ -1351,7 +1346,7 @@ int main(int argc, char **argv)
                                       viewerState.particleTranslation, 1.0f,
                                       &simulationBox,
                                       viewerState.wrapParticlesToBox,
-                                      &viewerState.selectedIds, &viewerState.overlapIds,
+                                      &viewerState.selectedIds, nullptr,
                                       false,
                                       viewerState.cutPlaneEnabled,
                                       viewerState.cutPlaneSceneZ);
@@ -1363,7 +1358,7 @@ int main(int argc, char **argv)
                                       viewerState.particleTranslation,
                                       viewerState.particleSizeScale, &simulationBox,
                                       viewerState.wrapParticlesToBox,
-                                      &viewerState.selectedIds, &viewerState.overlapIds,
+                                      &viewerState.selectedIds, nullptr,
                                       false,
                                       viewerState.cutPlaneEnabled,
                                       viewerState.cutPlaneSceneZ);
