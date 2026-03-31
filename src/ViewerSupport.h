@@ -54,6 +54,8 @@ struct ViewerState
     bool pendingRevealAll = false;
     bool pendingOverlapCheck = false;
     bool pendingInvertSelected = false;
+    bool pendingDescribeSelection = false;
+    bool pendingDescribeVisibleCount = false;
     bool pendingUnselect = false;
     bool pendingIncreaseSphereResolution = false;
     bool pendingDecreaseSphereResolution = false;

@@ -29,6 +29,7 @@
 #include <fstream>
 #include <cmath>
 #include <cstring>
+#include <iomanip>
 #include <memory>
 
 // ---- Load shader ----
@@ -297,6 +298,71 @@ void findOverlappingSphereParticles(const ParticleSystem &particleSystem,
     }
 }
 
+const Particle *findParticleById(const ParticleSystem &particleSystem, uint32_t particleId)
+{
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const auto particleIt = std::find_if(
+        particles.begin(), particles.end(),
+        [particleId](const Particle &particle) { return particle.id == particleId; });
+    return particleIt != particles.end() ? &(*particleIt) : nullptr;
+}
+
+void printSelectedParticles(const ParticleSystem &particleSystem,
+                            const std::unordered_set<uint32_t> &selectedIds,
+                            const SimulationBox &simulationBox)
+{
+    std::vector<uint32_t> sortedIds(selectedIds.begin(), selectedIds.end());
+    std::sort(sortedIds.begin(), sortedIds.end());
+
+    std::cout << "Selected particle IDs:";
+    for (uint32_t particleId : sortedIds)
+    {
+        std::cout << ' ' << particleId;
+    }
+    std::cout << std::endl;
+
+    if (sortedIds.size() != 2u)
+    {
+        return;
+    }
+
+    const Particle *firstParticle = findParticleById(particleSystem, sortedIds[0]);
+    const Particle *secondParticle = findParticleById(particleSystem, sortedIds[1]);
+    if (firstParticle == nullptr || secondParticle == nullptr)
+    {
+        std::cout << "Could not resolve both selected particle IDs in the current frame."
+                  << std::endl;
+        return;
+    }
+
+    bx::Vec3 displacement = {
+        secondParticle->position.x - firstParticle->position.x,
+        secondParticle->position.y - firstParticle->position.y,
+        secondParticle->position.z - firstParticle->position.z,
+    };
+    displacement = simulationBox.nearestImage(displacement);
+
+    const float centerDistance = bx::length(displacement);
+    const float radiusSum = particleRadius(*firstParticle) + particleRadius(*secondParticle);
+    std::cout << std::fixed << std::setprecision(6)
+              << "Center distance(" << sortedIds[0] << ", " << sortedIds[1]
+              << "): " << centerDistance << '\n'
+              << "Radius sum(" << sortedIds[0] << ", " << sortedIds[1]
+              << "): " << radiusSum << std::endl;
+}
+
+size_t countVisibleParticles(const ParticleSystem &particleSystem)
+{
+    return static_cast<size_t>(std::count_if(
+        particleSystem.particles().begin(), particleSystem.particles().end(),
+        [](const Particle &particle) { return particle.visible; }));
+}
+
+void printVisibleParticleCount(const ParticleSystem &particleSystem)
+{
+    std::cout << "Visible particles: " << countVisibleParticles(particleSystem) << std::endl;
+}
+
 void rebuildMobilitySystem(const ParticleSystem &particleSystem,
                            ParticleSystem &mobilitySystem,
                            const ViewerState &viewerState,
@@ -503,6 +569,18 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             if (action == GLFW_PRESS)
             {
                 state->showBox = !state->showBox;
+            }
+            break;
+        case GLFW_KEY_D:
+            if (action == GLFW_PRESS)
+            {
+                state->pendingDescribeSelection = true;
+            }
+            break;
+        case GLFW_KEY_V:
+            if (action == GLFW_PRESS)
+            {
+                state->pendingDescribeVisibleCount = true;
             }
             break;
         case GLFW_KEY_E:
@@ -806,6 +884,18 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         viewerState.pendingInvertSelected = false;
     }
 
+    if (viewerState.pendingDescribeSelection)
+    {
+        printSelectedParticles(particleSystem, viewerState.selectedIds, simulationBox);
+        viewerState.pendingDescribeSelection = false;
+    }
+
+    if (viewerState.pendingDescribeVisibleCount)
+    {
+        printVisibleParticleCount(particleSystem);
+        viewerState.pendingDescribeVisibleCount = false;
+    }
+
     if (viewerState.pendingUnselect)
     {
         viewerState.selectedIds.clear();
@@ -971,7 +1061,7 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                             (int)viewerState.selectedIds.size(), viewerState.lastPickedId,
                             sphereStacks, sphereSlices);
         bgfx::dbgTextPrintf(0, 3, 0x0f,
-                            "Drag rotates. Shift+drag translates. E checks overlaps. +/- detail.");
+                            "Drag rotates. Shift+drag translates. D prints selection. V prints visible count.");
     }
     else
     {
@@ -979,7 +1069,7 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                             (int)viewerState.selectedIds.size(), viewerState.lastPickedId,
                             particleTypeName(particleFileType), sphereStacks, sphereSlices);
         bgfx::dbgTextPrintf(0, 3, 0x0f,
-                            "Drag rotates. Shift+drag translates. +/- detail. E is sphere-only.");
+                            "Drag rotates. Shift+drag translates. D prints selection. V prints visible count.");
     }
     bgfx::dbgTextPrintf(0, 4, 0x0f,
                         "Enter resets rotation. B toggles box. P saves PNG. > creates cut plane.");
