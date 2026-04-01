@@ -28,21 +28,172 @@
 #endif
 #include <GLFW/glfw3native.h>
 
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+#include <unistd.h>
+#include <limits.h>
+#elif BX_PLATFORM_OSX
+#include <mach-o/dyld.h>
+#elif BX_PLATFORM_WINDOWS
+#include <windows.h>
+#endif
+
 #include <algorithm>
-#include <iostream>
+#include <filesystem>
 #include <fstream>
 #include <cmath>
 #include <cstring>
 #include <iomanip>
+#include <iostream>
 #include <memory>
+#include <system_error>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace
+{
+
+std::vector<fs::path> s_resourceSearchRoots;
+
+fs::path fallbackExecutablePath(const char *argv0)
+{
+    if (argv0 == nullptr || argv0[0] == '\0')
+    {
+        return {};
+    }
+
+    std::error_code error;
+    fs::path path(argv0);
+    if (path.is_relative())
+    {
+        path = fs::absolute(path, error);
+        if (error)
+        {
+            return {};
+        }
+    }
+
+    const fs::path canonicalPath = fs::weakly_canonical(path, error);
+    return error ? path.lexically_normal() : canonicalPath;
+}
+
+fs::path currentExecutablePath(const char *argv0)
+{
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+    char buffer[PATH_MAX];
+    const ssize_t length = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (length > 0)
+    {
+        buffer[length] = '\0';
+        return fs::path(buffer);
+    }
+#elif BX_PLATFORM_OSX
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size);
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0)
+    {
+        std::error_code error;
+        const fs::path path(buffer.data());
+        const fs::path canonicalPath = fs::weakly_canonical(path, error);
+        return error ? path.lexically_normal() : canonicalPath;
+    }
+#elif BX_PLATFORM_WINDOWS
+    std::vector<wchar_t> buffer(MAX_PATH);
+    DWORD length = 0;
+    while (true)
+    {
+        length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0)
+        {
+            break;
+        }
+        if (length < buffer.size())
+        {
+            return fs::path(buffer.data(), buffer.data() + length);
+        }
+        buffer.resize(buffer.size() * 2u);
+    }
+#endif
+
+    return fallbackExecutablePath(argv0);
+}
+
+void addSearchRoot(std::vector<fs::path> &roots, const fs::path &root)
+{
+    if (root.empty())
+    {
+        return;
+    }
+
+    std::error_code error;
+    const fs::path normalizedRoot = fs::weakly_canonical(root, error);
+    const fs::path finalRoot = error ? root.lexically_normal() : normalizedRoot;
+    if (std::find(roots.begin(), roots.end(), finalRoot) == roots.end())
+    {
+        roots.push_back(finalRoot);
+    }
+}
+
+std::vector<fs::path> buildResourceSearchRoots(const char *argv0)
+{
+    std::vector<fs::path> roots;
+
+    std::error_code error;
+    addSearchRoot(roots, fs::current_path(error));
+
+    const fs::path executablePath = currentExecutablePath(argv0);
+    if (!executablePath.empty())
+    {
+        const fs::path executableDir = executablePath.parent_path();
+        addSearchRoot(roots, executableDir);
+        addSearchRoot(roots, executableDir.parent_path());
+    }
+
+    return roots;
+}
+
+fs::path resolveResourcePath(const fs::path &relativePath)
+{
+    std::error_code error;
+    if (relativePath.is_absolute() && fs::exists(relativePath, error))
+    {
+        return relativePath;
+    }
+
+    for (const fs::path &root : s_resourceSearchRoots)
+    {
+        const fs::path candidate = root / relativePath;
+        if (fs::exists(candidate, error))
+        {
+            return candidate;
+        }
+        error.clear();
+    }
+
+    return {};
+}
+
+} // namespace
 
 // ---- Load shader ----
 bgfx::ShaderHandle loadShader(const char *path)
 {
-    std::ifstream file(path, std::ios::binary);
+    const fs::path shaderPath = resolveResourcePath(fs::path(path));
+    std::ifstream file(shaderPath.empty() ? fs::path(path) : shaderPath, std::ios::binary);
     if (!file)
     {
-        std::cerr << "Failed to open shader: " << path << std::endl;
+        std::cerr << "Failed to open shader: " << path;
+        if (!s_resourceSearchRoots.empty())
+        {
+            std::cerr << " (searched";
+            for (const fs::path &root : s_resourceSearchRoots)
+            {
+                std::cerr << ' ' << (root / path).string();
+            }
+            std::cerr << ')';
+        }
+        std::cerr << std::endl;
         return BGFX_INVALID_HANDLE;
     }
     file.seekg(0, std::ios::end);
@@ -1691,6 +1842,7 @@ int main(int argc, char **argv)
     ViewerState viewerState;
     ScreenshotCallback screenshotCallback;
     int exitCode = 0;
+    s_resourceSearchRoots = buildResourceSearchRoots(argc > 0 ? argv[0] : nullptr);
 
     // Create a GLFW window without an OpenGL context.
     glfwSetErrorCallback(glfw_errorCallback);

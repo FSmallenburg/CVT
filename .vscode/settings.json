@@ -1,18 +1,16 @@
 {
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build-debug/compile_commands.json",
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  "C_Cpp.default.compilerPath": "/usr/bin/g++",
-  "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
   "C_Cpp.default.includePath": [
     "${workspaceFolder}/**",
-    "/home/frank/BGFX/bgfx/include",
-    "/home/frank/BGFX/bx/include",
-    "/home/frank/BGFX/bimg/include"
+    "${workspaceFolder}/third_party/bgfx/include",
+    "${workspaceFolder}/third_party/bx/include",
+    "${workspaceFolder}/third_party/bimg/include"
   ],
   "C_Cpp.default.browse.path": [
     "${workspaceFolder}",
-    "/home/frank/BGFX/bgfx/include",
-    "/home/frank/BGFX/bx/include",
-    "/home/frank/BGFX/bimg/include"
+    "${workspaceFolder}/third_party/bgfx/include",
+    "${workspaceFolder}/third_party/bx/include",
+    "${workspaceFolder}/third_party/bimg/include"
   ]
 }

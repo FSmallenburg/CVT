@@ -3,6 +3,7 @@ project(ColloidVisualizationTool DESCRIPTION "Colloid Visualization Tool")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -13,11 +14,34 @@ endif()
 set(BGFX_DIR "${CMAKE_SOURCE_DIR}/third_party/bgfx" CACHE PATH "Path to the vendored bgfx source tree")
 set(BX_DIR "${CMAKE_SOURCE_DIR}/third_party/bx" CACHE PATH "Path to the vendored bx source tree")
 set(BIMG_DIR "${CMAKE_SOURCE_DIR}/third_party/bimg" CACHE PATH "Path to the vendored bimg source tree")
-set(BGFX_BUILD_DIR "${BGFX_DIR}/.build/linux64_gcc" CACHE PATH "Path to the bgfx build output directory")
 
-set(BGFX_LIB ${BGFX_BUILD_DIR}/bin/libbgfxRelease.a)
-set(BX_LIB ${BGFX_BUILD_DIR}/bin/libbxRelease.a)
-set(BIMG_LIB ${BGFX_BUILD_DIR}/bin/libbimgRelease.a)
+set(_bgfx_release_suffix "Release${CMAKE_STATIC_LIBRARY_SUFFIX}")
+set(_bgfx_lib_prefix "${CMAKE_STATIC_LIBRARY_PREFIX}")
+set(_bgfx_lib_name "${_bgfx_lib_prefix}bgfx${_bgfx_release_suffix}")
+set(_bx_lib_name "${_bgfx_lib_prefix}bx${_bgfx_release_suffix}")
+set(_bimg_lib_name "${_bgfx_lib_prefix}bimg${_bgfx_release_suffix}")
+
+set(_bgfx_auto_build_dir "")
+file(GLOB _bgfx_candidate_bin_dirs LIST_DIRECTORIES true "${BGFX_DIR}/.build/*/bin")
+foreach(_bgfx_candidate_bin_dir IN LISTS _bgfx_candidate_bin_dirs)
+    if(EXISTS "${_bgfx_candidate_bin_dir}/${_bgfx_lib_name}"
+       AND EXISTS "${_bgfx_candidate_bin_dir}/${_bx_lib_name}"
+       AND EXISTS "${_bgfx_candidate_bin_dir}/${_bimg_lib_name}")
+        get_filename_component(_bgfx_candidate_build_dir "${_bgfx_candidate_bin_dir}" DIRECTORY)
+        if(_bgfx_auto_build_dir)
+            message(FATAL_ERROR
+                "Multiple bgfx build directories were found under ${BGFX_DIR}/.build. "
+                "Set BGFX_BUILD_DIR explicitly.")
+        endif()
+        set(_bgfx_auto_build_dir "${_bgfx_candidate_build_dir}")
+    endif()
+endforeach()
+
+set(BGFX_BUILD_DIR "${_bgfx_auto_build_dir}" CACHE PATH "Path to the bgfx build output directory")
+
+set(BGFX_LIB "${BGFX_BUILD_DIR}/bin/${_bgfx_lib_name}")
+set(BX_LIB "${BGFX_BUILD_DIR}/bin/${_bx_lib_name}")
+set(BIMG_LIB "${BGFX_BUILD_DIR}/bin/${_bimg_lib_name}")
 
 add_executable(cvt
     src/ColorPalette.cpp
@@ -56,10 +80,30 @@ target_include_directories(cvt PRIVATE
     ${BIMG_DIR}/include
 )
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GLFW REQUIRED glfw3)
+find_package(glfw3 CONFIG QUIET)
 
-target_include_directories(cvt PRIVATE ${GLFW_INCLUDE_DIRS})
+set(GLFW_TARGET "")
+if(TARGET glfw)
+    set(GLFW_TARGET glfw)
+elseif(TARGET glfw3)
+    set(GLFW_TARGET glfw3)
+endif()
+
+if(NOT GLFW_TARGET)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(GLFW QUIET glfw3)
+    endif()
+
+    if(GLFW_FOUND)
+        target_include_directories(cvt PRIVATE ${GLFW_INCLUDE_DIRS})
+        target_link_libraries(cvt PRIVATE ${GLFW_LIBRARIES})
+    else()
+        message(FATAL_ERROR
+            "GLFW 3 not found. Install a CMake package that provides target glfw/glfw3, "
+            "or make glfw3 available through pkg-config.")
+    endif()
+endif()
 
 if(NOT EXISTS "${BGFX_DIR}/include/bgfx/bgfx.h")
     message(FATAL_ERROR "bgfx headers not found at ${BGFX_DIR}. Initialize submodules or override BGFX_DIR.")
@@ -89,5 +133,8 @@ target_link_libraries(cvt PRIVATE
     ${BGFX_LIB}
     ${BIMG_LIB}
     ${BX_LIB}
-    ${GLFW_LIBRARIES}
 )
+
+if(GLFW_TARGET)
+    target_link_libraries(cvt PRIVATE ${GLFW_TARGET})
+endif()
