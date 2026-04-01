@@ -401,6 +401,72 @@ std::vector<uint16_t> makeBoxIndices()
     };
 }
 
+std::vector<PosNormalVertex> makeRegularPolygonVertices(uint16_t sideCount)
+{
+    std::vector<PosNormalVertex> vertices;
+    if (sideCount < 3u)
+    {
+        return vertices;
+    }
+
+    vertices.reserve(2u + 2u * sideCount);
+
+    vertices.push_back({0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f});
+    for (uint16_t sideIndex = 0; sideIndex < sideCount; ++sideIndex)
+    {
+        const float theta = 2.0f * static_cast<float>(M_PI) * static_cast<float>(sideIndex)
+                            / static_cast<float>(sideCount);
+        vertices.push_back({std::cos(theta), std::sin(theta), 0.0f,
+                            0.0f, 0.0f, 1.0f});
+    }
+
+    vertices.push_back({0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f});
+    for (uint16_t sideIndex = 0; sideIndex < sideCount; ++sideIndex)
+    {
+        const float theta = 2.0f * static_cast<float>(M_PI) * static_cast<float>(sideIndex)
+                            / static_cast<float>(sideCount);
+        vertices.push_back({std::cos(theta), std::sin(theta), 0.0f,
+                            0.0f, 0.0f, -1.0f});
+    }
+
+    return vertices;
+}
+
+std::vector<uint16_t> makeRegularPolygonIndices(uint16_t sideCount)
+{
+    std::vector<uint16_t> indices;
+    if (sideCount < 3u)
+    {
+        return indices;
+    }
+
+    indices.reserve(static_cast<size_t>(sideCount) * 6u);
+
+    const uint16_t frontCenterIndex = 0u;
+    for (uint16_t sideIndex = 0u; sideIndex < sideCount; ++sideIndex)
+    {
+        const uint16_t currentIndex = static_cast<uint16_t>(1u + sideIndex);
+        const uint16_t nextIndex = static_cast<uint16_t>(1u + ((sideIndex + 1u) % sideCount));
+        indices.push_back(frontCenterIndex);
+        indices.push_back(currentIndex);
+        indices.push_back(nextIndex);
+    }
+
+    const uint16_t backCenterIndex = static_cast<uint16_t>(sideCount + 1u);
+    const uint16_t backStartIndex = static_cast<uint16_t>(backCenterIndex + 1u);
+    for (uint16_t sideIndex = 0u; sideIndex < sideCount; ++sideIndex)
+    {
+        const uint16_t currentIndex = static_cast<uint16_t>(backStartIndex + sideIndex);
+        const uint16_t nextIndex = static_cast<uint16_t>(backStartIndex
+                                                         + ((sideIndex + 1u) % sideCount));
+        indices.push_back(backCenterIndex);
+        indices.push_back(nextIndex);
+        indices.push_back(currentIndex);
+    }
+
+    return indices;
+}
+
 } // namespace
 
 void PosNormalVertex::init(bgfx::VertexLayout &layout)
@@ -485,6 +551,14 @@ Mesh Mesh::createBox(float halfExtent, const bgfx::VertexLayout &layout)
 {
     Mesh mesh;
     mesh.upload(makeBoxVertices(halfExtent), makeBoxIndices(), layout);
+    return mesh;
+}
+
+Mesh Mesh::createRegularPolygon(uint16_t sideCount, const bgfx::VertexLayout &layout)
+{
+    Mesh mesh;
+    mesh.upload(makeRegularPolygonVertices(sideCount), makeRegularPolygonIndices(sideCount),
+                layout);
     return mesh;
 }
 

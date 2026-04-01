@@ -36,6 +36,7 @@ class Mesh
     static Mesh createCone(float radius, float height, uint16_t slices,
          const bgfx::VertexLayout &layout);
     static Mesh createBox(float halfExtent, const bgfx::VertexLayout &layout);
+        static Mesh createRegularPolygon(uint16_t sideCount, const bgfx::VertexLayout &layout);
 
     bool upload(const std::vector<PosNormalVertex> &vertices, const std::vector<uint16_t> &indices,
                 const bgfx::VertexLayout &layout);

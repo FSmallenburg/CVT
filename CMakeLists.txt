@@ -56,6 +56,7 @@ add_executable(cvt
     src/Particle.cpp
     src/ParticleType.cpp
     src/ParticleSystem.cpp
+    src/PolygonType.cpp
     src/RodType.cpp
     src/ScreenshotSupport.cpp
     src/SimulationBox.cpp

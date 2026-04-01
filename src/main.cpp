@@ -8,6 +8,7 @@
 #include "PatchPlacement.h"
 #include "Particle.h"
 #include "ParticleSystem.h"
+#include "PolygonType.h"
 #include "RodType.h"
 #include "ScreenshotSupport.h"
 #include "SimulationBox.h"
@@ -273,6 +274,17 @@ struct BondRenderSystems
     uint16_t sphereSlices = 0u;
 };
 
+struct PolygonRenderSystem
+{
+    uint16_t sideCount = 0u;
+    std::unique_ptr<ParticleSystem> system;
+};
+
+struct PolygonRenderSystems
+{
+    std::vector<PolygonRenderSystem> systems;
+};
+
 struct LineVertex
 {
     float x;
@@ -320,6 +332,12 @@ std::unique_ptr<ParticleType> createCubeParticleType(const bgfx::VertexLayout &l
     return std::make_unique<CubeType>(layout);
 }
 
+std::unique_ptr<ParticleType> createPolygonParticleType(const bgfx::VertexLayout &layout,
+                                                        uint16_t sideCount)
+{
+    return std::make_unique<PolygonType>(layout, sideCount);
+}
+
 std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layout,
                                                  TrajectoryReader::FileType fileType,
                                                  uint16_t stacks,
@@ -333,6 +351,10 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
     {
         return createCubeParticleType(layout);
     }
+    if (fileType == TrajectoryReader::FileType::Polygon)
+    {
+        return createPolygonParticleType(layout, 3u);
+    }
 
     return createSphereParticleType(layout, stacks, slices);
 }
@@ -345,7 +367,10 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
         return "rod";
     case TrajectoryReader::FileType::Cube:
         return "cube";
+    case TrajectoryReader::FileType::Polygon:
+        return "polygon";
     case TrajectoryReader::FileType::Patchy:
+    case TrajectoryReader::FileType::PatchyLegacy:
         return "patchy";
     case TrajectoryReader::FileType::Patchy2D:
         return "patchy2d";
@@ -359,7 +384,18 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
 bool isPatchyFileType(TrajectoryReader::FileType fileType)
 {
     return fileType == TrajectoryReader::FileType::Patchy
+           || fileType == TrajectoryReader::FileType::PatchyLegacy
            || fileType == TrajectoryReader::FileType::Patchy2D;
+}
+
+bool isPolygonFileType(TrajectoryReader::FileType fileType)
+{
+    return fileType == TrajectoryReader::FileType::Polygon;
+}
+
+uint16_t polygonSideCount(const Particle &particle)
+{
+    return static_cast<uint16_t>(std::max(0.0f, std::round(particle.sizeParams[1])));
 }
 
 const char *colorModeName(ColorMode colorMode)
@@ -999,6 +1035,115 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
     }
 }
 
+PolygonRenderSystem *findPolygonRenderSystem(PolygonRenderSystems &polygonRenderSystems,
+                                             uint16_t sideCount)
+{
+    for (PolygonRenderSystem &polygonRenderSystem : polygonRenderSystems.systems)
+    {
+        if (polygonRenderSystem.sideCount == sideCount)
+        {
+            return &polygonRenderSystem;
+        }
+    }
+
+    return nullptr;
+}
+
+void ensurePolygonRenderSystems(const bgfx::VertexLayout &layout,
+                                const ParticleSystem &particleSystem,
+                                PolygonRenderSystems &polygonRenderSystems)
+{
+    std::vector<uint16_t> uniqueSideCounts;
+    for (const Particle &particle : particleSystem.particles())
+    {
+        const uint16_t sideCount = polygonSideCount(particle);
+        if (sideCount < 3u)
+        {
+            continue;
+        }
+
+        if (std::find(uniqueSideCounts.begin(), uniqueSideCounts.end(), sideCount)
+            == uniqueSideCounts.end())
+        {
+            uniqueSideCounts.push_back(sideCount);
+        }
+    }
+    std::sort(uniqueSideCounts.begin(), uniqueSideCounts.end());
+
+    bool mustRebuildSystems = polygonRenderSystems.systems.size() != uniqueSideCounts.size();
+    if (!mustRebuildSystems)
+    {
+        for (size_t index = 0; index < uniqueSideCounts.size(); ++index)
+        {
+            if (polygonRenderSystems.systems[index].sideCount != uniqueSideCounts[index])
+            {
+                mustRebuildSystems = true;
+                break;
+            }
+        }
+    }
+
+    if (mustRebuildSystems)
+    {
+        polygonRenderSystems.systems.clear();
+        polygonRenderSystems.systems.reserve(uniqueSideCounts.size());
+        for (uint16_t sideCount : uniqueSideCounts)
+        {
+            polygonRenderSystems.systems.push_back(PolygonRenderSystem{
+                .sideCount = sideCount,
+                .system = std::make_unique<ParticleSystem>(
+                    createPolygonParticleType(layout, sideCount)),
+            });
+        }
+    }
+}
+
+void rebuildPolygonRenderSystems(const ParticleSystem &particleSystem,
+                                 PolygonRenderSystems &polygonRenderSystems)
+{
+    for (PolygonRenderSystem &polygonRenderSystem : polygonRenderSystems.systems)
+    {
+        polygonRenderSystem.system->clear();
+    }
+
+    for (const Particle &particle : particleSystem.particles())
+    {
+        if (!particle.visible)
+        {
+            continue;
+        }
+
+        PolygonRenderSystem *polygonRenderSystem =
+            findPolygonRenderSystem(polygonRenderSystems, polygonSideCount(particle));
+        if (polygonRenderSystem == nullptr)
+        {
+            continue;
+        }
+
+        polygonRenderSystem->system->addParticle(particle);
+    }
+}
+
+void renderPolygonRenderSystems(PolygonRenderSystems &polygonRenderSystems,
+                                bgfx::ViewId viewId, bgfx::ProgramHandle program,
+                                const float *parentTransform, uint64_t renderState,
+                                const bx::Vec3 &positionOffset, float particleSizeScale,
+                                const SimulationBox *simulationBox,
+                                bool wrapToPeriodicBox,
+                                const std::unordered_set<uint32_t> *selectedParticleIds,
+                                bool usePickColors, bool cutPlaneEnabled,
+                                float cutPlaneSceneZ)
+{
+    for (PolygonRenderSystem &polygonRenderSystem : polygonRenderSystems.systems)
+    {
+        polygonRenderSystem.system->render(viewId, program, parentTransform, renderState,
+                                           positionOffset, particleSizeScale,
+                                           simulationBox, wrapToPeriodicBox,
+                                           selectedParticleIds, nullptr, usePickColors,
+                                           cutPlaneEnabled, cutPlaneSceneZ);
+    }
+}
+
 void rebuildMobilitySystem(const ParticleSystem &particleSystem,
                            ParticleSystem &mobilitySystem,
                            const ViewerState &viewerState,
@@ -1599,7 +1744,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         viewerState.pendingCutPlaneStep = 0;
     }
 
-    const bool supportsResolutionAdjustment = true;
+    const bool supportsResolutionAdjustment = particleFileType != TrajectoryReader::FileType::Polygon;
     bool changedSphereResolution = false;
     if (viewerState.pendingIncreaseSphereResolution)
     {
@@ -1940,6 +2085,7 @@ int main(int argc, char **argv)
         ParticleSystem mobilitySystem(createArrowParticleType(layout, kDefaultArrowSlices));
         PatchRenderSystems patchRenderSystems;
         BondRenderSystems bondRenderSystems;
+        PolygonRenderSystems polygonRenderSystems;
         TrajectoryReader::FileType particleFileType = TrajectoryReader::FileType::Sphere;
 
         // Load shaders
@@ -2105,6 +2251,11 @@ int main(int argc, char **argv)
 
             applyColorMode(particleSystem, viewerState.colorMode,
                            particleFileType == TrajectoryReader::FileType::Rod, false);
+            if (isPolygonFileType(particleFileType))
+            {
+                ensurePolygonRenderSystems(layout, particleSystem, polygonRenderSystems);
+                rebuildPolygonRenderSystems(particleSystem, polygonRenderSystems);
+            }
             if (isPatchyFileType(particleFileType))
             {
                 ensurePatchRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
@@ -2143,15 +2294,29 @@ int main(int argc, char **argv)
             }
             else
             {
-                particleSystem.render(kMainView, program, sceneTransform,
-                                      kParticleRenderState,
-                                      viewerState.particleTranslation,
-                                      viewerState.particleSizeScale, &simulationBox,
-                                      viewerState.wrapParticlesToBox,
-                                      &viewerState.selectedIds, nullptr,
-                                      false,
-                                      viewerState.cutPlaneEnabled,
-                                      viewerState.cutPlaneSceneZ);
+                if (isPolygonFileType(particleFileType))
+                {
+                    renderPolygonRenderSystems(polygonRenderSystems, kMainView, program,
+                                               sceneTransform, kParticleRenderState,
+                                               viewerState.particleTranslation,
+                                               viewerState.particleSizeScale, &simulationBox,
+                                               viewerState.wrapParticlesToBox,
+                                               &viewerState.selectedIds, false,
+                                               viewerState.cutPlaneEnabled,
+                                               viewerState.cutPlaneSceneZ);
+                }
+                else
+                {
+                    particleSystem.render(kMainView, program, sceneTransform,
+                                          kParticleRenderState,
+                                          viewerState.particleTranslation,
+                                          viewerState.particleSizeScale, &simulationBox,
+                                          viewerState.wrapParticlesToBox,
+                                          &viewerState.selectedIds, nullptr,
+                                          false,
+                                          viewerState.cutPlaneEnabled,
+                                          viewerState.cutPlaneSceneZ);
+                }
                 if (isPatchyFileType(particleFileType))
                 {
                     renderPatchRenderSystems(patchRenderSystems, kMainView, program,
@@ -2207,15 +2372,30 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    particleSystem.render(kPickView, pickProgram, sceneTransform,
-                                          kParticleRenderState,
-                                          viewerState.particleTranslation,
-                                          viewerState.particleSizeScale,
-                                          &simulationBox,
-                                          viewerState.wrapParticlesToBox, nullptr, nullptr,
-                                          true,
-                                          viewerState.cutPlaneEnabled,
-                                          viewerState.cutPlaneSceneZ);
+                    if (isPolygonFileType(particleFileType))
+                    {
+                        renderPolygonRenderSystems(polygonRenderSystems, kPickView, pickProgram,
+                                                   sceneTransform, kParticleRenderState,
+                                                   viewerState.particleTranslation,
+                                                   viewerState.particleSizeScale,
+                                                   &simulationBox,
+                                                   viewerState.wrapParticlesToBox,
+                                                   nullptr, true,
+                                                   viewerState.cutPlaneEnabled,
+                                                   viewerState.cutPlaneSceneZ);
+                    }
+                    else
+                    {
+                        particleSystem.render(kPickView, pickProgram, sceneTransform,
+                                              kParticleRenderState,
+                                              viewerState.particleTranslation,
+                                              viewerState.particleSizeScale,
+                                              &simulationBox,
+                                              viewerState.wrapParticlesToBox, nullptr, nullptr,
+                                              true,
+                                              viewerState.cutPlaneEnabled,
+                                              viewerState.cutPlaneSceneZ);
+                    }
                     if (isPatchyFileType(particleFileType))
                     {
                         renderPatchRenderSystems(patchRenderSystems, kPickView, pickProgram,

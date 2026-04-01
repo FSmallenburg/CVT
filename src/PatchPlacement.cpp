@@ -9,7 +9,10 @@
 namespace
 {
 
+const std::vector<bx::Vec3> kEmptyPatchPlacement;
+
 const std::unordered_map<size_t, std::vector<bx::Vec3>> kPatchPlacements = {
+      {0u, {}},
     {1u, {{0.0f, 0.0f, 1.0f}}},
     {2u, {{0.0f, 0.0f, 1.0f},
           {0.0f, 0.0f, -1.0f}}},
@@ -79,15 +82,15 @@ const std::vector<bx::Vec3> &patchPlacementDirections(size_t patchCount, bool pl
             return patchPlacementDirections(patchCount);
       }
 
+      if (patchCount == 0u)
+      {
+            return kEmptyPatchPlacement;
+      }
+
       auto placementIt = kPlanarPatchPlacements.find(patchCount);
       if (placementIt != kPlanarPatchPlacements.end())
       {
             return placementIt->second;
-      }
-
-      if (patchCount == 0u)
-      {
-            throw std::out_of_range("Unsupported patch count");
       }
 
       std::vector<bx::Vec3> directions;
