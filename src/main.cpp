@@ -1515,6 +1515,7 @@ static void updateMouseDrivenInteraction(ViewerState &viewerState, uint16_t widt
     }
 }
 
+#ifndef NDEBUG
 static void drawDebugOverlay(const ParticleSystem &particleSystem,
                              const ViewerState &viewerState,
                              const PickResources &pickResources,
@@ -1575,6 +1576,7 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                             (int)currentFrame + 1, (int)totalFrames);
     }
 }
+#endif
 
 static bx::Vec3 transformPoint(const float *transform, const bx::Vec3 &point)
 {
@@ -1695,7 +1697,7 @@ int main(int argc, char **argv)
     if (!glfwInit())
         return 1;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow *window = glfwCreateWindow(1024, 768, "bgfx spheres", nullptr, nullptr);
+    GLFWwindow *window = glfwCreateWindow(1024, 768, "Colloid Visualization Tool", nullptr, nullptr);
     if (!window)
         return 1;
     glfwSetWindowUserPointer(window, &viewerState);
@@ -2044,10 +2046,14 @@ int main(int argc, char **argv)
                 viewerState.pendingPickReadback = true;
             }
 
+#ifndef NDEBUG
             drawDebugOverlay(particleSystem, viewerState, pickResources, particleFileType,
                              sphereStacks,
                              sphereSlices, loadedPath, currentFrame, totalFrames);
             bgfx::setDebug(viewerState.showStats ? BGFX_DEBUG_STATS : BGFX_DEBUG_TEXT);
+#else
+            bgfx::setDebug(BGFX_DEBUG_NONE);
+#endif
             if (viewerState.pendingScreenshotRequest)
             {
                 const std::string screenshotPath = makeTimestampedScreenshotPath();

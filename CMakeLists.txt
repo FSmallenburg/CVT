@@ -1,9 +1,14 @@
 cmake_minimum_required(VERSION 3.10)
-project(MyBgfxProject)
+project(ColloidVisualizationTool DESCRIPTION "Colloid Visualization Tool")
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_definitions(BX_CONFIG_DEBUG=1)
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+                 Debug Release RelWithDebInfo MinSizeRel)
+endif()
 
 set(BGFX_DIR "${CMAKE_SOURCE_DIR}/third_party/bgfx" CACHE PATH "Path to the vendored bgfx source tree")
 set(BX_DIR "${CMAKE_SOURCE_DIR}/third_party/bx" CACHE PATH "Path to the vendored bx source tree")
@@ -14,7 +19,7 @@ set(BGFX_LIB ${BGFX_BUILD_DIR}/bin/libbgfxRelease.a)
 set(BX_LIB ${BGFX_BUILD_DIR}/bin/libbxRelease.a)
 set(BIMG_LIB ${BGFX_BUILD_DIR}/bin/libbimgRelease.a)
 
-add_executable(my_app
+add_executable(cvt
     src/ColorPalette.cpp
     src/CylinderType.cpp
     src/main.cpp
@@ -33,7 +38,19 @@ add_executable(my_app
     src/TrajectoryReader.cpp
     src/ViewerSupport.cpp
 )
-target_include_directories(my_app PRIVATE 
+
+target_compile_definitions(cvt PRIVATE
+    $<$<CONFIG:Debug>:BX_CONFIG_DEBUG=1>
+    $<$<NOT:$<CONFIG:Debug>>:BX_CONFIG_DEBUG=0>
+)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(cvt PRIVATE
+        $<$<CONFIG:Release>:-Ofast>
+    )
+endif()
+
+target_include_directories(cvt PRIVATE 
     ${BGFX_DIR}/include
     ${BX_DIR}/include
     ${BIMG_DIR}/include
@@ -42,7 +59,7 @@ target_include_directories(my_app PRIVATE
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLFW REQUIRED glfw3)
 
-target_include_directories(my_app PRIVATE ${GLFW_INCLUDE_DIRS})
+target_include_directories(cvt PRIVATE ${GLFW_INCLUDE_DIRS})
 
 if(NOT EXISTS "${BGFX_DIR}/include/bgfx/bgfx.h")
     message(FATAL_ERROR "bgfx headers not found at ${BGFX_DIR}. Initialize submodules or override BGFX_DIR.")
@@ -68,7 +85,7 @@ if(NOT EXISTS "${BIMG_LIB}")
     message(FATAL_ERROR "libbimgRelease.a not found at ${BIMG_LIB}. Build bgfx or override BGFX_BUILD_DIR.")
 endif()
 
-target_link_libraries(my_app PRIVATE
+target_link_libraries(cvt PRIVATE
     ${BGFX_LIB}
     ${BIMG_LIB}
     ${BX_LIB}

@@ -1,3 +1,3 @@
-rm build/my_app
-cmake --build build
-./build/my_app TestInputFiles/patchy.ptc
+rm build-release/cvt
+cmake --build build-release
+./build-release/cvt TestInputFiles/patchy.ptc

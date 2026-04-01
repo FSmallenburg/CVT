@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug my_app",
+      "name": "Debug cvt",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/my_app",
+      "program": "${workspaceFolder}/build-debug/cvt",
       "args": ["TestInputFiles/sample.sph"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
@@ -16,7 +16,7 @@
       "setupCommands": [
         { "description": "Enable pretty-printing", "text": "-enable-pretty-printing", "ignoreFailures": true }
       ],
-      "preLaunchTask": "build",
+      "preLaunchTask": "build-debug",
       "logging": { "engineLogging": false }
     }
   ]

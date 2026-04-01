@@ -2,12 +2,35 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "build",
+      "label": "configure-debug",
       "type": "shell",
-      "command": "cmake --build build",
+      "command": "cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug",
+      "problemMatcher": [],
+      "detail": "Configure the Debug build directory"
+    },
+    {
+      "label": "build-debug",
+      "type": "shell",
+      "command": "cmake --build build-debug",
       "group": "build",
       "problemMatcher": ["$gcc"],
-      "detail": "Build project before debugging"
+      "dependsOn": ["configure-debug"],
+      "detail": "Build the Debug configuration"
+    },
+    {
+      "label": "configure-release",
+      "type": "shell",
+      "command": "cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release",
+      "problemMatcher": [],
+      "detail": "Configure the Release build directory"
+    },
+    {
+      "label": "build-release",
+      "type": "shell",
+      "command": "cmake --build build-release",
+      "problemMatcher": ["$gcc"],
+      "dependsOn": ["configure-release"],
+      "detail": "Build the Release configuration"
     }
   ]
 }

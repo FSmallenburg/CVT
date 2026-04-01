@@ -1,0 +1,3 @@
+/home/frank/Visualization/New/Vis2/build-debug/CMakeFiles/cvt.dir
+/home/frank/Visualization/New/Vis2/build-debug/CMakeFiles/edit_cache.dir
+/home/frank/Visualization/New/Vis2/build-debug/CMakeFiles/rebuild_cache.dir
