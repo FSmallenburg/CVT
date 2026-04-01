@@ -62,7 +62,7 @@ std::vector<uint16_t> makeSphereIndices(uint16_t stacks, uint16_t slices)
     }
 
     // Sphere and hemisphere winding differ because their parameterizations rotate around
-    // different axes. Keep this ordering aligned with the sphere vertex generator above.
+    // different axes. Indices below are ordered for outward-facing CCW front faces.
 
     indices.reserve(static_cast<size_t>(stacks - 1u) * slices * 6u);
 
@@ -77,8 +77,8 @@ std::vector<uint16_t> makeSphereIndices(uint16_t stacks, uint16_t slices)
     {
         const uint16_t firstRing = static_cast<uint16_t>(firstRingStart + slice);
         indices.push_back(firstRing);
-        indices.push_back(static_cast<uint16_t>(firstRing + 1u));
         indices.push_back(northPoleIndex);
+        indices.push_back(static_cast<uint16_t>(firstRing + 1u));
     }
 
     for (uint16_t ring = 0; ring + 1u < stacks - 1u; ++ring)
@@ -94,12 +94,12 @@ std::vector<uint16_t> makeSphereIndices(uint16_t stacks, uint16_t slices)
             const uint16_t secondNext = static_cast<uint16_t>(secondSlice + 1u);
 
             indices.push_back(firstSlice);
-            indices.push_back(secondSlice);
             indices.push_back(firstNext);
+            indices.push_back(secondSlice);
 
             indices.push_back(secondSlice);
-            indices.push_back(secondNext);
             indices.push_back(firstNext);
+            indices.push_back(secondNext);
         }
     }
 
@@ -108,8 +108,8 @@ std::vector<uint16_t> makeSphereIndices(uint16_t stacks, uint16_t slices)
     {
         const uint16_t lastRing = static_cast<uint16_t>(lastRingStart + slice);
         indices.push_back(lastRing);
-        indices.push_back(southPoleIndex);
         indices.push_back(static_cast<uint16_t>(lastRing + 1u));
+        indices.push_back(southPoleIndex);
     }
 
     return indices;
@@ -151,12 +151,12 @@ std::vector<uint16_t> makeCylinderIndices(uint16_t slices)
         const uint16_t nextSecond = static_cast<uint16_t>(first + 3u);
 
         indices.push_back(first);
-        indices.push_back(second);
         indices.push_back(nextFirst);
+        indices.push_back(second);
 
         indices.push_back(second);
-        indices.push_back(nextSecond);
         indices.push_back(nextFirst);
+        indices.push_back(nextSecond);
     }
 
     return indices;
@@ -208,7 +208,8 @@ std::vector<uint16_t> makeHemisphereIndices(uint16_t stacks, uint16_t slices)
     }
 
     // This winding intentionally differs from makeSphereIndices: the hemisphere vertices are
-    // parameterized around the z axis rather than the sphere's y axis.
+    // parameterized around the z axis rather than the sphere's y axis. Indices below are
+    // ordered for outward-facing CCW front faces.
 
     indices.reserve(static_cast<size_t>(2u * stacks - 1u) * slices * 3u);
 
@@ -220,8 +221,8 @@ std::vector<uint16_t> makeHemisphereIndices(uint16_t stacks, uint16_t slices)
     {
         const uint16_t firstRing = static_cast<uint16_t>(firstRingStart + slice);
         indices.push_back(firstRing);
-        indices.push_back(northPoleIndex);
         indices.push_back(static_cast<uint16_t>(firstRing + 1u));
+        indices.push_back(northPoleIndex);
     }
 
     for (uint16_t ring = 0; ring + 1u < stacks; ++ring)
@@ -237,12 +238,12 @@ std::vector<uint16_t> makeHemisphereIndices(uint16_t stacks, uint16_t slices)
             const uint16_t secondNext = static_cast<uint16_t>(secondSlice + 1u);
 
             indices.push_back(firstSlice);
-            indices.push_back(firstNext);
             indices.push_back(secondSlice);
+            indices.push_back(firstNext);
 
             indices.push_back(secondSlice);
-            indices.push_back(firstNext);
             indices.push_back(secondNext);
+            indices.push_back(firstNext);
         }
     }
 
@@ -336,12 +337,12 @@ std::vector<uint16_t> makeConeIndices(uint16_t slices)
         const uint16_t nextSecond = static_cast<uint16_t>(first + 3u);
 
         indices.push_back(first);
-        indices.push_back(second);
         indices.push_back(nextFirst);
+        indices.push_back(second);
 
         indices.push_back(second);
-        indices.push_back(nextSecond);
         indices.push_back(nextFirst);
+        indices.push_back(nextSecond);
     }
 
     return indices;
@@ -391,12 +392,12 @@ std::vector<PosNormalVertex> makeBoxVertices(float halfExtent)
 std::vector<uint16_t> makeBoxIndices()
 {
     return {
-        0, 3, 2, 2, 1, 0,
-        4, 7, 6, 6, 5, 4,
-        8, 11, 10, 10, 9, 8,
-        12, 15, 14, 14, 13, 12,
-        16, 19, 18, 18, 17, 16,
-        20, 23, 22, 22, 21, 20,
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4,
+        8, 9, 10, 10, 11, 8,
+        12, 13, 14, 14, 15, 12,
+        16, 17, 18, 18, 19, 16,
+        20, 21, 22, 22, 23, 20,
     };
 }
 

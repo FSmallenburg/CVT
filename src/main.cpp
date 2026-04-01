@@ -237,10 +237,16 @@ constexpr uint8_t kLightingLevelCount = 30u;
 constexpr float kMinLightingScale = 0.3f;
 constexpr float kMaxLightingScale = 1.75f;
 constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
+// Particle meshes are authored so triangles wind counter-clockwise when viewed from
+// outside the particle. BGFX_STATE_FRONT_CCW therefore classifies those outward-facing
+// triangles as front faces, and BGFX_STATE_CULL_CCW maps to back-face culling on the
+// OpenGL backend used here. In effect, closed particle surfaces render only their
+// outward-facing triangles while discarding inward-facing triangles.
 constexpr uint64_t kParticleRenderState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
                                           | BGFX_STATE_WRITE_Z
                                           | BGFX_STATE_DEPTH_TEST_LESS
                                           | BGFX_STATE_CULL_CCW
+                                          | BGFX_STATE_FRONT_CCW
                                           | BGFX_STATE_MSAA;
 
 struct PatchCapSystem
