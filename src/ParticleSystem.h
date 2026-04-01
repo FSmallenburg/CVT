@@ -6,9 +6,21 @@
 
 #include <bgfx/bgfx.h>
 
+#include <array>
 #include <memory>
 #include <unordered_set>
 #include <vector>
+
+struct PatchyParticleData
+{
+  std::array<float, 9> orientationMatrix{1.0f, 0.0f, 0.0f,
+                       0.0f, 1.0f, 0.0f,
+                       0.0f, 0.0f, 1.0f};
+  float coreRadius = 1.0f;
+  float cosHalfAngle = 1.0f;
+  float capRadius = 1.0f;
+  std::vector<int32_t> bondIds;
+};
 
 class ParticleSystem
 {
@@ -22,10 +34,13 @@ class ParticleSystem
     void reserve(size_t count);
     void clear();
     void addParticle(const Particle &particle);
+    void addPatchyMetadata(const PatchyParticleData &patchData);
     size_t size() const;
 
     std::vector<Particle> &particles();
     const std::vector<Particle> &particles() const;
+    bool hasPatchyMetadata() const;
+    const std::vector<PatchyParticleData> &patchyMetadata() const;
 
     void render(bgfx::ViewId viewId, bgfx::ProgramHandle program, const float *parentTransform,
           uint64_t renderState, const bx::Vec3 &positionOffset = {0.0f, 0.0f, 0.0f},
@@ -40,5 +55,6 @@ class ParticleSystem
   private:
     std::unique_ptr<ParticleType> m_particleType;
     std::vector<Particle> m_particles;
+    std::vector<PatchyParticleData> m_patchyMetadata;
     std::vector<std::vector<float>> m_instanceDataPerPart;
 };

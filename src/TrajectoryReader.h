@@ -14,6 +14,7 @@ class TrajectoryReader
     {
         Sphere,
         Rod,
+      Patchy,
     };
 
     explicit TrajectoryReader(std::string path);
@@ -30,7 +31,7 @@ class TrajectoryReader
     bool scanFrames();
 
     std::string m_path;
-    std::string m_error;
+    mutable std::string m_error;
     std::vector<std::streamoff> m_frameOffsets;
     FileType m_fileType = FileType::Sphere;
 };

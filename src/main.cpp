@@ -1,6 +1,10 @@
 #include "ArrowType.h"
 #include "ColorPalette.h"
+#include "CylinderType.h"
 #include "Mesh.h"
+#include "PatchCapType.h"
+#include "PatchConeType.h"
+#include "PatchPlacement.h"
 #include "Particle.h"
 #include "ParticleSystem.h"
 #include "RodType.h"
@@ -80,11 +84,36 @@ constexpr float kMinParticleSizeScale = 0.01f;
 constexpr uint8_t kLightingLevelCount = 30u;
 constexpr float kMinLightingScale = 0.3f;
 constexpr float kMaxLightingScale = 1.75f;
+constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
 constexpr uint64_t kParticleRenderState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
                                           | BGFX_STATE_WRITE_Z
                                           | BGFX_STATE_DEPTH_TEST_LESS
                                           | BGFX_STATE_CULL_CCW
                                           | BGFX_STATE_MSAA;
+
+struct PatchCapSystem
+{
+    float cosHalfAngle = 1.0f;
+    std::unique_ptr<ParticleSystem> system;
+};
+
+struct PatchRenderSystems
+{
+    std::unique_ptr<ParticleSystem> coneSystem;
+    std::vector<PatchCapSystem> capSystems;
+    uint16_t coneSlices = 0u;
+    uint16_t capStacks = 0u;
+    uint16_t capSlices = 0u;
+};
+
+struct BondRenderSystems
+{
+    std::unique_ptr<ParticleSystem> cylinderSystem;
+    std::unique_ptr<ParticleSystem> nodeSystem;
+    uint16_t cylinderSlices = 0u;
+    uint16_t sphereStacks = 0u;
+    uint16_t sphereSlices = 0u;
+};
 
 struct LineVertex
 {
@@ -115,6 +144,12 @@ std::unique_ptr<ParticleType> createArrowParticleType(const bgfx::VertexLayout &
     return std::make_unique<ArrowType>(layout, slices);
 }
 
+std::unique_ptr<ParticleType> createCylinderParticleType(const bgfx::VertexLayout &layout,
+                                                         uint16_t slices)
+{
+    return std::make_unique<CylinderType>(layout, slices);
+}
+
 std::unique_ptr<ParticleType> createRodParticleType(const bgfx::VertexLayout &layout,
                                                     uint16_t stacks,
                                                     uint16_t slices)
@@ -137,7 +172,17 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
 
 const char *particleTypeName(TrajectoryReader::FileType fileType)
 {
-    return fileType == TrajectoryReader::FileType::Rod ? "rod" : "sphere";
+    switch (fileType)
+    {
+    case TrajectoryReader::FileType::Rod:
+        return "rod";
+    case TrajectoryReader::FileType::Patchy:
+        return "patchy";
+    case TrajectoryReader::FileType::Sphere:
+        return "sphere";
+    }
+
+    return "sphere";
 }
 
 const char *colorModeName(ColorMode colorMode)
@@ -363,6 +408,404 @@ void printVisibleParticleCount(const ParticleSystem &particleSystem)
     std::cout << "Visible particles: " << countVisibleParticles(particleSystem) << std::endl;
 }
 
+bx::Vec3 rotatePatchDirection(const std::array<float, 9> &rotationMatrix,
+                             const bx::Vec3 &direction)
+{
+    return {
+        rotationMatrix[0] * direction.x + rotationMatrix[1] * direction.y
+            + rotationMatrix[2] * direction.z,
+        rotationMatrix[3] * direction.x + rotationMatrix[4] * direction.y
+            + rotationMatrix[5] * direction.z,
+        rotationMatrix[6] * direction.x + rotationMatrix[7] * direction.y
+            + rotationMatrix[8] * direction.z,
+    };
+}
+
+PatchCapSystem *findPatchCapSystem(PatchRenderSystems &patchRenderSystems, float cosHalfAngle)
+{
+    for (PatchCapSystem &capSystem : patchRenderSystems.capSystems)
+    {
+        if (std::abs(capSystem.cosHalfAngle - cosHalfAngle) <= 1.0e-6f)
+        {
+            return &capSystem;
+        }
+    }
+
+    return nullptr;
+}
+
+void ensurePatchRenderSystems(const bgfx::VertexLayout &layout, uint16_t sphereStacks,
+                              uint16_t sphereSlices, const ParticleSystem &particleSystem,
+                              PatchRenderSystems &patchRenderSystems)
+{
+    if (!particleSystem.hasPatchyMetadata())
+    {
+        patchRenderSystems.coneSystem.reset();
+        patchRenderSystems.capSystems.clear();
+        return;
+    }
+
+    if (!patchRenderSystems.coneSystem || patchRenderSystems.coneSlices != sphereSlices)
+    {
+        patchRenderSystems.coneSystem = std::make_unique<ParticleSystem>(
+            std::make_unique<PatchConeType>(layout, sphereSlices));
+        patchRenderSystems.coneSlices = sphereSlices;
+    }
+
+    std::vector<float> uniqueAngles;
+    for (const PatchyParticleData &patchData : particleSystem.patchyMetadata())
+    {
+        const bool alreadyPresent = std::any_of(
+            uniqueAngles.begin(), uniqueAngles.end(),
+            [angle = patchData.cosHalfAngle](float existingAngle) {
+                return std::abs(existingAngle - angle) <= 1.0e-6f;
+            });
+        if (!alreadyPresent)
+        {
+            uniqueAngles.push_back(patchData.cosHalfAngle);
+        }
+    }
+    std::sort(uniqueAngles.begin(), uniqueAngles.end());
+
+    bool mustRebuildCapSystems = patchRenderSystems.capStacks != sphereStacks
+                                 || patchRenderSystems.capSlices != sphereSlices
+                                 || patchRenderSystems.capSystems.size() != uniqueAngles.size();
+    if (!mustRebuildCapSystems)
+    {
+        for (size_t index = 0; index < uniqueAngles.size(); ++index)
+        {
+            if (std::abs(patchRenderSystems.capSystems[index].cosHalfAngle - uniqueAngles[index])
+                > 1.0e-6f)
+            {
+                mustRebuildCapSystems = true;
+                break;
+            }
+        }
+    }
+
+    if (mustRebuildCapSystems)
+    {
+        patchRenderSystems.capSystems.clear();
+        patchRenderSystems.capSystems.reserve(uniqueAngles.size());
+        for (float cosHalfAngle : uniqueAngles)
+        {
+            patchRenderSystems.capSystems.push_back(PatchCapSystem{
+                .cosHalfAngle = cosHalfAngle,
+                .system = std::make_unique<ParticleSystem>(
+                    std::make_unique<PatchCapType>(layout, cosHalfAngle, sphereStacks,
+                                                   sphereSlices)),
+            });
+        }
+        patchRenderSystems.capStacks = sphereStacks;
+        patchRenderSystems.capSlices = sphereSlices;
+    }
+}
+
+void rebuildPatchRenderSystems(const ParticleSystem &particleSystem,
+                               PatchRenderSystems &patchRenderSystems)
+{
+    if (!particleSystem.hasPatchyMetadata() || !patchRenderSystems.coneSystem)
+    {
+        return;
+    }
+
+    patchRenderSystems.coneSystem->clear();
+    for (PatchCapSystem &capSystem : patchRenderSystems.capSystems)
+    {
+        capSystem.system->clear();
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<PatchyParticleData> &patchMetadata = particleSystem.patchyMetadata();
+    for (size_t particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+    {
+        const Particle &particle = particles[particleIndex];
+        if (!particle.visible)
+        {
+            continue;
+        }
+
+        const PatchyParticleData &patchData = patchMetadata[particleIndex];
+        const std::vector<bx::Vec3> &referenceDirections =
+            patchPlacementDirections(patchData.bondIds.size());
+        const float clampedCosHalfAngle = std::clamp(patchData.cosHalfAngle, 0.0f, 1.0f);
+        const float sinHalfAngle = std::sqrt(std::max(0.0f,
+                                                      1.0f - clampedCosHalfAngle
+                                                               * clampedCosHalfAngle));
+        const float coneRadius = patchData.capRadius * sinHalfAngle;
+        const float coneHeight = patchData.capRadius * clampedCosHalfAngle;
+        PatchCapSystem *capSystem = findPatchCapSystem(patchRenderSystems,
+                                                       patchData.cosHalfAngle);
+        if (capSystem == nullptr)
+        {
+            continue;
+        }
+
+        for (const bx::Vec3 &referenceDirection : referenceDirections)
+        {
+            const bx::Vec3 rotatedDirection =
+                rotatePatchDirection(patchData.orientationMatrix, referenceDirection);
+
+            Particle coneParticle;
+            coneParticle.id = particle.id;
+            coneParticle.position = particle.position;
+            coneParticle.direction = rotatedDirection;
+            coneParticle.baseColor = kPatchColor;
+            coneParticle.color = kPatchColor;
+            coneParticle.visible = true;
+            coneParticle.sizeParams[0] = coneRadius;
+            coneParticle.sizeParams[1] = coneHeight;
+            patchRenderSystems.coneSystem->addParticle(coneParticle);
+
+            Particle capParticle;
+            capParticle.id = particle.id;
+            capParticle.position = particle.position;
+            capParticle.direction = rotatedDirection;
+            capParticle.baseColor = kPatchColor;
+            capParticle.color = kPatchColor;
+            capParticle.visible = true;
+            capParticle.sizeParams[0] = patchData.capRadius;
+            capSystem->system->addParticle(capParticle);
+        }
+    }
+}
+
+void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::ViewId viewId,
+                              bgfx::ProgramHandle program, const float *parentTransform,
+                              uint64_t renderState, const bx::Vec3 &positionOffset,
+                              float particleSizeScale, const SimulationBox *simulationBox,
+                              bool wrapToPeriodicBox,
+                              const std::unordered_set<uint32_t> *selectedParticleIds,
+                              bool usePickColors, bool cutPlaneEnabled,
+                              float cutPlaneSceneZ)
+{
+    if (patchRenderSystems.coneSystem)
+    {
+        patchRenderSystems.coneSystem->render(viewId, program, parentTransform, renderState,
+                                              positionOffset, particleSizeScale,
+                                              simulationBox, wrapToPeriodicBox,
+                                              selectedParticleIds, nullptr, usePickColors,
+                                              cutPlaneEnabled, cutPlaneSceneZ);
+    }
+
+    for (PatchCapSystem &capSystem : patchRenderSystems.capSystems)
+    {
+        capSystem.system->render(viewId, program, parentTransform, renderState,
+                                 positionOffset, particleSizeScale,
+                                 simulationBox, wrapToPeriodicBox,
+                                 selectedParticleIds, nullptr, usePickColors,
+                                 cutPlaneEnabled, cutPlaneSceneZ);
+    }
+}
+
+const Particle *resolveBondTarget(const ParticleSystem &particleSystem, int32_t bondId)
+{
+    if (bondId < 0)
+    {
+        return nullptr;
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const size_t zeroBasedIndex = static_cast<size_t>(bondId);
+    if (zeroBasedIndex < particles.size())
+    {
+        return &particles[zeroBasedIndex];
+    }
+
+    const auto particleIt = std::find_if(
+        particles.begin(), particles.end(),
+        [bondId](const Particle &particle) {
+            return particle.id == static_cast<uint32_t>(bondId + 1);
+        });
+    if (particleIt != particles.end())
+    {
+        return &(*particleIt);
+    }
+
+    return nullptr;
+}
+
+void selectBondedNeighbors(const ParticleSystem &particleSystem,
+                           std::unordered_set<uint32_t> &selectedIds)
+{
+    if (!particleSystem.hasPatchyMetadata() || selectedIds.empty())
+    {
+        return;
+    }
+
+    const std::unordered_set<uint32_t> originalSelection = selectedIds;
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<PatchyParticleData> &patchMetadata = particleSystem.patchyMetadata();
+    for (size_t particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+    {
+        const Particle &particle = particles[particleIndex];
+        const bool sourceWasSelected = originalSelection.contains(particle.id);
+
+        for (int32_t bondId : patchMetadata[particleIndex].bondIds)
+        {
+            const Particle *bondTarget = resolveBondTarget(particleSystem, bondId);
+            if (bondTarget == nullptr)
+            {
+                continue;
+            }
+
+            if (sourceWasSelected)
+            {
+                selectedIds.insert(bondTarget->id);
+            }
+
+            if (originalSelection.contains(bondTarget->id))
+            {
+                selectedIds.insert(particle.id);
+            }
+        }
+    }
+}
+
+void ensureBondRenderSystems(const bgfx::VertexLayout &layout, uint16_t sphereStacks,
+                             uint16_t sphereSlices, const ParticleSystem &particleSystem,
+                             BondRenderSystems &bondRenderSystems)
+{
+    if (!particleSystem.hasPatchyMetadata())
+    {
+        bondRenderSystems.cylinderSystem.reset();
+        bondRenderSystems.nodeSystem.reset();
+        return;
+    }
+
+    if (!bondRenderSystems.cylinderSystem || bondRenderSystems.cylinderSlices != sphereSlices)
+    {
+        bondRenderSystems.cylinderSystem = std::make_unique<ParticleSystem>(
+            createCylinderParticleType(layout, sphereSlices));
+        bondRenderSystems.cylinderSlices = sphereSlices;
+    }
+
+    if (!bondRenderSystems.nodeSystem || bondRenderSystems.sphereStacks != sphereStacks
+        || bondRenderSystems.sphereSlices != sphereSlices)
+    {
+        bondRenderSystems.nodeSystem = std::make_unique<ParticleSystem>(
+            createSphereParticleType(layout, sphereStacks, sphereSlices));
+        bondRenderSystems.sphereStacks = sphereStacks;
+        bondRenderSystems.sphereSlices = sphereSlices;
+    }
+}
+
+void rebuildBondRenderSystems(const ParticleSystem &particleSystem,
+                              const SimulationBox &simulationBox,
+                              const bx::Vec3 &positionOffset,
+                              bool wrapToPeriodicBox,
+                              BondRenderSystems &bondRenderSystems)
+{
+    if (!particleSystem.hasPatchyMetadata() || !bondRenderSystems.cylinderSystem
+        || !bondRenderSystems.nodeSystem)
+    {
+        return;
+    }
+
+    bondRenderSystems.cylinderSystem->clear();
+    bondRenderSystems.nodeSystem->clear();
+
+    const auto displayedPositionFor = [&](const bx::Vec3 &rawPosition) {
+        bx::Vec3 displayedPosition = {rawPosition.x + positionOffset.x,
+                                      rawPosition.y + positionOffset.y,
+                                      rawPosition.z + positionOffset.z};
+        if (wrapToPeriodicBox)
+        {
+            simulationBox.wrapPosition(displayedPosition);
+        }
+        return displayedPosition;
+    };
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<PatchyParticleData> &patchMetadata = particleSystem.patchyMetadata();
+    for (size_t particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+    {
+        const Particle &particle = particles[particleIndex];
+        if (!particle.visible)
+        {
+            continue;
+        }
+
+        const bx::Vec3 displayedSourcePosition = displayedPositionFor(particle.position);
+
+        Particle nodeParticle;
+        nodeParticle.id = particle.id;
+        nodeParticle.position = displayedSourcePosition;
+        nodeParticle.baseColor = particle.baseColor;
+        nodeParticle.color = particle.color;
+        nodeParticle.visible = true;
+        nodeParticle.sizeParams[0] = 0.25f * particleRadius(particle);
+        nodeParticle.sizeParams[1] = nodeParticle.sizeParams[0];
+        nodeParticle.sizeParams[2] = nodeParticle.sizeParams[0];
+        bondRenderSystems.nodeSystem->addParticle(nodeParticle);
+
+        for (int32_t bondId : patchMetadata[particleIndex].bondIds)
+        {
+            const Particle *bondTarget = resolveBondTarget(particleSystem, bondId);
+            if (bondTarget == nullptr || !bondTarget->visible)
+            {
+                continue;
+            }
+
+            bx::Vec3 displacement = {
+                bondTarget->position.x - particle.position.x,
+                bondTarget->position.y - particle.position.y,
+                bondTarget->position.z - particle.position.z,
+            };
+            displacement = simulationBox.nearestImage(displacement);
+
+            const bx::Vec3 halfDisplacement = bx::mul(displacement, 0.5f);
+            const float cylinderLength = bx::length(halfDisplacement);
+            if (cylinderLength <= 1.0e-6f)
+            {
+                continue;
+            }
+
+            Particle cylinderParticle;
+            cylinderParticle.id = particle.id;
+            cylinderParticle.position = {
+                displayedSourcePosition.x + 0.25f * displacement.x,
+                displayedSourcePosition.y + 0.25f * displacement.y,
+                displayedSourcePosition.z + 0.25f * displacement.z,
+            };
+            cylinderParticle.direction = halfDisplacement;
+            cylinderParticle.baseColor = particle.baseColor;
+            cylinderParticle.color = particle.color;
+            cylinderParticle.visible = true;
+            cylinderParticle.sizeParams[0] = 0.125f * particleRadius(particle);
+            cylinderParticle.sizeParams[1] = cylinderLength;
+            bondRenderSystems.cylinderSystem->addParticle(cylinderParticle);
+        }
+    }
+}
+
+void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId viewId,
+                             bgfx::ProgramHandle program, const float *parentTransform,
+                             uint64_t renderState, float particleSizeScale,
+                             const std::unordered_set<uint32_t> *selectedParticleIds,
+                             bool usePickColors, bool cutPlaneEnabled,
+                             float cutPlaneSceneZ)
+{
+    const bx::Vec3 zeroOffset{0.0f, 0.0f, 0.0f};
+
+    if (bondRenderSystems.cylinderSystem)
+    {
+        bondRenderSystems.cylinderSystem->render(viewId, program, parentTransform, renderState,
+                                                 zeroOffset, 1.0f,
+                                                 nullptr, false,
+                                                 selectedParticleIds, nullptr, usePickColors,
+                                                 cutPlaneEnabled, cutPlaneSceneZ);
+    }
+    if (bondRenderSystems.nodeSystem)
+    {
+        bondRenderSystems.nodeSystem->render(viewId, program, parentTransform, renderState,
+                                             zeroOffset, particleSizeScale,
+                                             nullptr, false,
+                                             selectedParticleIds, nullptr, usePickColors,
+                                             cutPlaneEnabled, cutPlaneSceneZ);
+    }
+}
+
 void rebuildMobilitySystem(const ParticleSystem &particleSystem,
                            ParticleSystem &mobilitySystem,
                            const ViewerState &viewerState,
@@ -568,7 +1011,23 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
         case GLFW_KEY_B:
             if (action == GLFW_PRESS)
             {
-                state->showBox = !state->showBox;
+                if ((mods & GLFW_MOD_CONTROL) != 0)
+                {
+                    state->pendingSelectBonded = true;
+                }
+                else if ((mods & GLFW_MOD_SHIFT) != 0)
+                {
+                    state->bondModeEnabled = !state->bondModeEnabled;
+                    if (state->bondModeEnabled)
+                    {
+                        state->mobilityModeEnabled = false;
+                    }
+                    markPickBufferDirty(*state);
+                }
+                else
+                {
+                    state->showBox = !state->showBox;
+                }
             }
             break;
         case GLFW_KEY_D:
@@ -593,6 +1052,10 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             if (action == GLFW_PRESS && (mods & GLFW_MOD_SHIFT) != 0)
             {
                 state->mobilityModeEnabled = !state->mobilityModeEnabled;
+                if (state->mobilityModeEnabled)
+                {
+                    state->bondModeEnabled = false;
+                }
                 markPickBufferDirty(*state);
             }
             else if (action == GLFW_PRESS)
@@ -831,7 +1294,12 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
     }
 
     std::cerr << "Failed to load frame " << requestedFrame
-              << " from trajectory file: " << loadedPath << std::endl;
+              << " from trajectory file: " << loadedPath;
+    if (trajectoryReader != nullptr && !trajectoryReader->error().empty())
+    {
+        std::cerr << "\n" << trajectoryReader->error();
+    }
+    std::cerr << std::endl;
 }
 
 static void processPendingActions(ViewerState &viewerState, ParticleSystem &particleSystem,
@@ -882,6 +1350,13 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         invertSelection(particleSystem, viewerState.selectedIds);
         viewerState.pendingInvertSelected = false;
+    }
+
+    if (viewerState.pendingSelectBonded)
+    {
+        selectBondedNeighbors(particleSystem, viewerState.selectedIds);
+        viewerState.pendingSelectBonded = false;
+        markPickBufferDirty(viewerState);
     }
 
     if (viewerState.pendingDescribeSelection)
@@ -1072,11 +1547,12 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                             "Drag rotates. Shift+drag translates. D prints selection. V prints visible count.");
     }
     bgfx::dbgTextPrintf(0, 4, 0x0f,
-                        "Enter resets rotation. B toggles box. P saves PNG. > creates cut plane.");
+                        "Enter resets rotation. B toggles box. Shift+B toggles bonds. P saves PNG.");
     bgfx::dbgTextPrintf(0, 5, 0x0f,
-                        "M cycles colors. Shift+M toggles mobility. Box: %s  Mobility: %s",
+                        "M cycles colors. Shift+M toggles mobility. Box: %s  Mobility: %s  Bonds: %s",
                         viewerState.showBox ? "on" : "off",
-                        viewerState.mobilityModeEnabled ? "on" : "off");
+                        viewerState.mobilityModeEnabled ? "on" : "off",
+                        viewerState.bondModeEnabled ? "on" : "off");
     bgfx::dbgTextPrintf(0, 6, 0x0f,
                         "Cut plane: %s  z=%.2f  Color: %s  Size: %.2f  Light: %.2f",
                         viewerState.cutPlaneEnabled ? "active" : "off",
@@ -1266,6 +1742,8 @@ int main(int argc, char **argv)
         ParticleSystem particleSystem(
             createSphereParticleType(layout, sphereStacks, sphereSlices));
         ParticleSystem mobilitySystem(createArrowParticleType(layout, kDefaultArrowSlices));
+        PatchRenderSystems patchRenderSystems;
+        BondRenderSystems bondRenderSystems;
         TrajectoryReader::FileType particleFileType = TrajectoryReader::FileType::Sphere;
 
         // Load shaders
@@ -1306,8 +1784,13 @@ int main(int argc, char **argv)
                 totalFrames = trajectoryReader->frameCount();
                 if (!trajectoryReader->loadFrame(currentFrame, particleSystem, simulationBox))
                 {
-                    std::cerr << "Failed to load frame 0 from trajectory file: " << loadedPath
-                              << std::endl;
+                    std::cerr << "Failed to load frame 0 from trajectory file: "
+                              << loadedPath;
+                    if (!trajectoryReader->error().empty())
+                    {
+                        std::cerr << "\n" << trajectoryReader->error();
+                    }
+                    std::cerr << std::endl;
                     exitCode = 1;
                 }
                 else
@@ -1426,8 +1909,29 @@ int main(int argc, char **argv)
 
             applyColorMode(particleSystem, viewerState.colorMode,
                            particleFileType == TrajectoryReader::FileType::Rod, false);
+            if (particleFileType == TrajectoryReader::FileType::Patchy)
+            {
+                ensurePatchRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
+                                         patchRenderSystems);
+                rebuildPatchRenderSystems(particleSystem, patchRenderSystems);
+                ensureBondRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
+                                        bondRenderSystems);
+                rebuildBondRenderSystems(particleSystem, simulationBox,
+                                         viewerState.particleTranslation,
+                                         viewerState.wrapParticlesToBox,
+                                         bondRenderSystems);
+            }
 
-            if (viewerState.mobilityModeEnabled)
+            if (viewerState.bondModeEnabled)
+            {
+                renderBondRenderSystems(bondRenderSystems, kMainView, program,
+                                        sceneTransform, kParticleRenderState,
+                                        viewerState.particleSizeScale,
+                                        &viewerState.selectedIds, false,
+                                        viewerState.cutPlaneEnabled,
+                                        viewerState.cutPlaneSceneZ);
+            }
+            else if (viewerState.mobilityModeEnabled)
             {
                 rebuildMobilitySystem(particleSystem, mobilitySystem, viewerState, simulationBox);
                 applyColorMode(mobilitySystem, viewerState.colorMode, true, true);
@@ -1452,6 +1956,17 @@ int main(int argc, char **argv)
                                       false,
                                       viewerState.cutPlaneEnabled,
                                       viewerState.cutPlaneSceneZ);
+                if (particleFileType == TrajectoryReader::FileType::Patchy)
+                {
+                    renderPatchRenderSystems(patchRenderSystems, kMainView, program,
+                                             sceneTransform, kParticleRenderState,
+                                             viewerState.particleTranslation,
+                                             viewerState.particleSizeScale, &simulationBox,
+                                             viewerState.wrapParticlesToBox,
+                                             &viewerState.selectedIds, false,
+                                             viewerState.cutPlaneEnabled,
+                                             viewerState.cutPlaneSceneZ);
+                }
             }
             if (viewerState.showBox)
             {
@@ -1474,7 +1989,16 @@ int main(int argc, char **argv)
                 bgfx::setViewRect(kPickView, 0, 0, pickResources.width, pickResources.height);
                 bgfx::setViewFrameBuffer(kPickView, pickResources.frameBuffer);
                 bgfx::setViewTransform(kPickView, view, proj);
-                if (viewerState.mobilityModeEnabled)
+                if (viewerState.bondModeEnabled)
+                {
+                    renderBondRenderSystems(bondRenderSystems, kPickView, pickProgram,
+                                            sceneTransform, kParticleRenderState,
+                                            viewerState.particleSizeScale,
+                                            nullptr, true,
+                                            viewerState.cutPlaneEnabled,
+                                            viewerState.cutPlaneSceneZ);
+                }
+                else if (viewerState.mobilityModeEnabled)
                 {
                     mobilitySystem.render(kPickView, pickProgram, sceneTransform,
                                           kParticleRenderState,
@@ -1496,6 +2020,18 @@ int main(int argc, char **argv)
                                           true,
                                           viewerState.cutPlaneEnabled,
                                           viewerState.cutPlaneSceneZ);
+                    if (particleFileType == TrajectoryReader::FileType::Patchy)
+                    {
+                        renderPatchRenderSystems(patchRenderSystems, kPickView, pickProgram,
+                                                 sceneTransform, kParticleRenderState,
+                                                 viewerState.particleTranslation,
+                                                 viewerState.particleSizeScale,
+                                                 &simulationBox,
+                                                 viewerState.wrapParticlesToBox,
+                                                 nullptr, true,
+                                                 viewerState.cutPlaneEnabled,
+                                                 viewerState.cutPlaneSceneZ);
+                    }
                 }
 
                 bgfx::blit(kBlitView, pickResources.readbackTexture, 0, 0,

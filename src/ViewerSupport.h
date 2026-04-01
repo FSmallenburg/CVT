@@ -54,6 +54,7 @@ struct ViewerState
     bool pendingRevealAll = false;
     bool pendingOverlapCheck = false;
     bool pendingInvertSelected = false;
+    bool pendingSelectBonded = false;
     bool pendingDescribeSelection = false;
     bool pendingDescribeVisibleCount = false;
     bool pendingUnselect = false;
@@ -77,6 +78,7 @@ struct ViewerState
     bool pendingScreenshotRequest = false;
     ColorMode colorMode = ColorMode::FileDefault;
     bool mobilityModeEnabled = false;
+    bool bondModeEnabled = false;
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
 };

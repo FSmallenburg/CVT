@@ -1,5 +1,6 @@
 #include "Mesh.h"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -248,6 +249,50 @@ std::vector<uint16_t> makeHemisphereIndices(uint16_t stacks, uint16_t slices)
     return indices;
 }
 
+std::vector<PosNormalVertex> makeSphericalCapVertices(float radius, float cosHalfAngle,
+                                                      uint16_t stacks, uint16_t slices)
+{
+    std::vector<PosNormalVertex> vertices;
+    if (stacks == 0u || slices == 0u)
+    {
+        return vertices;
+    }
+
+    const float clampedCos = std::clamp(cosHalfAngle, -1.0f, 1.0f);
+    const float maxPhi = std::acos(clampedCos);
+
+    vertices.reserve(1u + static_cast<size_t>(stacks) * (slices + 1u));
+    vertices.push_back({0.0f, 0.0f, radius, 0.0f, 0.0f, 1.0f});
+
+    for (uint16_t stack = 1; stack <= stacks; ++stack)
+    {
+        const float phi = maxPhi * static_cast<float>(stack) / static_cast<float>(stacks);
+        const float ringRadius = std::sin(phi);
+        const float z = std::cos(phi);
+
+        for (uint16_t slice = 0; slice <= slices; ++slice)
+        {
+            const float theta = 2.0f * static_cast<float>(M_PI) * static_cast<float>(slice)
+                                / static_cast<float>(slices);
+            const float cosTheta = std::cos(theta);
+            const float sinTheta = std::sin(theta);
+            const float nx = ringRadius * cosTheta;
+            const float ny = ringRadius * sinTheta;
+            const float nz = z;
+
+            vertices.push_back({radius * nx, radius * ny, radius * nz,
+                                nx, ny, nz});
+        }
+    }
+
+    return vertices;
+}
+
+std::vector<uint16_t> makeSphericalCapIndices(uint16_t stacks, uint16_t slices)
+{
+    return makeHemisphereIndices(stacks, slices);
+}
+
 std::vector<PosNormalVertex> makeConeVertices(float radius, float height,
                                               uint16_t slices)
 {
@@ -383,6 +428,15 @@ Mesh Mesh::createHemisphere(float radius, uint16_t stacks, uint16_t slices,
     Mesh mesh;
     mesh.upload(makeHemisphereVertices(radius, stacks, slices),
                 makeHemisphereIndices(stacks, slices), layout);
+    return mesh;
+}
+
+Mesh Mesh::createSphericalCap(float radius, float cosHalfAngle, uint16_t stacks,
+                              uint16_t slices, const bgfx::VertexLayout &layout)
+{
+    Mesh mesh;
+    mesh.upload(makeSphericalCapVertices(radius, cosHalfAngle, stacks, slices),
+                makeSphericalCapIndices(stacks, slices), layout);
     return mesh;
 }
 

@@ -31,6 +31,8 @@ class Mesh
            const bgfx::VertexLayout &layout);
     static Mesh createHemisphere(float radius, uint16_t stacks, uint16_t slices,
            const bgfx::VertexLayout &layout);
+        static Mesh createSphericalCap(float radius, float cosHalfAngle, uint16_t stacks,
+              uint16_t slices, const bgfx::VertexLayout &layout);
     static Mesh createCone(float radius, float height, uint16_t slices,
          const bgfx::VertexLayout &layout);
     static Mesh createBox(float halfExtent, const bgfx::VertexLayout &layout);

@@ -74,11 +74,17 @@ void ParticleSystem::reserve(size_t count)
 void ParticleSystem::clear()
 {
     m_particles.clear();
+    m_patchyMetadata.clear();
 }
 
 void ParticleSystem::addParticle(const Particle &particle)
 {
     m_particles.push_back(particle);
+}
+
+void ParticleSystem::addPatchyMetadata(const PatchyParticleData &patchData)
+{
+    m_patchyMetadata.push_back(patchData);
 }
 
 size_t ParticleSystem::size() const
@@ -94,6 +100,16 @@ std::vector<Particle> &ParticleSystem::particles()
 const std::vector<Particle> &ParticleSystem::particles() const
 {
     return m_particles;
+}
+
+bool ParticleSystem::hasPatchyMetadata() const
+{
+    return !m_patchyMetadata.empty() && m_patchyMetadata.size() == m_particles.size();
+}
+
+const std::vector<PatchyParticleData> &ParticleSystem::patchyMetadata() const
+{
+    return m_patchyMetadata;
 }
 
 void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,

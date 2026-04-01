@@ -16,9 +16,13 @@ set(BIMG_LIB ${BGFX_BUILD_DIR}/bin/libbimgRelease.a)
 
 add_executable(my_app
     src/ColorPalette.cpp
+    src/CylinderType.cpp
     src/main.cpp
     src/ArrowType.cpp
     src/Mesh.cpp
+    src/PatchCapType.cpp
+    src/PatchConeType.cpp
+    src/PatchPlacement.cpp
     src/Particle.cpp
     src/ParticleType.cpp
     src/ParticleSystem.cpp
