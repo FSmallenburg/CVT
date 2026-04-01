@@ -329,11 +329,19 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
         return "rod";
     case TrajectoryReader::FileType::Patchy:
         return "patchy";
+    case TrajectoryReader::FileType::Patchy2D:
+        return "patchy2d";
     case TrajectoryReader::FileType::Sphere:
         return "sphere";
     }
 
     return "sphere";
+}
+
+bool isPatchyFileType(TrajectoryReader::FileType fileType)
+{
+    return fileType == TrajectoryReader::FileType::Patchy
+           || fileType == TrajectoryReader::FileType::Patchy2D;
 }
 
 const char *colorModeName(ColorMode colorMode)
@@ -348,6 +356,8 @@ const char *colorModeName(ColorMode colorMode)
         return "uniform";
     case ColorMode::Orientation:
         return "orientation";
+    case ColorMode::BondCount:
+        return "bonds";
     case ColorMode::Count:
         break;
     }
@@ -382,6 +392,7 @@ std::array<float, 4> orientationColor(const bx::Vec3 &direction)
 
 std::array<float, 4> resolveParticleColor(const Particle &particle, size_t particleIndex,
                                          ColorMode colorMode,
+                                         const std::vector<PatchyParticleData> *patchMetadata,
                                          bool supportsOrientationMode,
                                          bool uniformUsesOrientation)
 {
@@ -397,6 +408,16 @@ std::array<float, 4> resolveParticleColor(const Particle &particle, size_t parti
     case ColorMode::Orientation:
         return supportsOrientationMode ? orientationColor(particle.direction)
                                        : colorFromLetter('A');
+    case ColorMode::BondCount:
+        if (patchMetadata != nullptr && particleIndex < patchMetadata->size())
+        {
+            const size_t bondCount = static_cast<size_t>(std::count_if(
+                (*patchMetadata)[particleIndex].bondIds.begin(),
+                (*patchMetadata)[particleIndex].bondIds.end(),
+                [](int32_t bondId) { return bondId >= 0; }));
+            return colorFromLetter(static_cast<char>('A' + (bondCount % kParticlePaletteColorCount)));
+        }
+        return particle.baseColor;
     case ColorMode::Count:
         break;
     }
@@ -420,10 +441,13 @@ void applyColorMode(ParticleSystem &particleSystem, ColorMode colorMode,
                     bool supportsOrientationMode, bool uniformUsesOrientation)
 {
     std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<PatchyParticleData> *patchMetadata =
+        particleSystem.hasPatchyMetadata() ? &particleSystem.patchyMetadata() : nullptr;
     for (size_t index = 0; index < particles.size(); ++index)
     {
         Particle &particle = particles[index];
         particle.color = resolveParticleColor(particle, index, colorMode,
+                                              patchMetadata,
                                               supportsOrientationMode,
                                               uniformUsesOrientation);
     }
@@ -678,7 +702,7 @@ void rebuildPatchRenderSystems(const ParticleSystem &particleSystem,
 
         const PatchyParticleData &patchData = patchMetadata[particleIndex];
         const std::vector<bx::Vec3> &referenceDirections =
-            patchPlacementDirections(patchData.bondIds.size());
+            patchPlacementDirections(patchData.bondIds.size(), patchData.planarPlacement);
         const float clampedCosHalfAngle = std::clamp(patchData.cosHalfAngle, 0.0f, 1.0f);
         const float sinHalfAngle = std::sqrt(std::max(0.0f,
                                                       1.0f - clampedCosHalfAngle
@@ -2063,7 +2087,7 @@ int main(int argc, char **argv)
 
             applyColorMode(particleSystem, viewerState.colorMode,
                            particleFileType == TrajectoryReader::FileType::Rod, false);
-            if (particleFileType == TrajectoryReader::FileType::Patchy)
+            if (isPatchyFileType(particleFileType))
             {
                 ensurePatchRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
                                          patchRenderSystems);
@@ -2110,7 +2134,7 @@ int main(int argc, char **argv)
                                       false,
                                       viewerState.cutPlaneEnabled,
                                       viewerState.cutPlaneSceneZ);
-                if (particleFileType == TrajectoryReader::FileType::Patchy)
+                if (isPatchyFileType(particleFileType))
                 {
                     renderPatchRenderSystems(patchRenderSystems, kMainView, program,
                                              sceneTransform, kParticleRenderState,
@@ -2174,7 +2198,7 @@ int main(int argc, char **argv)
                                           true,
                                           viewerState.cutPlaneEnabled,
                                           viewerState.cutPlaneSceneZ);
-                    if (particleFileType == TrajectoryReader::FileType::Patchy)
+                    if (isPatchyFileType(particleFileType))
                     {
                         renderPatchRenderSystems(patchRenderSystems, kPickView, pickProgram,
                                                  sceneTransform, kParticleRenderState,

@@ -34,6 +34,10 @@ TrajectoryReader::FileType detectFileType(const std::string &path)
     {
         return TrajectoryReader::FileType::Patchy;
     }
+    if (extension == ".patch")
+    {
+        return TrajectoryReader::FileType::Patchy2D;
+    }
 
     return TrajectoryReader::FileType::Sphere;
 }
@@ -289,7 +293,7 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
             particle.sizeParams[2] = radius;
             particle.sizeParams[3] = 1.0f;
         }
-        else if (m_fileType == FileType::Patchy)
+        else if (m_fileType == FileType::Patchy || m_fileType == FileType::Patchy2D)
         {
             std::vector<std::string> tokens;
             std::string token;
@@ -305,6 +309,7 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
             }
 
             PatchyParticleData patchData;
+            patchData.planarPlacement = (m_fileType == FileType::Patchy2D);
             if (!parseFloatToken(tokens[0], patchData.coreRadius)
                 || !parseFloatToken(tokens[1], patchData.cosHalfAngle))
             {
@@ -350,7 +355,7 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 patchData.bondIds.push_back(bondId);
             }
 
-            if (!hasPatchPlacement(patchData.bondIds.size()))
+            if (!patchData.planarPlacement && !hasPatchPlacement(patchData.bondIds.size()))
             {
                 return setParticleError("unsupported patch count "
                                         + std::to_string(patchData.bondIds.size()));

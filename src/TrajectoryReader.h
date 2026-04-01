@@ -14,7 +14,8 @@ class TrajectoryReader
     {
         Sphere,
         Rod,
-      Patchy,
+        Patchy,
+        Patchy2D,
     };
 
     explicit TrajectoryReader(std::string path);

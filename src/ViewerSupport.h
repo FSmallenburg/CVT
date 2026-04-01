@@ -17,6 +17,7 @@ enum class ColorMode : uint8_t
     PaletteCycle,
     Uniform,
     Orientation,
+    BondCount,
     Count,
 };
 

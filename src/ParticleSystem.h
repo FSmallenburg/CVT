@@ -13,13 +13,14 @@
 
 struct PatchyParticleData
 {
-  std::array<float, 9> orientationMatrix{1.0f, 0.0f, 0.0f,
-                       0.0f, 1.0f, 0.0f,
-                       0.0f, 0.0f, 1.0f};
-  float coreRadius = 1.0f;
-  float cosHalfAngle = 1.0f;
-  float capRadius = 1.0f;
-  std::vector<int32_t> bondIds;
+    std::array<float, 9> orientationMatrix{1.0f, 0.0f, 0.0f,
+                                           0.0f, 1.0f, 0.0f,
+                                           0.0f, 0.0f, 1.0f};
+    float coreRadius = 1.0f;
+    float cosHalfAngle = 1.0f;
+    float capRadius = 1.0f;
+    bool planarPlacement = false;
+    std::vector<int32_t> bondIds;
 };
 
 class ParticleSystem
