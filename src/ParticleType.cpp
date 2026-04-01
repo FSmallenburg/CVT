@@ -2,6 +2,38 @@
 
 #include <bx/math.h>
 
+namespace
+{
+
+void buildParticleTransform(const Particle &particle, float *outTransform)
+{
+    if (particle.hasOrientationMatrix)
+    {
+        outTransform[0] = particle.orientationMatrix[0];
+        outTransform[1] = particle.orientationMatrix[3];
+        outTransform[2] = particle.orientationMatrix[6];
+        outTransform[3] = 0.0f;
+        outTransform[4] = particle.orientationMatrix[1];
+        outTransform[5] = particle.orientationMatrix[4];
+        outTransform[6] = particle.orientationMatrix[7];
+        outTransform[7] = 0.0f;
+        outTransform[8] = particle.orientationMatrix[2];
+        outTransform[9] = particle.orientationMatrix[5];
+        outTransform[10] = particle.orientationMatrix[8];
+        outTransform[11] = 0.0f;
+        outTransform[12] = particle.position.x;
+        outTransform[13] = particle.position.y;
+        outTransform[14] = particle.position.z;
+        outTransform[15] = 1.0f;
+        return;
+    }
+
+    bx::mtxSRT(outTransform, 1.0f, 1.0f, 1.0f, particle.rotation.x, particle.rotation.y,
+               particle.rotation.z, particle.position.x, particle.position.y, particle.position.z);
+}
+
+} // namespace
+
 float ParticleType::resolveScale(const Particle &particle, uint8_t channel)
 {
     return channel < particle.sizeParams.size() ? particle.sizeParams[channel] : 1.0f;
@@ -13,8 +45,7 @@ void ParticleType::buildPartTransform(const Particle &particle, const float *par
     const RenderPart &part = renderParts()[partIndex];
 
     float particleTransform[16];
-    bx::mtxSRT(particleTransform, 1.0f, 1.0f, 1.0f, particle.rotation.x, particle.rotation.y,
-               particle.rotation.z, particle.position.x, particle.position.y, particle.position.z);
+    buildParticleTransform(particle, particleTransform);
 
     float partTransform[16];
     bx::mtxSRT(partTransform, part.baseScale.x * resolveScale(particle, part.scaleChannels[0]),

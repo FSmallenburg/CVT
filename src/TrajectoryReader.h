@@ -14,6 +14,7 @@ class TrajectoryReader
     {
         Sphere,
         Rod,
+      Cube,
         Patchy,
         Patchy2D,
     };

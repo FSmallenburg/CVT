@@ -350,22 +350,53 @@ std::vector<uint16_t> makeConeIndices(uint16_t slices)
 std::vector<PosNormalVertex> makeBoxVertices(float halfExtent)
 {
     return {
+        // Front (+Z)
         {-halfExtent, -halfExtent, halfExtent, 0.0f, 0.0f, 1.0f},
         {halfExtent, -halfExtent, halfExtent, 0.0f, 0.0f, 1.0f},
         {halfExtent, halfExtent, halfExtent, 0.0f, 0.0f, 1.0f},
         {-halfExtent, halfExtent, halfExtent, 0.0f, 0.0f, 1.0f},
-        {-halfExtent, -halfExtent, -halfExtent, 0.0f, 0.0f, -1.0f},
+
+        // Back (-Z)
         {halfExtent, -halfExtent, -halfExtent, 0.0f, 0.0f, -1.0f},
-        {halfExtent, halfExtent, -halfExtent, 0.0f, 0.0f, -1.0f},
+        {-halfExtent, -halfExtent, -halfExtent, 0.0f, 0.0f, -1.0f},
         {-halfExtent, halfExtent, -halfExtent, 0.0f, 0.0f, -1.0f},
+        {halfExtent, halfExtent, -halfExtent, 0.0f, 0.0f, -1.0f},
+
+        // Right (+X)
+        {halfExtent, -halfExtent, halfExtent, 1.0f, 0.0f, 0.0f},
+        {halfExtent, -halfExtent, -halfExtent, 1.0f, 0.0f, 0.0f},
+        {halfExtent, halfExtent, -halfExtent, 1.0f, 0.0f, 0.0f},
+        {halfExtent, halfExtent, halfExtent, 1.0f, 0.0f, 0.0f},
+
+        // Left (-X)
+        {-halfExtent, -halfExtent, -halfExtent, -1.0f, 0.0f, 0.0f},
+        {-halfExtent, -halfExtent, halfExtent, -1.0f, 0.0f, 0.0f},
+        {-halfExtent, halfExtent, halfExtent, -1.0f, 0.0f, 0.0f},
+        {-halfExtent, halfExtent, -halfExtent, -1.0f, 0.0f, 0.0f},
+
+        // Top (+Y)
+        {-halfExtent, halfExtent, halfExtent, 0.0f, 1.0f, 0.0f},
+        {halfExtent, halfExtent, halfExtent, 0.0f, 1.0f, 0.0f},
+        {halfExtent, halfExtent, -halfExtent, 0.0f, 1.0f, 0.0f},
+        {-halfExtent, halfExtent, -halfExtent, 0.0f, 1.0f, 0.0f},
+
+        // Bottom (-Y)
+        {-halfExtent, -halfExtent, -halfExtent, 0.0f, -1.0f, 0.0f},
+        {halfExtent, -halfExtent, -halfExtent, 0.0f, -1.0f, 0.0f},
+        {halfExtent, -halfExtent, halfExtent, 0.0f, -1.0f, 0.0f},
+        {-halfExtent, -halfExtent, halfExtent, 0.0f, -1.0f, 0.0f},
     };
 }
 
 std::vector<uint16_t> makeBoxIndices()
 {
     return {
-        0, 1, 2, 2, 3, 0, 4, 7, 6, 6, 5, 4, 4, 5, 1, 1, 0, 4,
-        3, 2, 6, 6, 7, 3, 1, 5, 6, 6, 2, 1, 4, 0, 3, 3, 7, 4,
+        0, 3, 2, 2, 1, 0,
+        4, 7, 6, 6, 5, 4,
+        8, 11, 10, 10, 9, 8,
+        12, 15, 14, 14, 13, 12,
+        16, 19, 18, 18, 17, 16,
+        20, 23, 22, 22, 21, 20,
     };
 }
 

@@ -45,6 +45,7 @@ set(BIMG_LIB "${BGFX_BUILD_DIR}/bin/${_bimg_lib_name}")
 
 add_executable(cvt
     src/ColorPalette.cpp
+    src/CubeType.cpp
     src/CylinderType.cpp
     src/main.cpp
     src/ArrowType.cpp

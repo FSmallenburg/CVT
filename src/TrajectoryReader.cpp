@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 
@@ -15,20 +16,34 @@ namespace
 
 constexpr float kSphericalBoxPadding = 1.0f;
 
-TrajectoryReader::FileType detectFileType(const std::string &path)
+std::string lowercaseExtension(const std::string &path)
 {
     const size_t extensionPos = path.find_last_of('.');
     if (extensionPos == std::string::npos)
     {
-        return TrajectoryReader::FileType::Sphere;
+        return {};
     }
 
     std::string extension = path.substr(extensionPos);
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return extension;
+}
+
+std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path)
+{
+    const std::string extension = lowercaseExtension(path);
+    if (extension == ".sph")
+    {
+        return TrajectoryReader::FileType::Sphere;
+    }
     if (extension == ".rod")
     {
         return TrajectoryReader::FileType::Rod;
+    }
+    if (extension == ".cub")
+    {
+        return TrajectoryReader::FileType::Cube;
     }
     if (extension == ".ptc")
     {
@@ -39,7 +54,7 @@ TrajectoryReader::FileType detectFileType(const std::string &path)
         return TrajectoryReader::FileType::Patchy2D;
     }
 
-    return TrajectoryReader::FileType::Sphere;
+    return std::nullopt;
 }
 
 bool readNextDataLine(std::istream &input, std::string &line, std::streamoff *offset = nullptr)
@@ -150,7 +165,24 @@ bool parseIntToken(const std::string &token, int32_t &value)
 
 TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
 {
-    m_fileType = detectFileType(m_path);
+    const std::optional<FileType> detectedFileType = detectFileType(m_path);
+    if (!detectedFileType.has_value())
+    {
+        const std::string extension = lowercaseExtension(m_path);
+        if (extension.empty())
+        {
+            m_error = "Unsupported trajectory file extension in " + m_path
+                      + ". Expected one of: .sph, .rod, .cub, .ptc, .patch";
+        }
+        else
+        {
+            m_error = "Unsupported trajectory file extension '" + extension + "' in "
+                      + m_path + ". Expected one of: .sph, .rod, .cub, .ptc, .patch";
+        }
+        return;
+    }
+
+    m_fileType = *detectedFileType;
     scanFrames();
 }
 
@@ -291,6 +323,51 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
             particle.sizeParams[0] = radius;
             particle.sizeParams[1] = bx::length(direction);
             particle.sizeParams[2] = radius;
+            particle.sizeParams[3] = 1.0f;
+        }
+        else if (m_fileType == FileType::Cube)
+        {
+            std::vector<std::string> tokens;
+            std::string token;
+            while (particleStream >> token)
+            {
+                tokens.push_back(token);
+            }
+
+            if (tokens.size() != 10u)
+            {
+                return setParticleError(
+                    "cube particles require edge length followed by 9 rotation matrix values");
+            }
+
+            float edgeLength = 0.0f;
+            if (!parseFloatToken(tokens[0], edgeLength))
+            {
+                return setParticleError("invalid cube edge length");
+            }
+
+            std::array<float, 9> parsedOrientationMatrix{};
+            for (size_t matrixIndex = 0; matrixIndex < 9u; ++matrixIndex)
+            {
+                if (!parseFloatToken(tokens[1u + matrixIndex],
+                                     parsedOrientationMatrix[matrixIndex]))
+                {
+                    return setParticleError("invalid rotation matrix entry at index "
+                                            + std::to_string(matrixIndex));
+                }
+            }
+
+            for (size_t row = 0; row < 3u; ++row)
+            {
+                for (size_t column = 0; column < 3u; ++column)
+                {
+                    particle.orientationMatrix[row * 3u + column] =
+                        parsedOrientationMatrix[column * 3u + row];
+                }
+            }
+
+            particle.hasOrientationMatrix = true;
+            particle.setUniformScale(edgeLength);
             particle.sizeParams[3] = 1.0f;
         }
         else if (m_fileType == FileType::Patchy || m_fileType == FileType::Patchy2D)

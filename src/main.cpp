@@ -1,5 +1,6 @@
 #include "ArrowType.h"
 #include "ColorPalette.h"
+#include "CubeType.h"
 #include "CylinderType.h"
 #include "Mesh.h"
 #include "PatchCapType.h"
@@ -308,6 +309,11 @@ std::unique_ptr<ParticleType> createRodParticleType(const bgfx::VertexLayout &la
     return std::make_unique<RodType>(layout, stacks, slices);
 }
 
+std::unique_ptr<ParticleType> createCubeParticleType(const bgfx::VertexLayout &layout)
+{
+    return std::make_unique<CubeType>(layout);
+}
+
 std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layout,
                                                  TrajectoryReader::FileType fileType,
                                                  uint16_t stacks,
@@ -316,6 +322,10 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
     if (fileType == TrajectoryReader::FileType::Rod)
     {
         return createRodParticleType(layout, stacks, slices);
+    }
+    if (fileType == TrajectoryReader::FileType::Cube)
+    {
+        return createCubeParticleType(layout);
     }
 
     return createSphereParticleType(layout, stacks, slices);
@@ -327,6 +337,8 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
     {
     case TrajectoryReader::FileType::Rod:
         return "rod";
+    case TrajectoryReader::FileType::Cube:
+        return "cube";
     case TrajectoryReader::FileType::Patchy:
         return "patchy";
     case TrajectoryReader::FileType::Patchy2D:
