@@ -52,6 +52,8 @@ RodType::RodType(const bgfx::VertexLayout &layout, uint16_t stacks, uint16_t sli
         : m_cylinderMesh(Mesh::createCylinder(1.0f, 1.0f, slices, layout)),
             m_capMesh(Mesh::createHemisphere(1.0f, stacks, slices, layout))
 {
+    m_parts.reserve(3u);
+
     m_parts.push_back(RenderPart{
         .mesh = &m_cylinderMesh,
         .localOffset = {0.0f, 0.0f, 0.0f},
