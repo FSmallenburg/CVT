@@ -348,6 +348,11 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
                                                  uint16_t stacks,
                                                  uint16_t slices)
 {
+    if (fileType == TrajectoryReader::FileType::Sphere
+        || fileType == TrajectoryReader::FileType::Disk)
+    {
+        return createSphereParticleType(layout, stacks, slices);
+    }
     if (fileType == TrajectoryReader::FileType::Rod)
     {
         return createRodParticleType(layout, stacks, slices);
@@ -362,6 +367,12 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
     }
 
     return createSphereParticleType(layout, stacks, slices);
+}
+
+bool isSphereLikeFileType(TrajectoryReader::FileType fileType)
+{
+    return fileType == TrajectoryReader::FileType::Sphere
+           || fileType == TrajectoryReader::FileType::Disk;
 }
 
 bool isPatchyFileType(TrajectoryReader::FileType fileType)
@@ -1686,7 +1697,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
 
     if (viewerState.pendingOverlapCheck)
     {
-        if (particleFileType == TrajectoryReader::FileType::Sphere)
+        if (isSphereLikeFileType(particleFileType))
         {
             viewerState.selectedIds.clear();
             findOverlappingSphereParticles(particleSystem, simulationBox,
@@ -1882,11 +1893,11 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
     bgfx::dbgTextPrintf(
         0, 1, 0x0f,
         "Left click toggles selection. H hides selected. Shift+H reveals all.");
-    if (particleFileType == TrajectoryReader::FileType::Sphere)
+    if (isSphereLikeFileType(particleFileType))
     {
-        bgfx::dbgTextPrintf(0, 2, 0x0f, "Selected: %d  Last pick: %u  Sphere: %ux%u",
+        bgfx::dbgTextPrintf(0, 2, 0x0f, "Selected: %d  Last pick: %u  %s: %ux%u",
                             (int)viewerState.selectedIds.size(), viewerState.lastPickedId,
-                            sphereStacks, sphereSlices);
+                            particleTypeName(particleFileType), sphereStacks, sphereSlices);
         bgfx::dbgTextPrintf(0, 3, 0x0f,
                             "Drag rotates. Shift+drag translates. D prints selection. V prints visible count.");
     }
@@ -2135,6 +2146,7 @@ int main(int argc, char **argv)
             else
             {
                 particleFileType = trajectoryReader->fileType();
+                viewerState.fileDimensionality = trajectoryReader->dimensionality();
                 particleSystem.setType(createParticleType(layout, particleFileType,
                                                           sphereStacks, sphereSlices));
                 totalFrames = trajectoryReader->frameCount();

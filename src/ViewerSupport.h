@@ -3,6 +3,7 @@
 #include "ColorPalette.h"
 #include "ParticleSystem.h"
 #include "SimulationBox.h"
+#include "TrajectoryReader.h"
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
@@ -57,6 +58,8 @@ struct ViewerState
     uint8_t lightingLevelIndex = 14u;
     float particleSizeScale = 1.0f;
     bool wrapParticlesToBox = true;
+    TrajectoryReader::Dimensionality fileDimensionality =
+        TrajectoryReader::Dimensionality::ThreeDimensional;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     uint8_t maxSeenParticleTypeIndex = 0u;
     std::unordered_set<uint32_t> selectedIds;

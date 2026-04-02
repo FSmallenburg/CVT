@@ -39,6 +39,10 @@ std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path
     {
         return TrajectoryReader::FileType::Sphere;
     }
+    if (extension == ".dsk")
+    {
+        return TrajectoryReader::FileType::Disk;
+    }
     if (extension == ".rod")
     {
         return TrajectoryReader::FileType::Rod;
@@ -65,6 +69,25 @@ std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path
     }
 
     return std::nullopt;
+}
+
+TrajectoryReader::Dimensionality detectDimensionality(TrajectoryReader::FileType fileType)
+{
+    switch (fileType)
+    {
+    case TrajectoryReader::FileType::Disk:
+    case TrajectoryReader::FileType::Polygon:
+    case TrajectoryReader::FileType::Patchy2D:
+        return TrajectoryReader::Dimensionality::TwoDimensional;
+    case TrajectoryReader::FileType::Sphere:
+    case TrajectoryReader::FileType::Rod:
+    case TrajectoryReader::FileType::Cube:
+    case TrajectoryReader::FileType::Patchy:
+    case TrajectoryReader::FileType::PatchyLegacy:
+        return TrajectoryReader::Dimensionality::ThreeDimensional;
+    }
+
+    return TrajectoryReader::Dimensionality::ThreeDimensional;
 }
 
 bool readNextDataLine(std::istream &input, std::string &line, std::streamoff *offset = nullptr)
@@ -182,17 +205,18 @@ TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
         if (extension.empty())
         {
             m_error = "Unsupported trajectory file extension in " + m_path
-                      + ". Expected one of: .sph, .rod, .cub, .gon, .ptc, .pat, .patch";
+                      + ". Expected one of: .sph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
         }
         else
         {
             m_error = "Unsupported trajectory file extension '" + extension + "' in "
-                      + m_path + ". Expected one of: .sph, .rod, .cub, .gon, .ptc, .pat, .patch";
+                      + m_path + ". Expected one of: .sph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
         }
         return;
     }
 
     m_fileType = *detectedFileType;
+    m_dimensionality = detectDimensionality(m_fileType);
     scanFrames();
 }
 
@@ -214,6 +238,11 @@ size_t TrajectoryReader::frameCount() const
 TrajectoryReader::FileType TrajectoryReader::fileType() const
 {
     return m_fileType;
+}
+
+TrajectoryReader::Dimensionality TrajectoryReader::dimensionality() const
+{
+    return m_dimensionality;
 }
 
 bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSystem,

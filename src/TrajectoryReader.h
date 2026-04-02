@@ -13,6 +13,7 @@ class TrajectoryReader
     enum class FileType
     {
         Sphere,
+    Disk,
         Rod,
         Cube,
         Polygon,
@@ -21,12 +22,19 @@ class TrajectoryReader
         Patchy2D,
     };
 
+  enum class Dimensionality
+  {
+    TwoDimensional,
+    ThreeDimensional,
+  };
+
     explicit TrajectoryReader(std::string path);
 
     bool isOpen() const;
     const std::string &error() const;
     size_t frameCount() const;
     FileType fileType() const;
+  Dimensionality dimensionality() const;
 
     bool loadFrame(size_t frameIndex, ParticleSystem &particleSystem,
                    SimulationBox &simulationBox) const;
@@ -38,4 +46,5 @@ class TrajectoryReader
     mutable std::string m_error;
     std::vector<std::streamoff> m_frameOffsets;
     FileType m_fileType = FileType::Sphere;
+    Dimensionality m_dimensionality = Dimensionality::ThreeDimensional;
 };

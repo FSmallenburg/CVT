@@ -27,6 +27,8 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
 {
     switch (fileType)
     {
+    case TrajectoryReader::FileType::Disk:
+        return "disk";
     case TrajectoryReader::FileType::Rod:
         return "rod";
     case TrajectoryReader::FileType::Cube:
