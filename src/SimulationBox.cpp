@@ -110,6 +110,11 @@ float SimulationBox::renderRadius() const
     return m_renderRadius;
 }
 
+bool SimulationBox::isPeriodic(size_t axis) const
+{
+    return axis < m_periodic.size() ? m_periodic[axis] : false;
+}
+
 void SimulationBox::wrapPosition(bx::Vec3 &position) const
 {
     if (m_periodic[0])

@@ -23,6 +23,13 @@ struct PatchyParticleData
     std::vector<int32_t> bondIds;
 };
 
+  struct NearestNeighborData
+  {
+    uint32_t neighborIndex = 0;
+    float distance = 0.0f;
+    bx::Vec3 displacement{0.0f, 0.0f, 0.0f};
+  };
+
 class ParticleSystem
 {
   public:
@@ -42,6 +49,11 @@ class ParticleSystem
     const std::vector<Particle> &particles() const;
     bool hasPatchyMetadata() const;
     const std::vector<PatchyParticleData> &patchyMetadata() const;
+    void clearNeighborAnalysis();
+    void resizeNeighborAnalysis(size_t count);
+    bool hasNeighborAnalysis() const;
+    std::vector<std::vector<NearestNeighborData>> &neighborAnalysis();
+    const std::vector<std::vector<NearestNeighborData>> &neighborAnalysis() const;
 
     void render(bgfx::ViewId viewId, bgfx::ProgramHandle program, const float *parentTransform,
           uint64_t renderState, const bx::Vec3 &positionOffset = {0.0f, 0.0f, 0.0f},
@@ -57,5 +69,6 @@ class ParticleSystem
     std::unique_ptr<ParticleType> m_particleType;
     std::vector<Particle> m_particles;
     std::vector<PatchyParticleData> m_patchyMetadata;
+    std::vector<std::vector<NearestNeighborData>> m_neighborAnalysis;
     std::vector<std::vector<float>> m_instanceDataPerPart;
 };

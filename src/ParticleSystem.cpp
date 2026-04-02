@@ -75,6 +75,7 @@ void ParticleSystem::clear()
 {
     m_particles.clear();
     m_patchyMetadata.clear();
+    m_neighborAnalysis.clear();
 }
 
 void ParticleSystem::addParticle(const Particle &particle)
@@ -110,6 +111,32 @@ bool ParticleSystem::hasPatchyMetadata() const
 const std::vector<PatchyParticleData> &ParticleSystem::patchyMetadata() const
 {
     return m_patchyMetadata;
+}
+
+void ParticleSystem::clearNeighborAnalysis()
+{
+    m_neighborAnalysis.clear();
+}
+
+void ParticleSystem::resizeNeighborAnalysis(size_t count)
+{
+    m_neighborAnalysis.clear();
+    m_neighborAnalysis.resize(count);
+}
+
+bool ParticleSystem::hasNeighborAnalysis() const
+{
+    return !m_neighborAnalysis.empty() && m_neighborAnalysis.size() == m_particles.size();
+}
+
+std::vector<std::vector<NearestNeighborData>> &ParticleSystem::neighborAnalysis()
+{
+    return m_neighborAnalysis;
+}
+
+const std::vector<std::vector<NearestNeighborData>> &ParticleSystem::neighborAnalysis() const
+{
+    return m_neighborAnalysis;
 }
 
 void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
@@ -204,14 +231,32 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
             continue;
         }
 
-        bgfx::InstanceDataBuffer idb;
-        bgfx::allocInstanceDataBuffer(&idb, visibleCount, kInstanceStrideBytes);
-        std::memcpy(idb.data, instanceData.data(),
-                    static_cast<size_t>(visibleCount) * kInstanceStrideBytes);
+        uint32_t submittedInstanceCount = 0;
+        while (submittedInstanceCount < visibleCount)
+        {
+            const uint32_t remainingInstanceCount = visibleCount - submittedInstanceCount;
+            const uint32_t availableInstanceCount =
+                bgfx::getAvailInstanceDataBuffer(remainingInstanceCount, kInstanceStrideBytes);
+            if (availableInstanceCount == 0)
+            {
+                break;
+            }
 
-        part.mesh->bind();
-        bgfx::setInstanceDataBuffer(&idb);
-        bgfx::setState(renderState);
-        bgfx::submit(viewId, program);
+            const uint32_t batchInstanceCount =
+                bx::min<uint32_t>(remainingInstanceCount, availableInstanceCount);
+            bgfx::InstanceDataBuffer idb;
+            bgfx::allocInstanceDataBuffer(&idb, batchInstanceCount, kInstanceStrideBytes);
+            std::memcpy(idb.data,
+                        instanceData.data()
+                            + static_cast<size_t>(submittedInstanceCount) * kInstanceFloatCount,
+                        static_cast<size_t>(batchInstanceCount) * kInstanceStrideBytes);
+
+            part.mesh->bind();
+            bgfx::setInstanceDataBuffer(&idb);
+            bgfx::setState(renderState);
+            bgfx::submit(viewId, program);
+
+            submittedInstanceCount += batchInstanceCount;
+        }
     }
 }

@@ -189,6 +189,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             if (viewerState.bondModeEnabled)
             {
                 viewerState.mobilityModeEnabled = false;
+                viewerState.nearestNeighborModeEnabled = false;
             }
             markPickDirty = true;
         }
@@ -200,6 +201,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             if (viewerState.mobilityModeEnabled)
             {
                 viewerState.bondModeEnabled = false;
+                viewerState.nearestNeighborModeEnabled = false;
             }
             markPickDirty = true;
         }
@@ -294,6 +296,38 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 markPickDirty = true;
             }
         }        
+    }
+
+    if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        float neighborCutoffFactor = viewerState.neighborCutoffFactor;
+        if (ImGui::SliderFloat("Neighbor cutoff factor", &neighborCutoffFactor,
+                               1.0f, 3.0f, "%.2f"))
+        {
+            viewerState.neighborCutoffFactor = neighborCutoffFactor;
+            viewerState.neighborAnalysisValid = false;
+            particleSystem.clearNeighborAnalysis();
+            markPickDirty = true;
+        }
+
+        if (ImGui::Button("Find neighbors"))
+        {
+            viewerState.pendingFindNeighbors = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Toggle neighbor mode (Shift-N)"))
+        {
+            viewerState.nearestNeighborModeEnabled = !viewerState.nearestNeighborModeEnabled;
+            if (viewerState.nearestNeighborModeEnabled)
+            {
+                viewerState.bondModeEnabled = false;
+                viewerState.mobilityModeEnabled = false;
+            }
+            markPickDirty = true;
+        }
+
+        ImGui::Text("Neighbors: %s",
+                    viewerState.neighborAnalysisValid ? "computed" : "not computed");
     }
 
     if (markPickDirty)

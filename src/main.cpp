@@ -240,6 +240,7 @@ constexpr float kOrientationEpsilon = 1.0e-6f;
 constexpr float kParticleSizeScaleStep = 0.01f;
 constexpr float kMinParticleSizeScale = 0.01f;
 constexpr uint8_t kLightingLevelCount = 30u;
+constexpr uint32_t kMaxNeighborsPerParticle = 50u;
 constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
 float s_uiScrollX = 0.0f;
 float s_uiScrollY = 0.0f;
@@ -277,6 +278,13 @@ struct BondRenderSystems
     uint16_t cylinderSlices = 0u;
     uint16_t sphereStacks = 0u;
     uint16_t sphereSlices = 0u;
+};
+
+struct NeighborCellAddress
+{
+    int x = 0;
+    int y = 0;
+    int z = 0;
 };
 
 struct PolygonRenderSystem
@@ -586,6 +594,280 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
               << "): " << radiusSum << std::endl;
 }
 
+void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &particleSystem)
+{
+    viewerState.neighborAnalysisValid = false;
+    particleSystem.clearNeighborAnalysis();
+}
+
+bool usesPeriodicNeighborGrid(const ViewerState &viewerState,
+                              const SimulationBox &simulationBox)
+{
+    if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
+    {
+        return false;
+    }
+
+    if (!simulationBox.isPeriodic(0) || !simulationBox.isPeriodic(1))
+    {
+        return false;
+    }
+
+    if (viewerState.fileDimensionality == TrajectoryReader::Dimensionality::ThreeDimensional
+        && !simulationBox.isPeriodic(2))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+float wrapNeighborDelta(float delta, float extent)
+{
+    if (extent <= 0.0f)
+    {
+        return delta;
+    }
+
+    const float halfExtent = 0.5f * extent;
+    while (delta > halfExtent)
+    {
+        delta -= extent;
+    }
+    while (delta < -halfExtent)
+    {
+        delta += extent;
+    }
+    return delta;
+}
+
+void addNeighborRelation(std::vector<NearestNeighborData> &neighbors, uint32_t neighborIndex,
+                         const bx::Vec3 &displacement, float distance)
+{
+    if (neighbors.size() >= kMaxNeighborsPerParticle)
+    {
+        return;
+    }
+
+    neighbors.push_back(NearestNeighborData{
+        .neighborIndex = neighborIndex,
+        .distance = distance,
+        .displacement = displacement,
+    });
+}
+
+void findNearestNeighbors(const ViewerState &viewerState, const SimulationBox &simulationBox,
+                          ParticleSystem &particleSystem)
+{
+    const std::vector<Particle> &particles = particleSystem.particles();
+    particleSystem.resizeNeighborAnalysis(particles.size());
+    if (particles.empty())
+    {
+        return;
+    }
+
+    const bool isThreeDimensional =
+        viewerState.fileDimensionality == TrajectoryReader::Dimensionality::ThreeDimensional;
+    const bool periodicGrid = usesPeriodicNeighborGrid(viewerState, simulationBox);
+
+    float maxDiameter = 0.0f;
+    bx::Vec3 minPosition = particles.front().position;
+    bx::Vec3 maxPosition = particles.front().position;
+    for (const Particle &particle : particles)
+    {
+        maxDiameter = bx::max(maxDiameter, 2.0f * particleRadius(particle));
+        minPosition.x = bx::min(minPosition.x, particle.position.x);
+        minPosition.y = bx::min(minPosition.y, particle.position.y);
+        maxPosition.x = bx::max(maxPosition.x, particle.position.x);
+        maxPosition.y = bx::max(maxPosition.y, particle.position.y);
+        if (isThreeDimensional)
+        {
+            minPosition.z = bx::min(minPosition.z, particle.position.z);
+            maxPosition.z = bx::max(maxPosition.z, particle.position.z);
+        }
+    }
+
+    const float minimumCellSize = bx::max(maxDiameter * viewerState.neighborCutoffFactor,
+                                          1.0e-6f);
+    const bx::Vec3 periodicMinBounds = simulationBox.minBounds();
+    const bx::Vec3 periodicBoxSize = simulationBox.size();
+
+    bx::Vec3 origin = periodicGrid ? periodicMinBounds : minPosition;
+    bx::Vec3 extent = periodicGrid ? periodicBoxSize
+                                   : bx::Vec3{maxPosition.x - minPosition.x,
+                                              maxPosition.y - minPosition.y,
+                                              isThreeDimensional
+                                                  ? (maxPosition.z - minPosition.z)
+                                                  : 0.0f};
+    if (!periodicGrid)
+    {
+        extent.x = bx::max(extent.x, minimumCellSize);
+        extent.y = bx::max(extent.y, minimumCellSize);
+        extent.z = isThreeDimensional ? bx::max(extent.z, minimumCellSize) : minimumCellSize;
+    }
+
+    auto cellCountForExtent = [&](float axisExtent) {
+        if (periodicGrid)
+        {
+            return bx::max(1, int(std::floor(axisExtent / minimumCellSize)));
+        }
+        return bx::max(1, int(std::ceil(axisExtent / minimumCellSize)));
+    };
+
+    const int cellCountX = cellCountForExtent(extent.x);
+    const int cellCountY = cellCountForExtent(extent.y);
+    const int cellCountZ = isThreeDimensional ? cellCountForExtent(extent.z) : 1;
+
+    const float cellSizeX = periodicGrid ? extent.x / float(cellCountX) : minimumCellSize;
+    const float cellSizeY = periodicGrid ? extent.y / float(cellCountY) : minimumCellSize;
+    const float cellSizeZ = isThreeDimensional
+                                ? (periodicGrid ? extent.z / float(cellCountZ) : minimumCellSize)
+                                : minimumCellSize;
+
+    auto coordinateToCell = [&](float coordinate, float axisOrigin, float axisExtent,
+                                float axisCellSize, int axisCellCount) {
+        if (axisCellCount <= 1)
+        {
+            return 0;
+        }
+
+        float relative = coordinate - axisOrigin;
+        if (periodicGrid)
+        {
+            while (relative < 0.0f)
+            {
+                relative += axisExtent;
+            }
+            while (relative >= axisExtent)
+            {
+                relative -= axisExtent;
+            }
+        }
+
+        const int cellIndex = static_cast<int>(std::floor(relative / axisCellSize));
+        return std::clamp(cellIndex, 0, axisCellCount - 1);
+    };
+
+    auto flattenCell = [&](int x, int y, int z) {
+        return x + cellCountX * (y + cellCountY * z);
+    };
+
+    std::vector<NeighborCellAddress> particleCells(particles.size());
+    std::vector<std::vector<uint32_t>> cells(
+        static_cast<size_t>(cellCountX * cellCountY * cellCountZ));
+    for (size_t particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+    {
+        const Particle &particle = particles[particleIndex];
+        const int cellX = coordinateToCell(particle.position.x, origin.x, extent.x,
+                                           cellSizeX, cellCountX);
+        const int cellY = coordinateToCell(particle.position.y, origin.y, extent.y,
+                                           cellSizeY, cellCountY);
+        const int cellZ = isThreeDimensional
+                              ? coordinateToCell(particle.position.z, origin.z, extent.z,
+                                                 cellSizeZ, cellCountZ)
+                              : 0;
+        particleCells[particleIndex] = NeighborCellAddress{cellX, cellY, cellZ};
+        cells[flattenCell(cellX, cellY, cellZ)].push_back(static_cast<uint32_t>(particleIndex));
+    }
+
+    std::vector<std::vector<NearestNeighborData>> &neighborLists = particleSystem.neighborAnalysis();
+    for (size_t particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+    {
+        const Particle &particle = particles[particleIndex];
+        const NeighborCellAddress sourceCell = particleCells[particleIndex];
+        std::vector<int> uniqueNeighborCells;
+        uniqueNeighborCells.reserve(isThreeDimensional ? 27u : 9u);
+        for (int offsetZ = (isThreeDimensional ? -1 : 0);
+             offsetZ <= (isThreeDimensional ? 1 : 0); ++offsetZ)
+        {
+            for (int offsetY = -1; offsetY <= 1; ++offsetY)
+            {
+                for (int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    int neighborCellX = sourceCell.x + offsetX;
+                    int neighborCellY = sourceCell.y + offsetY;
+                    int neighborCellZ = sourceCell.z + offsetZ;
+
+                    if (periodicGrid)
+                    {
+                        neighborCellX = (neighborCellX % cellCountX + cellCountX) % cellCountX;
+                        neighborCellY = (neighborCellY % cellCountY + cellCountY) % cellCountY;
+                        if (isThreeDimensional)
+                        {
+                            neighborCellZ = (neighborCellZ % cellCountZ + cellCountZ) % cellCountZ;
+                        }
+                        else
+                        {
+                            neighborCellZ = 0;
+                        }
+                    }
+                    else if (neighborCellX < 0 || neighborCellX >= cellCountX
+                             || neighborCellY < 0 || neighborCellY >= cellCountY
+                             || neighborCellZ < 0 || neighborCellZ >= cellCountZ)
+                    {
+                        continue;
+                    }
+
+                    const int flattenedNeighborCell =
+                        flattenCell(neighborCellX, neighborCellY, neighborCellZ);
+                    if (std::find(uniqueNeighborCells.begin(), uniqueNeighborCells.end(),
+                                  flattenedNeighborCell)
+                        != uniqueNeighborCells.end())
+                    {
+                        continue;
+                    }
+                    uniqueNeighborCells.push_back(flattenedNeighborCell);
+                }
+            }
+        }
+
+        for (int flattenedNeighborCell : uniqueNeighborCells)
+        {
+            const std::vector<uint32_t> &cellParticles = cells[flattenedNeighborCell];
+                    for (uint32_t neighborIndex : cellParticles)
+                    {
+                        if (neighborIndex <= particleIndex)
+                        {
+                            continue;
+                        }
+
+                        const Particle &neighborParticle = particles[neighborIndex];
+                        bx::Vec3 displacement = {
+                            neighborParticle.position.x - particle.position.x,
+                            neighborParticle.position.y - particle.position.y,
+                            isThreeDimensional
+                                ? (neighborParticle.position.z - particle.position.z)
+                                : 0.0f,
+                        };
+                        if (periodicGrid)
+                        {
+                            displacement.x = wrapNeighborDelta(displacement.x, extent.x);
+                            displacement.y = wrapNeighborDelta(displacement.y, extent.y);
+                            if (isThreeDimensional)
+                            {
+                                displacement.z = wrapNeighborDelta(displacement.z, extent.z);
+                            }
+                        }
+
+                        const float cutoffDistance = viewerState.neighborCutoffFactor
+                                                     * (particleRadius(particle)
+                                                        + particleRadius(neighborParticle));
+                        const float distance = bx::length(displacement);
+                        if (distance >= cutoffDistance)
+                        {
+                            continue;
+                        }
+
+                        addNeighborRelation(neighborLists[particleIndex], neighborIndex,
+                                            displacement, distance);
+                        addNeighborRelation(neighborLists[neighborIndex],
+                                            static_cast<uint32_t>(particleIndex),
+                                            bx::mul(displacement, -1.0f), distance);
+                    }
+        }
+    }
+}
+
 bx::Vec3 rotatePatchDirection(const std::array<float, 9> &rotationMatrix,
                              const bx::Vec3 &direction)
 {
@@ -844,13 +1126,6 @@ void ensureBondRenderSystems(const bgfx::VertexLayout &layout, uint16_t sphereSt
                              uint16_t sphereSlices, const ParticleSystem &particleSystem,
                              BondRenderSystems &bondRenderSystems)
 {
-    if (!particleSystem.hasPatchyMetadata())
-    {
-        bondRenderSystems.cylinderSystem.reset();
-        bondRenderSystems.nodeSystem.reset();
-        return;
-    }
-
     if (!bondRenderSystems.cylinderSystem || bondRenderSystems.cylinderSlices != sphereSlices)
     {
         bondRenderSystems.cylinderSystem = std::make_unique<ParticleSystem>(
@@ -981,6 +1256,94 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
                                              nullptr, false,
                                              selectedParticleIds, nullptr, usePickColors,
                                              cutPlaneEnabled, cutPlaneSceneZ);
+    }
+}
+
+void rebuildNearestNeighborRenderSystems(const ParticleSystem &particleSystem,
+                                         const SimulationBox &simulationBox,
+                                         const bx::Vec3 &positionOffset,
+                                         bool wrapToPeriodicBox,
+                                         BondRenderSystems &neighborRenderSystems)
+{
+    if (!particleSystem.hasNeighborAnalysis() || !neighborRenderSystems.cylinderSystem
+        || !neighborRenderSystems.nodeSystem)
+    {
+        return;
+    }
+
+    neighborRenderSystems.cylinderSystem->clear();
+    neighborRenderSystems.nodeSystem->clear();
+
+    const auto displayedPositionFor = [&](const bx::Vec3 &rawPosition) {
+        bx::Vec3 displayedPosition = {rawPosition.x + positionOffset.x,
+                                      rawPosition.y + positionOffset.y,
+                                      rawPosition.z + positionOffset.z};
+        if (wrapToPeriodicBox)
+        {
+            simulationBox.wrapPosition(displayedPosition);
+        }
+        return displayedPosition;
+    };
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    for (size_t particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+    {
+        const Particle &particle = particles[particleIndex];
+        if (!particle.visible)
+        {
+            continue;
+        }
+
+        const bx::Vec3 displayedSourcePosition = displayedPositionFor(particle.position);
+
+        Particle nodeParticle;
+        nodeParticle.id = particle.id;
+        nodeParticle.position = displayedSourcePosition;
+        nodeParticle.baseColor = particle.baseColor;
+        nodeParticle.color = particle.color;
+        nodeParticle.visible = true;
+        nodeParticle.sizeParams[0] = 0.25f * particleRadius(particle);
+        nodeParticle.sizeParams[1] = nodeParticle.sizeParams[0];
+        nodeParticle.sizeParams[2] = nodeParticle.sizeParams[0];
+        neighborRenderSystems.nodeSystem->addParticle(nodeParticle);
+
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            if (neighbor.neighborIndex >= particles.size())
+            {
+                continue;
+            }
+
+            const Particle &neighborParticle = particles[neighbor.neighborIndex];
+            if (!neighborParticle.visible)
+            {
+                continue;
+            }
+
+            const bx::Vec3 halfDisplacement = bx::mul(neighbor.displacement, 0.5f);
+            const float cylinderLength = bx::length(halfDisplacement);
+            if (cylinderLength <= 1.0e-6f)
+            {
+                continue;
+            }
+
+            Particle cylinderParticle;
+            cylinderParticle.id = particle.id;
+            cylinderParticle.position = {
+                displayedSourcePosition.x + 0.5f * halfDisplacement.x,
+                displayedSourcePosition.y + 0.5f * halfDisplacement.y,
+                displayedSourcePosition.z + 0.5f * halfDisplacement.z,
+            };
+            cylinderParticle.direction = halfDisplacement;
+            cylinderParticle.baseColor = particle.baseColor;
+            cylinderParticle.color = particle.color;
+            cylinderParticle.visible = true;
+            cylinderParticle.sizeParams[0] = 0.125f * particleRadius(particle);
+            cylinderParticle.sizeParams[1] = cylinderLength;
+            neighborRenderSystems.cylinderSystem->addParticle(cylinderParticle);
+        }
     }
 }
 
@@ -1327,6 +1690,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                     if (state->bondModeEnabled)
                     {
                         state->mobilityModeEnabled = false;
+                        state->nearestNeighborModeEnabled = false;
                     }
                     markPickBufferDirty(*state);
                 }
@@ -1361,6 +1725,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                 if (state->mobilityModeEnabled)
                 {
                     state->bondModeEnabled = false;
+                    state->nearestNeighborModeEnabled = false;
                 }
                 markPickBufferDirty(*state);
             }
@@ -1370,6 +1735,18 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                     (static_cast<uint8_t>(state->colorMode) + 1u)
                     % static_cast<uint8_t>(ColorMode::Count);
                 state->colorMode = static_cast<ColorMode>(nextMode);
+            }
+            break;
+        case GLFW_KEY_N:
+            if (action == GLFW_PRESS && (mods & GLFW_MOD_SHIFT) != 0)
+            {
+                state->nearestNeighborModeEnabled = !state->nearestNeighborModeEnabled;
+                if (state->nearestNeighborModeEnabled)
+                {
+                    state->bondModeEnabled = false;
+                    state->mobilityModeEnabled = false;
+                }
+                markPickBufferDirty(*state);
             }
             break;
         case GLFW_KEY_S:
@@ -1643,6 +2020,7 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         viewerState.previousRawPositions = std::move(previousRawPositions);
         viewerState.hasPreviousFramePositions = true;
         noteEncounteredParticleTypes(viewerState, particleSystem);
+        invalidateNeighborAnalysis(viewerState, particleSystem);
         applyParticleVisibilityFilters(particleSystem, viewerState);
         markPickBufferDirty(viewerState);
         return;
@@ -1718,6 +2096,14 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         selectBondedNeighbors(particleSystem, viewerState.selectedIds);
         viewerState.pendingSelectBonded = false;
+        markPickBufferDirty(viewerState);
+    }
+
+    if (viewerState.pendingFindNeighbors)
+    {
+        findNearestNeighbors(viewerState, simulationBox, particleSystem);
+        viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
+        viewerState.pendingFindNeighbors = false;
         markPickBufferDirty(viewerState);
     }
 
@@ -1804,6 +2190,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         particleSystem.setType(createParticleType(layout, particleFileType,
                                                   sphereStacks, sphereSlices));
+        invalidateNeighborAnalysis(viewerState, particleSystem);
         if (!hasValidParticleMeshes(particleSystem))
         {
             std::cerr << "Failed to rebuild " << particleTypeName(particleFileType)
@@ -2110,6 +2497,7 @@ int main(int argc, char **argv)
         ParticleSystem mobilitySystem(createArrowParticleType(layout, kDefaultArrowSlices));
         PatchRenderSystems patchRenderSystems;
         BondRenderSystems bondRenderSystems;
+        BondRenderSystems nearestNeighborRenderSystems;
         PolygonRenderSystems polygonRenderSystems;
         TrajectoryReader::FileType particleFileType = TrajectoryReader::FileType::Sphere;
 
@@ -2164,6 +2552,7 @@ int main(int argc, char **argv)
                 else
                 {
                     noteEncounteredParticleTypes(viewerState, particleSystem);
+                    invalidateNeighborAnalysis(viewerState, particleSystem);
                     applyParticleVisibilityFilters(particleSystem, viewerState);
                     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
                 }
@@ -2329,10 +2718,28 @@ int main(int argc, char **argv)
                                          viewerState.wrapParticlesToBox,
                                          bondRenderSystems);
             }
+            ensureBondRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
+                                    nearestNeighborRenderSystems);
+            if (viewerState.neighborAnalysisValid)
+            {
+                rebuildNearestNeighborRenderSystems(particleSystem, simulationBox,
+                                                    viewerState.particleTranslation,
+                                                    viewerState.wrapParticlesToBox,
+                                                    nearestNeighborRenderSystems);
+            }
 
             if (viewerState.bondModeEnabled)
             {
                 renderBondRenderSystems(bondRenderSystems, kMainView, program,
+                                        sceneTransform, kParticleRenderState,
+                                        viewerState.particleSizeScale,
+                                        &viewerState.selectedIds, false,
+                                        viewerState.cutPlaneEnabled,
+                                        viewerState.cutPlaneSceneZ);
+            }
+            else if (viewerState.nearestNeighborModeEnabled && viewerState.neighborAnalysisValid)
+            {
+                renderBondRenderSystems(nearestNeighborRenderSystems, kMainView, program,
                                         sceneTransform, kParticleRenderState,
                                         viewerState.particleSizeScale,
                                         &viewerState.selectedIds, false,
@@ -2415,6 +2822,17 @@ int main(int argc, char **argv)
                 {
                     renderBondRenderSystems(bondRenderSystems, kPickView, pickProgram,
                                             sceneTransform, kParticleRenderState,
+                                            viewerState.particleSizeScale,
+                                            nullptr, true,
+                                            viewerState.cutPlaneEnabled,
+                                            viewerState.cutPlaneSceneZ);
+                }
+                else if (viewerState.nearestNeighborModeEnabled
+                         && viewerState.neighborAnalysisValid)
+                {
+                    renderBondRenderSystems(nearestNeighborRenderSystems, kPickView,
+                                            pickProgram, sceneTransform,
+                                            kParticleRenderState,
                                             viewerState.particleSizeScale,
                                             nullptr, true,
                                             viewerState.cutPlaneEnabled,

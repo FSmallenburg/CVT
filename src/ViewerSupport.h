@@ -60,6 +60,10 @@ struct ViewerState
     bool wrapParticlesToBox = true;
     TrajectoryReader::Dimensionality fileDimensionality =
         TrajectoryReader::Dimensionality::ThreeDimensional;
+    float neighborCutoffFactor = 1.3f;
+    bool neighborAnalysisValid = false;
+    bool pendingFindNeighbors = false;
+    bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     uint8_t maxSeenParticleTypeIndex = 0u;
     std::unordered_set<uint32_t> selectedIds;

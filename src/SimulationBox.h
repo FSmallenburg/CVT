@@ -26,6 +26,7 @@ class SimulationBox
     bx::Vec3 center() const;
     Shape shape() const;
     float renderRadius() const;
+    bool isPeriodic(size_t axis) const;
 
     void wrapPosition(bx::Vec3 &position) const;
     bx::Vec3 nearestImage(bx::Vec3 delta) const;
