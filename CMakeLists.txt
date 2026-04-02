@@ -65,6 +65,7 @@ add_executable(cvt
     src/SphereType.cpp
     src/TrajectoryReader.cpp
     src/ViewerSupport.cpp
+    src/ViewerUi.cpp
     third_party/bgfx/3rdparty/dear-imgui/imgui.cpp
     third_party/bgfx/3rdparty/dear-imgui/imgui_draw.cpp
     third_party/bgfx/3rdparty/dear-imgui/imgui_tables.cpp
