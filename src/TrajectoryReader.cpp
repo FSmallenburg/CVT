@@ -306,6 +306,7 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
         }
 
         Particle particle;
+        particle.typeLabel = label;
         particle.id = static_cast<uint32_t>(particleIndex + 1);
         particle.position = {x, y, z};
         particle.baseColor = colorFromLetter(label);

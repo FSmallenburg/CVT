@@ -8,6 +8,7 @@
 class Particle
 {
   public:
+    char typeLabel = 'A';
     bx::Vec3 position{0.0f, 0.0f, 0.0f};
     bx::Vec3 rotation{0.0f, 0.0f, 0.0f};
     bx::Vec3 direction{0.0f, 0.0f, 1.0f};

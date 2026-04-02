@@ -42,6 +42,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <cmath>
@@ -675,7 +676,7 @@ void printVisibleParticleCount(const ParticleSystem &particleSystem)
     std::cout << "Visible particles: " << countVisibleParticles(particleSystem) << std::endl;
 }
 
-void drawViewerControls(ViewerState &viewerState, const ParticleSystem &particleSystem,
+void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem,
                         TrajectoryReader::FileType particleFileType,
                         const std::string &loadedPath,
                         size_t currentFrame, size_t totalFrames,
@@ -708,6 +709,21 @@ void drawViewerControls(ViewerState &viewerState, const ParticleSystem &particle
     ImGui::Text("Particle type: %s", particleTypeName(particleFileType));
     ImGui::Text("Visible: %zu", countVisibleParticles(particleSystem));
     ImGui::Text("Selected: %zu", viewerState.selectedIds.size());
+
+    if (totalFrames > 1)
+    {
+        const int displayedFrameNumber = static_cast<int>(currentFrame) + 1;
+        ImGui::Text("Frame: %d / %zu", displayedFrameNumber, totalFrames);
+
+        int sliderFrameNumber = displayedFrameNumber;
+        if (ImGui::SliderInt("##FrameSlider", &sliderFrameNumber, 1,
+                                static_cast<int>(totalFrames), ""))
+        {
+            viewerState.pendingFrameIndex = sliderFrameNumber - 1;
+        }
+    }
+
+
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Basic controls", ImGuiTreeNodeFlags_DefaultOpen))
@@ -773,6 +789,26 @@ void drawViewerControls(ViewerState &viewerState, const ParticleSystem &particle
             viewerState.colorMode = static_cast<ColorMode>(colorModeIndex);
         }
 
+        if (viewerState.maxSeenParticleTypeIndex > 0u)
+        {
+            ImGui::TextUnformatted("Particle types");
+            for (uint8_t typeIndex = 0; typeIndex <= viewerState.maxSeenParticleTypeIndex;
+                 ++typeIndex)
+            {
+                bool typeVisible = viewerState.particleTypeVisible[typeIndex];
+                const char label[] = {
+                    static_cast<char>('a' + bx::min<uint8_t>(typeIndex, 25u)),
+                    '\0',
+                };
+                if (ImGui::Checkbox(label, &typeVisible))
+                {
+                    viewerState.particleTypeVisible[typeIndex] = typeVisible;
+                    applyParticleVisibilityFilters(particleSystem, viewerState);
+                    markPickDirty = true;
+                }
+            }
+        }
+
         bool cutPlaneEnabled = viewerState.cutPlaneEnabled;
         if (ImGui::Checkbox("Enable cut plane", &cutPlaneEnabled))
         {
@@ -788,19 +824,6 @@ void drawViewerControls(ViewerState &viewerState, const ParticleSystem &particle
             {
                 viewerState.cutPlaneSceneZ = cutPlaneSceneZ;
                 markPickDirty = true;
-            }
-        }
-
-        if (totalFrames > 1)
-        {
-            const int displayedFrameNumber = static_cast<int>(currentFrame) + 1;
-            ImGui::Text("Frame: %d / %zu", displayedFrameNumber, totalFrames);
-
-            int sliderFrameNumber = displayedFrameNumber;
-            if (ImGui::SliderInt("##FrameSlider", &sliderFrameNumber, 1,
-                                 static_cast<int>(totalFrames), ""))
-            {
-                viewerState.pendingFrameIndex = sliderFrameNumber - 1;
             }
         }
 
@@ -1889,7 +1912,8 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         currentFrame = requestedFrame;
         viewerState.previousRawPositions = std::move(previousRawPositions);
         viewerState.hasPreviousFramePositions = true;
-        applyHiddenParticles(particleSystem, viewerState.hiddenIds);
+        noteEncounteredParticleTypes(viewerState, particleSystem);
+        applyParticleVisibilityFilters(particleSystem, viewerState);
         markPickBufferDirty(viewerState);
         return;
     }
@@ -1914,8 +1938,12 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
 {
     if (viewerState.pendingHideSelected)
     {
-        if (hideSelectedParticles(particleSystem, viewerState.selectedIds,
-                                  viewerState.hiddenIds))
+        const bool hiddenChanged = hideSelectedParticles(particleSystem,
+                                                         viewerState.selectedIds,
+                                                         viewerState.hiddenIds);
+        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                      viewerState);
+        if (hiddenChanged || visibilityChanged)
         {
             markPickBufferDirty(viewerState);
         }
@@ -1926,7 +1954,10 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
 
     if (viewerState.pendingRevealAll)
     {
-        if (revealAllParticles(particleSystem, viewerState.hiddenIds))
+        const bool hiddenChanged = revealAllParticles(particleSystem, viewerState.hiddenIds);
+        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                      viewerState);
+        if (hiddenChanged || visibilityChanged)
         {
             markPickBufferDirty(viewerState);
         }
@@ -2401,7 +2432,8 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    applyHiddenParticles(particleSystem, viewerState.hiddenIds);
+                    noteEncounteredParticleTypes(viewerState, particleSystem);
+                    applyParticleVisibilityFilters(particleSystem, viewerState);
                     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
                 }
             }

@@ -1,6 +1,7 @@
 #include "ViewerSupport.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace
@@ -139,6 +140,50 @@ bool applyHiddenParticles(ParticleSystem &particleSystem,
     for (Particle &particle : particleSystem.particles())
     {
         const bool shouldBeVisible = !hiddenIds.contains(particle.id);
+        if (particle.visible != shouldBeVisible)
+        {
+            particle.visible = shouldBeVisible;
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+uint8_t particleTypeIndex(char label)
+{
+    const unsigned char unsignedLabel = static_cast<unsigned char>(label);
+    if (!std::isalpha(unsignedLabel))
+    {
+        return 0u;
+    }
+
+    const int index = std::toupper(unsignedLabel) - 'A';
+    return static_cast<uint8_t>(std::clamp(index, 0, int(kParticlePaletteColorCount) - 1));
+}
+
+bool isParticleTypeVisible(const ViewerState &state, char typeLabel)
+{
+    return state.particleTypeVisible[particleTypeIndex(typeLabel)];
+}
+
+void noteEncounteredParticleTypes(ViewerState &state, const ParticleSystem &particleSystem)
+{
+    for (const Particle &particle : particleSystem.particles())
+    {
+        state.maxSeenParticleTypeIndex = std::max(state.maxSeenParticleTypeIndex,
+                                                  particleTypeIndex(particle.typeLabel));
+    }
+}
+
+bool applyParticleVisibilityFilters(ParticleSystem &particleSystem,
+                                    const ViewerState &state)
+{
+    bool changed = false;
+    for (Particle &particle : particleSystem.particles())
+    {
+        const bool shouldBeVisible = !state.hiddenIds.contains(particle.id)
+                                     && isParticleTypeVisible(state, particle.typeLabel);
         if (particle.visible != shouldBeVisible)
         {
             particle.visible = shouldBeVisible;

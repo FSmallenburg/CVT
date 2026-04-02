@@ -1,11 +1,13 @@
 #pragma once
 
+#include "ColorPalette.h"
 #include "ParticleSystem.h"
 #include "SimulationBox.h"
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_set>
@@ -26,6 +28,7 @@ struct ViewerState
     ViewerState()
     {
         bx::mtxIdentity(sceneRotation);
+        particleTypeVisible.fill(true);
     }
 
     bool showUi = true;
@@ -54,6 +57,8 @@ struct ViewerState
     uint8_t lightingLevelIndex = 14u;
     float particleSizeScale = 1.0f;
     bool wrapParticlesToBox = true;
+    std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
+    uint8_t maxSeenParticleTypeIndex = 0u;
     std::unordered_set<uint32_t> selectedIds;
     std::unordered_set<uint32_t> hiddenIds;
     bool pendingHideSelected = false;
@@ -118,6 +123,11 @@ bool revealAllParticles(ParticleSystem &particleSystem,
                         std::unordered_set<uint32_t> &hiddenIds);
 bool applyHiddenParticles(ParticleSystem &particleSystem,
                           const std::unordered_set<uint32_t> &hiddenIds);
+uint8_t particleTypeIndex(char label);
+bool isParticleTypeVisible(const ViewerState &state, char typeLabel);
+void noteEncounteredParticleTypes(ViewerState &state, const ParticleSystem &particleSystem);
+bool applyParticleVisibilityFilters(ParticleSystem &particleSystem,
+                                    const ViewerState &state);
 void resolvePendingPickRequest(ViewerState &state, const PickResources &pickResources);
 void destroyPickResources(PickResources &pickResources);
 bool createPickResources(PickResources &pickResources, uint16_t width, uint16_t height);
