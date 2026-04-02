@@ -2,6 +2,7 @@
 #include "ColorPalette.h"
 #include "CubeType.h"
 #include "CylinderType.h"
+#include "ImGuiBgfx.h"
 #include "Mesh.h"
 #include "PatchCapType.h"
 #include "PatchConeType.h"
@@ -20,6 +21,7 @@
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 #include <bx/math.h>
+#include <dear-imgui/imgui.h>
 #include <GLFW/glfw3.h>
 #if BX_PLATFORM_LINUX
 #define GLFW_EXPOSE_NATIVE_X11
@@ -224,6 +226,7 @@ constexpr double kClickDragThresholdPixels = 4.0;
 constexpr bgfx::ViewId kMainView = 0;
 constexpr bgfx::ViewId kPickView = 1;
 constexpr bgfx::ViewId kBlitView = 2;
+constexpr bgfx::ViewId kUiView = 3;
 constexpr float kSphereRadius = 1.0f;
 constexpr uint16_t kDefaultArrowSlices = 12;
 constexpr uint16_t kDefaultSphereStacks = 10;
@@ -237,7 +240,12 @@ constexpr float kMinParticleSizeScale = 0.01f;
 constexpr uint8_t kLightingLevelCount = 30u;
 constexpr float kMinLightingScale = 0.3f;
 constexpr float kMaxLightingScale = 1.75f;
+constexpr float kUiPanelWidthFraction = 1.0f / 3.0f;
+constexpr uint16_t kMinUiPanelWidth = 360u;
+constexpr uint16_t kMinRenderViewportWidth = 640u;
 constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
+float s_uiScrollX = 0.0f;
+float s_uiScrollY = 0.0f;
 // Particle meshes are authored so triangles wind counter-clockwise when viewed from
 // outside the particle. BGFX_STATE_FRONT_CCW therefore classifies those outward-facing
 // triangles as front faces, and BGFX_STATE_CULL_CCW maps to back-face culling on the
@@ -632,9 +640,197 @@ size_t countVisibleParticles(const ParticleSystem &particleSystem)
         [](const Particle &particle) { return particle.visible; }));
 }
 
+uint16_t computeUiPanelWidth(uint16_t windowWidth, bool showUi)
+{
+    if (!showUi || !ImGuiBgfx::isAvailable() || windowWidth <= kMinRenderViewportWidth)
+    {
+        return 0u;
+    }
+
+    const uint16_t maxUiPanelWidth = static_cast<uint16_t>(windowWidth - kMinRenderViewportWidth);
+    uint16_t requestedWidth = static_cast<uint16_t>(
+        std::lround(static_cast<float>(windowWidth) * kUiPanelWidthFraction));
+    requestedWidth = static_cast<uint16_t>(bx::max<uint16_t>(requestedWidth, kMinUiPanelWidth));
+    return bx::min<uint16_t>(requestedWidth, maxUiPanelWidth);
+}
+
+uint16_t computeRenderViewportWidth(uint16_t windowWidth, bool showUi)
+{
+    const uint16_t uiPanelWidth = computeUiPanelWidth(windowWidth, showUi);
+    return static_cast<uint16_t>(bx::max<int>(int(windowWidth) - int(uiPanelWidth), 1));
+}
+
+bool isInRenderViewport(const ViewerState &viewerState, double mouseX, double mouseY)
+{
+    return viewerState.renderViewportWidth > 0
+           && viewerState.renderViewportHeight > 0
+           && mouseX >= 0.0
+           && mouseY >= 0.0
+           && mouseX < static_cast<double>(viewerState.renderViewportWidth)
+           && mouseY < static_cast<double>(viewerState.renderViewportHeight);
+}
+
 void printVisibleParticleCount(const ParticleSystem &particleSystem)
 {
     std::cout << "Visible particles: " << countVisibleParticles(particleSystem) << std::endl;
+}
+
+void drawViewerControls(ViewerState &viewerState, const ParticleSystem &particleSystem,
+                        TrajectoryReader::FileType particleFileType,
+                        const std::string &loadedPath,
+                        size_t currentFrame, size_t totalFrames,
+                        uint16_t windowWidth, uint16_t windowHeight,
+                        float cutPlaneMinSceneZ, float cutPlaneMaxSceneZ)
+{
+    if (!viewerState.showUi || !ImGuiBgfx::isAvailable())
+    {
+        return;
+    }
+
+    bool markPickDirty = false;
+
+    const float panelX = static_cast<float>(windowWidth - viewerState.uiPanelWidth);
+    ImGui::SetNextWindowPos(ImVec2(panelX, 0.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(viewerState.uiPanelWidth),
+                                    static_cast<float>(windowHeight)),
+                             ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.92f);
+    const ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove
+                                         | ImGuiWindowFlags_NoResize
+                                         | ImGuiWindowFlags_NoCollapse;
+    if (!ImGui::Begin("Viewer Controls", &viewerState.showUi, windowFlags))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("File: %s", loadedPath.empty() ? "<none>" : loadedPath.c_str());
+    ImGui::Text("Particle type: %s", particleTypeName(particleFileType));
+    ImGui::Text("Visible: %zu", countVisibleParticles(particleSystem));
+    ImGui::Text("Selected: %zu", viewerState.selectedIds.size());
+    ImGui::Separator();
+
+    if (ImGui::CollapsingHeader("Basic controls", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        if (ImGui::Checkbox("Show simulation box", &viewerState.showBox))
+        {
+            markPickDirty = true;
+        }
+        if (ImGui::Checkbox("Wrap particles to box", &viewerState.wrapParticlesToBox))
+        {
+            markPickDirty = true;
+        }
+
+        bool bondModeEnabled = viewerState.bondModeEnabled;
+        if (ImGui::Checkbox("Bond mode", &bondModeEnabled))
+        {
+            viewerState.bondModeEnabled = bondModeEnabled;
+            if (viewerState.bondModeEnabled)
+            {
+                viewerState.mobilityModeEnabled = false;
+            }
+            markPickDirty = true;
+        }
+
+        bool mobilityModeEnabled = viewerState.mobilityModeEnabled;
+        if (ImGui::Checkbox("Mobility mode", &mobilityModeEnabled))
+        {
+            viewerState.mobilityModeEnabled = mobilityModeEnabled;
+            if (viewerState.mobilityModeEnabled)
+            {
+                viewerState.bondModeEnabled = false;
+            }
+            markPickDirty = true;
+        }
+
+        float particleSizeScale = viewerState.particleSizeScale;
+        if (ImGui::SliderFloat("Particle size scale", &particleSizeScale,
+                               kMinParticleSizeScale, 3.0f, "%.2f"))
+        {
+            viewerState.particleSizeScale = particleSizeScale;
+            markPickDirty = true;
+        }
+
+        int lightingLevelIndex = viewerState.lightingLevelIndex;
+        if (ImGui::SliderInt("Lighting level", &lightingLevelIndex, 0,
+                             int(kLightingLevelCount - 1u)))
+        {
+            viewerState.lightingLevelIndex = static_cast<uint8_t>(lightingLevelIndex);
+        }
+        ImGui::Text("Light scale: %.2f", lightingScaleFromIndex(viewerState.lightingLevelIndex));
+
+        static const char *kColorModeLabels[] = {
+            "File default",
+            "Palette cycle",
+            "Uniform",
+            "Orientation",
+            "Bond count",
+        };
+        int colorModeIndex = static_cast<int>(viewerState.colorMode);
+        if (ImGui::Combo("Color mode", &colorModeIndex,
+                         kColorModeLabels, IM_ARRAYSIZE(kColorModeLabels)))
+        {
+            viewerState.colorMode = static_cast<ColorMode>(colorModeIndex);
+        }
+
+        bool cutPlaneEnabled = viewerState.cutPlaneEnabled;
+        if (ImGui::Checkbox("Enable cut plane", &cutPlaneEnabled))
+        {
+            viewerState.cutPlaneEnabled = cutPlaneEnabled;
+            viewerState.cutPlaneSceneZ = cutPlaneEnabled ? 0.0f : cutPlaneMaxSceneZ;
+            markPickDirty = true;
+        }
+        if (viewerState.cutPlaneEnabled)
+        {
+            float cutPlaneSceneZ = viewerState.cutPlaneSceneZ;
+            if (ImGui::SliderFloat("Cut plane z", &cutPlaneSceneZ,
+                                   cutPlaneMinSceneZ, cutPlaneMaxSceneZ, "%.2f"))
+            {
+                viewerState.cutPlaneSceneZ = cutPlaneSceneZ;
+                markPickDirty = true;
+            }
+        }
+
+        if (totalFrames > 1)
+        {
+            const int displayedFrameNumber = static_cast<int>(currentFrame) + 1;
+            ImGui::Text("Frame: %d / %zu", displayedFrameNumber, totalFrames);
+
+            int sliderFrameNumber = displayedFrameNumber;
+            if (ImGui::SliderInt("##FrameSlider", &sliderFrameNumber, 1,
+                                 static_cast<int>(totalFrames), ""))
+            {
+                viewerState.pendingFrameIndex = sliderFrameNumber - 1;
+            }
+        }
+
+        if (ImGui::Button("Hide selected"))
+        {
+            viewerState.pendingHideSelected = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reveal all"))
+        {
+            viewerState.pendingRevealAll = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear selection"))
+        {
+            viewerState.pendingUnselect = true;
+        }
+
+        if (ImGui::Button("Screenshot"))
+        {
+            viewerState.pendingScreenshotRequest = true;
+        }
+    }
+
+    if (markPickDirty)
+    {
+        markPickBufferDirty(viewerState);
+    }
+
+    ImGui::End();
 }
 
 bx::Vec3 rotatePatchDirection(const std::array<float, 9> &rotationMatrix,
@@ -1228,10 +1424,26 @@ static void glfw_errorCallback(int error, const char *description)
     fprintf(stderr, "GLFW error %d: %s\n", error, description);
 }
 
+static void glfw_charCallback(GLFWwindow *window, unsigned int codePoint)
+{
+    ViewerState *state = getViewerState(window);
+    if (state == nullptr)
+    {
+        return;
+    }
+
+    ImGuiBgfx::addInputCharacter(codePoint);
+}
+
 static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     ViewerState *state = getViewerState(window);
-    if (state == nullptr || action == GLFW_RELEASE)
+    if (state == nullptr)
+    {
+        return;
+    }
+
+    if (action == GLFW_RELEASE)
     {
         return;
     }
@@ -1240,6 +1452,9 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
     {
         case GLFW_KEY_F1:
             if(action == GLFW_PRESS) state->showStats = !state->showStats;
+            break;
+        case GLFW_KEY_F2:
+            if(action == GLFW_PRESS) state->showUi = !state->showUi;
             break;
         case GLFW_KEY_ENTER:
         case GLFW_KEY_KP_ENTER:
@@ -1423,7 +1638,11 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
         case GLFW_KEY_U:
             if (action == GLFW_PRESS)
             {
-                if ((mods & GLFW_MOD_SHIFT) == 0)
+                if ((mods & GLFW_MOD_SHIFT) != 0)
+                {
+                    state->showUi = !state->showUi;
+                }
+                else
                 {
                     state->pendingUnselect = true;
                 }
@@ -1482,10 +1701,22 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
         return;
     }
 
+    if (action == GLFW_PRESS || action == GLFW_RELEASE)
+    {
+        ImGuiBgfx::addMouseButtonEvent(button, action == GLFW_PRESS);
+    }
+
+    const bool wantsMouseCapture = ImGuiBgfx::wantsMouseCapture();
+    const bool inRenderViewport = isInRenderViewport(*state, state->mouseX, state->mouseY);
+
     if (button == GLFW_MOUSE_BUTTON_LEFT)
     {
         if (action == GLFW_PRESS)
         {
+            if (wantsMouseCapture || !inRenderViewport)
+            {
+                return;
+            }
             state->leftMouseDown = true;
             state->leftDragActive = false;
             state->leftTranslateMode = (mods & GLFW_MOD_SHIFT) != 0;
@@ -1496,14 +1727,14 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
         }
         else if (action == GLFW_RELEASE)
         {
-            if (!state->leftDragActive && !state->leftTranslateMode)
+            if (!wantsMouseCapture && inRenderViewport
+                && !state->leftDragActive && !state->leftTranslateMode)
             {
-                int width = 0;
-                int height = 0;
-                glfwGetWindowSize(window, &width, &height);
                 state->pendingPickRequest = true;
-                state->pendingPickX = clampPickCoordinate(state->mouseX, width);
-                state->pendingPickY = clampPickCoordinate(state->mouseY, height);
+                state->pendingPickX = clampPickCoordinate(state->mouseX,
+                                                          state->renderViewportWidth);
+                state->pendingPickY = clampPickCoordinate(state->mouseY,
+                                                          state->renderViewportHeight);
             }
 
             state->leftMouseDown = false;
@@ -1513,16 +1744,29 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
     }
     else if (button == GLFW_MOUSE_BUTTON_RIGHT)
     {
-        state->rightMouseDown = (action == GLFW_PRESS);
-        state->lastMouseX = state->mouseX;
-        state->lastMouseY = state->mouseY;
+        if (action == GLFW_PRESS)
+        {
+            if (wantsMouseCapture || !inRenderViewport)
+            {
+                return;
+            }
+            state->rightMouseDown = true;
+            state->lastMouseX = state->mouseX;
+            state->lastMouseY = state->mouseY;
+        }
+        else if (action == GLFW_RELEASE)
+        {
+            state->rightMouseDown = false;
+        }
     }
 }
 
 static void glfw_scrollCallback(GLFWwindow *window, double xoffset, double yoffset)
 {
     ViewerState *state = getViewerState(window);
-    if (state == nullptr || yoffset == 0.0)
+    s_uiScrollX += static_cast<float>(xoffset);
+    s_uiScrollY += static_cast<float>(yoffset);
+    if (state == nullptr || yoffset == 0.0 || ImGuiBgfx::wantsMouseCapture())
     {
         return;
     }
@@ -1556,18 +1800,31 @@ static void handleWindowResize(GLFWwindow *window, int &width, int &height,
 {
     const int oldWidth = width;
     const int oldHeight = height;
+    const uint16_t oldRenderWidth = viewerState.renderViewportWidth;
+    const uint16_t oldRenderHeight = viewerState.renderViewportHeight;
     glfwGetWindowSize(window, &width, &height);
-    if (width == oldWidth && height == oldHeight)
+    const uint16_t newRenderWidth = computeRenderViewportWidth(static_cast<uint16_t>(width),
+                                                               viewerState.showUi);
+    const uint16_t newRenderHeight = static_cast<uint16_t>(bx::max(height, 1));
+    viewerState.uiPanelWidth = computeUiPanelWidth(static_cast<uint16_t>(width), viewerState.showUi);
+    viewerState.renderViewportWidth = newRenderWidth;
+    viewerState.renderViewportHeight = newRenderHeight;
+    if (width == oldWidth && height == oldHeight
+        && newRenderWidth == oldRenderWidth && newRenderHeight == oldRenderHeight)
     {
         return;
     }
 
-    bgfx::reset((uint32_t)width, (uint32_t)height, BGFX_RESET_VSYNC);
-    bgfx::setViewRect(kMainView, 0, 0, bgfx::BackbufferRatio::Equal);
+    if (width != oldWidth || height != oldHeight)
+    {
+        bgfx::reset((uint32_t)width, (uint32_t)height, BGFX_RESET_VSYNC);
+    }
+    bgfx::setViewRect(kMainView, 0, 0, viewerState.renderViewportWidth,
+                      viewerState.renderViewportHeight);
     viewerState.pendingPickReadback = false;
     markPickBufferDirty(viewerState);
-    if (!createPickResources(pickResources, static_cast<uint16_t>(width),
-                             static_cast<uint16_t>(height)))
+    if (!createPickResources(pickResources, viewerState.renderViewportWidth,
+                             viewerState.renderViewportHeight))
     {
         std::cerr << "GPU picking disabled after resize: "
                   << pickResources.disableReason << std::endl;
@@ -1596,6 +1853,11 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
     {
         requestedFrame = totalFrames - 1;
     }
+    else if (viewerState.pendingFrameIndex >= 0)
+    {
+        requestedFrame = std::min<size_t>(static_cast<size_t>(viewerState.pendingFrameIndex),
+                                          totalFrames - 1);
+    }
     else if (viewerState.pendingFrameStep < 0 && currentFrame > 0)
     {
         requestedFrame = currentFrame - 1;
@@ -1606,6 +1868,7 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
     }
 
     viewerState.pendingFrameStep = 0;
+    viewerState.pendingFrameIndex = -1;
     viewerState.jumpToFirstFrame = false;
     viewerState.jumpToLastFrame = false;
 
@@ -2036,11 +2299,12 @@ int main(int argc, char **argv)
     if (!glfwInit())
         return 1;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow *window = glfwCreateWindow(1024, 768, "Colloid Visualization Tool", nullptr, nullptr);
+    GLFWwindow *window = glfwCreateWindow(1536, 768, "Colloid Visualization Tool", nullptr, nullptr);
     if (!window)
         return 1;
     glfwSetWindowUserPointer(window, &viewerState);
     glfwSetKeyCallback(window, glfw_keyCallback);
+    glfwSetCharCallback(window, glfw_charCallback);
     glfwSetCursorPosCallback(window, glfw_mouseCallback);
     glfwSetMouseButtonCallback(window, glfw_mouseButtonCallback);
     glfwSetScrollCallback(window, glfw_scrollCallback);
@@ -2148,7 +2412,21 @@ int main(int argc, char **argv)
             exitCode = 1;
         }
 
-        float initialAspectRatio = height > 0 ? float(width) / float(height) : 1.0f;
+        bgfx::setViewClear(kMainView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.0f, 0);
+        bgfx::setViewClear(kPickView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
+        const bool uiAvailable = ImGuiBgfx::create(kUiView);
+        if (!uiAvailable)
+        {
+            std::cerr << "Dear ImGui UI unavailable; continuing without UI." << std::endl;
+        }
+        viewerState.uiPanelWidth = computeUiPanelWidth(static_cast<uint16_t>(width), viewerState.showUi);
+        viewerState.renderViewportWidth = computeRenderViewportWidth(static_cast<uint16_t>(width),
+                                                                     viewerState.showUi);
+        viewerState.renderViewportHeight = static_cast<uint16_t>(bx::max(height, 1));
+
+        float initialAspectRatio = height > 0
+                                       ? float(viewerState.renderViewportWidth) / float(height)
+                                       : 1.0f;
         float cameraDistance = computeInitialCameraDistance(simulationBox);
         bx::Vec3 cameraPos = {0.0f, 0.0f, cameraDistance};
         float orthoBaseHalfHeight =
@@ -2161,11 +2439,10 @@ int main(int argc, char **argv)
                                                           + simulationBox.size().z * simulationBox.size().z);
         const float cutPlaneMaxSceneZ = cameraDistance;
 
-        bgfx::setViewClear(kMainView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.0f, 0);
-        bgfx::setViewRect(kMainView, 0, 0, bgfx::BackbufferRatio::Equal);
-        bgfx::setViewClear(kPickView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
-        if (!createPickResources(pickResources, static_cast<uint16_t>(width),
-                                 static_cast<uint16_t>(height)))
+        bgfx::setViewRect(kMainView, 0, 0, viewerState.renderViewportWidth,
+                          viewerState.renderViewportHeight);
+        if (!createPickResources(pickResources, viewerState.renderViewportWidth,
+                                 viewerState.renderViewportHeight))
         {
             std::cerr << "GPU picking disabled: " << pickResources.disableReason << std::endl;
         }
@@ -2192,6 +2469,7 @@ int main(int argc, char **argv)
         }
 
         uint32_t lastSubmittedFrame = 0;
+    double lastUiFrameTime = glfwGetTime();
 
         while (exitCode == 0 && !glfwWindowShouldClose(window))
         {
@@ -2223,15 +2501,35 @@ int main(int argc, char **argv)
             float view[16];
             float proj[16];
             bx::mtxLookAt(view, cameraPos, s_cameraTarget, bx::Vec3{0.0f, 1.0f, 0.0f}, bx::Handedness::Right);
-            float currentAspectRatio = height > 0 ? float(width) / float(height) : 1.0f;
+            bgfx::setViewRect(kMainView, 0, 0, viewerState.renderViewportWidth,
+                              viewerState.renderViewportHeight);
+            float currentAspectRatio = height > 0
+                                           ? float(viewerState.renderViewportWidth) / float(height)
+                                           : 1.0f;
             float zoomedHalfHeight = orthoBaseHalfHeight * viewerState.orthoZoom;
             float zoomedHalfWidth = currentAspectRatio * zoomedHalfHeight;
-            updateMouseDrivenInteraction(viewerState, width, height, zoomedHalfWidth,
-                                         zoomedHalfHeight);
+            updateMouseDrivenInteraction(viewerState, viewerState.renderViewportWidth,
+                                         viewerState.renderViewportHeight,
+                                         zoomedHalfWidth, zoomedHalfHeight);
             bx::mtxOrtho(proj, -zoomedHalfWidth, zoomedHalfWidth, -zoomedHalfHeight,
                          zoomedHalfHeight, nearPlane, farPlane, 0.0f,
                          bgfx::getCaps()->homogeneousDepth, bx::Handedness::Right);
             bgfx::setViewTransform(kMainView, view, proj);
+
+            const double currentUiFrameTime = glfwGetTime();
+            const float uiDeltaTime = static_cast<float>(currentUiFrameTime - lastUiFrameTime);
+            lastUiFrameTime = currentUiFrameTime;
+            ImGuiBgfx::beginFrame(window, static_cast<uint16_t>(width),
+                                  static_cast<uint16_t>(height),
+                                  viewerState.mouseX, viewerState.mouseY,
+                                  uiDeltaTime, s_uiScrollX, s_uiScrollY);
+            s_uiScrollX = 0.0f;
+            s_uiScrollY = 0.0f;
+
+            drawViewerControls(viewerState, particleSystem, particleFileType,
+                               loadedPath, currentFrame, totalFrames,
+                               static_cast<uint16_t>(width), static_cast<uint16_t>(height),
+                               cutPlaneMinSceneZ, cutPlaneMaxSceneZ);
 
             // Set fixed world-space light direction from the shaded point toward the light.
             s_lightDir = bx::normalize(s_lightDir);
@@ -2428,9 +2726,12 @@ int main(int argc, char **argv)
 #else
             bgfx::setDebug(BGFX_DEBUG_NONE);
 #endif
+            ImGuiBgfx::endFrame();
             if (viewerState.pendingScreenshotRequest)
             {
                 const std::string screenshotPath = makeTimestampedScreenshotPath();
+                screenshotCallback.queueViewportCrop(screenshotPath,
+                                                     viewerState.renderViewportWidth);
                 bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath.c_str());
                 viewerState.pendingScreenshotRequest = false;
             }
@@ -2439,6 +2740,7 @@ int main(int argc, char **argv)
         }
 
         destroyPickResources(pickResources);
+        ImGuiBgfx::destroy();
         if (bgfx::isValid(pickProgram))
         {
             bgfx::destroy(pickProgram);

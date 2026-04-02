@@ -47,6 +47,8 @@ add_executable(cvt
     src/ColorPalette.cpp
     src/CubeType.cpp
     src/CylinderType.cpp
+    src/ImGuiBgfx.cpp
+    src/ImGuiCompat.cpp
     src/main.cpp
     src/ArrowType.cpp
     src/Mesh.cpp
@@ -63,6 +65,10 @@ add_executable(cvt
     src/SphereType.cpp
     src/TrajectoryReader.cpp
     src/ViewerSupport.cpp
+    third_party/bgfx/3rdparty/dear-imgui/imgui.cpp
+    third_party/bgfx/3rdparty/dear-imgui/imgui_draw.cpp
+    third_party/bgfx/3rdparty/dear-imgui/imgui_tables.cpp
+    third_party/bgfx/3rdparty/dear-imgui/imgui_widgets.cpp
 )
 
 target_compile_definitions(cvt PRIVATE
@@ -78,6 +84,8 @@ endif()
 
 target_include_directories(cvt PRIVATE 
     ${BGFX_DIR}/include
+    ${BGFX_DIR}/3rdparty
+    ${BGFX_DIR}/examples/common/imgui
     ${BX_DIR}/include
     ${BIMG_DIR}/include
 )

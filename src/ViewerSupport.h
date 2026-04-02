@@ -28,8 +28,12 @@ struct ViewerState
         bx::mtxIdentity(sceneRotation);
     }
 
+    bool showUi = true;
     bool showStats = false;
     bool showBox = true;
+    uint16_t renderViewportWidth = 0;
+    uint16_t renderViewportHeight = 0;
+    uint16_t uiPanelWidth = 0;
     double mouseX = 0.0;
     double mouseY = 0.0;
     double lastMouseX = 0.0;
@@ -43,6 +47,7 @@ struct ViewerState
     float sceneRotation[16];
     bx::Vec3 particleTranslation{0.0f, 0.0f, 0.0f};
     int pendingFrameStep = 0;
+    int pendingFrameIndex = -1;
     bool jumpToFirstFrame = false;
     bool jumpToLastFrame = false;
     float orthoZoom = 1.0f;

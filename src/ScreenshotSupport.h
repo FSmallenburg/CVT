@@ -3,11 +3,14 @@
 #include <bgfx/bgfx.h>
 
 #include <string>
+#include <unordered_map>
 
 class ScreenshotCallback final : public bgfx::CallbackI
 {
   public:
     ScreenshotCallback() = default;
+
+    void queueViewportCrop(const std::string &filePath, uint32_t viewportWidth);
 
     void fatal(const char *_filePath, uint16_t _line, bgfx::Fatal::Enum _code,
                const char *_str) override;
@@ -33,6 +36,10 @@ class ScreenshotCallback final : public bgfx::CallbackI
     bool writeScreenshot(const char *filePath, uint32_t width, uint32_t height,
                          uint32_t pitch, bgfx::TextureFormat::Enum format,
                          const void *data, bool yflip);
+
+    uint32_t takeQueuedViewportCrop(const char *filePath);
+
+    std::unordered_map<std::string, uint32_t> pendingViewportCrops;
 };
 
 std::string makeTimestampedScreenshotPath();

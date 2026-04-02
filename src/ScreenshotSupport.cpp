@@ -6,12 +6,14 @@
 #include <bx/file.h>
 
 #include <chrono>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
+#include <vector>
 
 namespace
 {
@@ -77,10 +79,50 @@ void ScreenshotCallback::cacheWrite(uint64_t, const void *, uint32_t)
 {
 }
 
+void ScreenshotCallback::queueViewportCrop(const std::string &filePath, uint32_t viewportWidth)
+{
+    if (!filePath.empty())
+    {
+        pendingViewportCrops[filePath] = viewportWidth;
+    }
+}
+
 void ScreenshotCallback::screenShot(const char *filePath, uint32_t width, uint32_t height,
                                     uint32_t pitch, bgfx::TextureFormat::Enum format,
                                     const void *data, uint32_t, bool yflip)
 {
+    const uint32_t viewportWidth = takeQueuedViewportCrop(filePath);
+    if (viewportWidth > 0 && viewportWidth < width && data != nullptr)
+    {
+        const uint32_t bytesPerPixel =
+            bimg::getBitsPerPixel(static_cast<bimg::TextureFormat::Enum>(format)) / 8u;
+        const uint32_t croppedPitch = viewportWidth * bytesPerPixel;
+        if (bytesPerPixel > 0 && croppedPitch <= pitch)
+        {
+            std::vector<uint8_t> croppedData(static_cast<size_t>(croppedPitch) * height);
+            const uint8_t *sourceBytes = static_cast<const uint8_t *>(data);
+            for (uint32_t row = 0; row < height; ++row)
+            {
+                std::memcpy(croppedData.data() + static_cast<size_t>(row) * croppedPitch,
+                            sourceBytes + static_cast<size_t>(row) * pitch,
+                            croppedPitch);
+            }
+
+            if (!writeScreenshot(filePath, viewportWidth, height, croppedPitch, format,
+                                 croppedData.data(), yflip))
+            {
+                std::fprintf(stderr, "Failed to write screenshot: %s\n",
+                             filePath != nullptr ? filePath : "<unknown>");
+                std::fflush(stderr);
+                return;
+            }
+
+            std::printf("Saved snapshot: %s\n", filePath != nullptr ? filePath : "<unknown>");
+            std::fflush(stdout);
+            return;
+        }
+    }
+
     if (!writeScreenshot(filePath, width, height, pitch, format, data, yflip))
     {
         std::fprintf(stderr, "Failed to write screenshot: %s\n",
@@ -104,6 +146,24 @@ void ScreenshotCallback::captureEnd()
 
 void ScreenshotCallback::captureFrame(const void *, uint32_t)
 {
+}
+
+uint32_t ScreenshotCallback::takeQueuedViewportCrop(const char *filePath)
+{
+    if (filePath == nullptr)
+    {
+        return 0u;
+    }
+
+    const auto it = pendingViewportCrops.find(filePath);
+    if (it == pendingViewportCrops.end())
+    {
+        return 0u;
+    }
+
+    const uint32_t viewportWidth = it->second;
+    pendingViewportCrops.erase(it);
+    return viewportWidth;
 }
 
 bool ScreenshotCallback::writeScreenshot(const char *filePath, uint32_t width, uint32_t height,
