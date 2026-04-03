@@ -159,6 +159,7 @@ bool isInRenderViewport(const ViewerState &viewerState, double mouseX, double mo
 
 void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem,
                         const BondDiagramResources *bondDiagramResources,
+                        const StructureFactorResources *structureFactorResources,
                         TrajectoryReader::FileType particleFileType,
                         const std::string &loadedPath,
                         size_t currentFrame, size_t totalFrames,
@@ -345,148 +346,239 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
     if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        const bool supportsPsi6 =
-            viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
-        if (!supportsPsi6
-            && (viewerState.analysisColorMode
-                    == AnalysisColorMode::BondOrientationalOrderMagnitude
-                || viewerState.analysisColorMode
-                    == AnalysisColorMode::BondOrientationalOrderPhase))
+        if (ImGui::CollapsingHeader("Neighbor analysis"))
         {
-            viewerState.analysisColorMode = AnalysisColorMode::Disabled;
-            markColorDependentHelperSystemsDirty(viewerState);
-        }
-
-        float neighborCutoffFactor = viewerState.neighborCutoffFactor;
-        if (ImGui::SliderFloat("Neighbor cutoff factor", &neighborCutoffFactor,
-                               1.0f, 2.0f, "%.2f"))
-        {
-            viewerState.neighborCutoffFactor = neighborCutoffFactor;
-            viewerState.neighborAnalysisValid = false;
-            particleSystem.clearNeighborAnalysis();
-            markNearestNeighborRenderSystemsDirty(viewerState);
-            markBondDiagramGeometryDirty(viewerState);
-            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            const bool supportsPsi6 =
+                viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
+            if (!supportsPsi6
+                && (viewerState.analysisColorMode
+                        == AnalysisColorMode::BondOrientationalOrderMagnitude
+                    || viewerState.analysisColorMode
+                        == AnalysisColorMode::BondOrientationalOrderPhase))
             {
+                viewerState.analysisColorMode = AnalysisColorMode::Disabled;
                 markColorDependentHelperSystemsDirty(viewerState);
             }
-            viewerState.pendingFindNeighbors = viewerState.autoFindNeighbors;
-            markPickDirty = true;
-        }
 
-        if (ImGui::Button("Find neighbors"))
-        {
-            viewerState.pendingFindNeighbors = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::Checkbox("auto", &viewerState.autoFindNeighbors)
-            && viewerState.autoFindNeighbors
-            && !viewerState.neighborAnalysisValid)
-        {
-            viewerState.pendingFindNeighbors = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Toggle neighbor mode (Shift-N)"))
-        {
-            viewerState.nearestNeighborModeEnabled = !viewerState.nearestNeighborModeEnabled;
-            if (viewerState.nearestNeighborModeEnabled)
+            float neighborCutoffFactor = viewerState.neighborCutoffFactor;
+            if (ImGui::SliderFloat("Neighbor cutoff factor", &neighborCutoffFactor,
+                                1.0f, 2.0f, "%.2f"))
             {
-                viewerState.bondModeEnabled = false;
-                viewerState.mobilityModeEnabled = false;
-            }
-            markPickDirty = true;
-        }
-
-        ImGui::Text("Neighbors: %s",
-                    viewerState.neighborAnalysisValid ? "computed" : "not computed");
-
-        ImGui::BeginDisabled(!viewerState.neighborAnalysisValid);
-        int analysisColorModeIndex =
-            analysisColorModeComboIndex(viewerState.analysisColorMode);
-        if (supportsPsi6)
-        {
-            static const char *kAnalysisColorModeLabels2D[] = {
-                "None",
-                "Neighbor count",
-                "Bond-orientational order: magnitude",
-                "Bond-orientational order: phase",
-            };
-            if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
-                             kAnalysisColorModeLabels2D,
-                             IM_ARRAYSIZE(kAnalysisColorModeLabels2D)))
-            {
-                viewerState.analysisColorMode =
-                    analysisColorModeFromComboIndex(analysisColorModeIndex, true);
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-        }
-        else
-        {
-            static const char *kAnalysisColorModeLabels3D[] = {
-                "None",
-                "Neighbor count",
-            };
-            analysisColorModeIndex = bx::min(analysisColorModeIndex, 1);
-            if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
-                             kAnalysisColorModeLabels3D,
-                             IM_ARRAYSIZE(kAnalysisColorModeLabels3D)))
-            {
-                viewerState.analysisColorMode =
-                    analysisColorModeFromComboIndex(analysisColorModeIndex, false);
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-        }
-        ImGui::EndDisabled();
-
-        const bool usesBondOrientationalColor =
-            viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderMagnitude
-            || viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderPhase;
-        ImGui::BeginDisabled(!supportsPsi6 || !usesBondOrientationalColor);
-        int symmetryOrderIndex = int(viewerState.bondOrientationalOrder) - 2;
-        static const char *kBondOrientationalOrderLabels[] = {
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-        };
-        if (ImGui::Combo("Bond-order symmetry", &symmetryOrderIndex,
-                         kBondOrientationalOrderLabels,
-                         IM_ARRAYSIZE(kBondOrientationalOrderLabels)))
-        {
-            viewerState.bondOrientationalOrder =
-                static_cast<uint8_t>(symmetryOrderIndex + 2);
-            viewerState.pendingRefreshAnalysisResults = viewerState.neighborAnalysisValid;
-        }
-        ImGui::EndDisabled();
-
-        if (viewerState.neighborAnalysisValid
-            && ImGui::CollapsingHeader("Bond diagram"))
-        {
-            viewerState.bondDiagramRenderRequested = true;
-            ImGui::Separator();
-            if (bondDiagramResources != nullptr && bondDiagramResources->enabled
-                && bgfx::isValid(bondDiagramResources->colorTexture))
-            {
-                const float previewSize = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
-                ImGui::Image(bondDiagramResources->colorTexture,
-                             ImVec2(previewSize, previewSize));
-            }
-            else if (bondDiagramResources != nullptr
-                     && !bondDiagramResources->disableReason.empty())
-            {
-                ImGui::TextWrapped("Preview unavailable: %s",
-                                   bondDiagramResources->disableReason.c_str());
-            }
-
-            float bondDiagramPointScale = viewerState.bondDiagramPointScale;
-            if (ImGui::SliderFloat("Point size", &bondDiagramPointScale,
-                                   0.01f, 0.12f, "%.3f"))
-            {
-                viewerState.bondDiagramPointScale = bondDiagramPointScale;
+                viewerState.neighborCutoffFactor = neighborCutoffFactor;
+                viewerState.neighborAnalysisValid = false;
+                particleSystem.clearNeighborAnalysis();
+                markNearestNeighborRenderSystemsDirty(viewerState);
                 markBondDiagramGeometryDirty(viewerState);
+                if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+                {
+                    markColorDependentHelperSystemsDirty(viewerState);
+                }
+                viewerState.pendingFindNeighbors = viewerState.autoFindNeighbors;
+                markPickDirty = true;
+            }
+
+            if (ImGui::Button("Find neighbors"))
+            {
+                viewerState.pendingFindNeighbors = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Checkbox("auto", &viewerState.autoFindNeighbors)
+                && viewerState.autoFindNeighbors
+                && !viewerState.neighborAnalysisValid)
+            {
+                viewerState.pendingFindNeighbors = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Toggle neighbor mode (Shift-N)"))
+            {
+                viewerState.nearestNeighborModeEnabled = !viewerState.nearestNeighborModeEnabled;
+                if (viewerState.nearestNeighborModeEnabled)
+                {
+                    viewerState.bondModeEnabled = false;
+                    viewerState.mobilityModeEnabled = false;
+                }
+                markPickDirty = true;
+            }
+
+            ImGui::Text("Neighbors: %s",
+                        viewerState.neighborAnalysisValid ? "computed" : "not computed");
+
+            ImGui::BeginDisabled(!viewerState.neighborAnalysisValid);
+            int analysisColorModeIndex =
+                analysisColorModeComboIndex(viewerState.analysisColorMode);
+            if (supportsPsi6)
+            {
+                static const char *kAnalysisColorModeLabels2D[] = {
+                    "None",
+                    "Neighbor count",
+                    "Bond-orientational order: magnitude",
+                    "Bond-orientational order: phase",
+                };
+                if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
+                                kAnalysisColorModeLabels2D,
+                                IM_ARRAYSIZE(kAnalysisColorModeLabels2D)))
+                {
+                    viewerState.analysisColorMode =
+                        analysisColorModeFromComboIndex(analysisColorModeIndex, true);
+                    markColorDependentHelperSystemsDirty(viewerState);
+                }
+            }
+            else
+            {
+                static const char *kAnalysisColorModeLabels3D[] = {
+                    "None",
+                    "Neighbor count",
+                };
+                analysisColorModeIndex = bx::min(analysisColorModeIndex, 1);
+                if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
+                                kAnalysisColorModeLabels3D,
+                                IM_ARRAYSIZE(kAnalysisColorModeLabels3D)))
+                {
+                    viewerState.analysisColorMode =
+                        analysisColorModeFromComboIndex(analysisColorModeIndex, false);
+                    markColorDependentHelperSystemsDirty(viewerState);
+                }
+            }
+            ImGui::EndDisabled();
+
+            const bool usesBondOrientationalColor =
+                viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderMagnitude
+                || viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderPhase;
+            ImGui::BeginDisabled(!supportsPsi6 || !usesBondOrientationalColor);
+            int symmetryOrderIndex = int(viewerState.bondOrientationalOrder) - 2;
+            static const char *kBondOrientationalOrderLabels[] = {
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+            };
+            if (ImGui::Combo("Bond-order symmetry", &symmetryOrderIndex,
+                            kBondOrientationalOrderLabels,
+                            IM_ARRAYSIZE(kBondOrientationalOrderLabels)))
+            {
+                viewerState.bondOrientationalOrder =
+                    static_cast<uint8_t>(symmetryOrderIndex + 2);
+                viewerState.pendingRefreshAnalysisResults = viewerState.neighborAnalysisValid;
+            }
+            ImGui::EndDisabled();
+
+            if (viewerState.neighborAnalysisValid
+                && ImGui::CollapsingHeader("Bond diagram"))
+            {
+                viewerState.bondDiagramRenderRequested = true;
+                ImGui::Separator();
+                if (bondDiagramResources != nullptr && bondDiagramResources->enabled
+                    && bgfx::isValid(bondDiagramResources->colorTexture))
+                {
+                    const float sofqImageSize = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                    ImGui::Image(bondDiagramResources->colorTexture,
+                                ImVec2(sofqImageSize, sofqImageSize));
+                }
+                else if (bondDiagramResources != nullptr
+                        && !bondDiagramResources->disableReason.empty())
+                {
+                    ImGui::TextWrapped("Structure factor unavailable: %s",
+                                    bondDiagramResources->disableReason.c_str());
+                }
+
+                float bondDiagramPointScale = viewerState.bondDiagramPointScale;
+                if (ImGui::SliderFloat("Point size", &bondDiagramPointScale,
+                                    0.01f, 0.12f, "%.3f"))
+                {
+                    viewerState.bondDiagramPointScale = bondDiagramPointScale;
+                    markBondDiagramGeometryDirty(viewerState);
+                }
+            }         
+        }           
+
+        if (ImGui::CollapsingHeader("Structure factor"))
+        {
+            if (ImGui::Button("Compute struc"))
+            {
+                markStructureFactorDirty(viewerState);
+                viewerState.structureFactorPendingCompute = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Auto update##StructureFactor",
+                                &viewerState.structureFactorAutoUpdate)
+                && viewerState.structureFactorAutoUpdate
+                && viewerState.structureFactorDirty)
+            {
+                viewerState.structureFactorPendingCompute = true;
+            }
+
+            int maxMode = viewerState.structureFactorMaxModeX;
+            if (ImGui::SliderInt("Max |k-mode|", &maxMode, 4, 128))
+            {
+                viewerState.structureFactorMaxModeX = maxMode;
+                viewerState.structureFactorMaxModeY = maxMode;
+                markStructureFactorDirty(viewerState);
+            }
+
+            int sofqPixels = int(viewerState.structureFactorImageSize);
+            if (ImGui::SliderInt("Pixels", &sofqPixels, 64, 384))
+            {
+                viewerState.structureFactorImageSize =
+                    static_cast<uint16_t>(std::clamp(sofqPixels, 64, 384));
+                markStructureFactorDirty(viewerState);
+            }
+
+            bool logScale = viewerState.structureFactorLogScale;
+            if (ImGui::Checkbox("Log scale##StructureFactor", &logScale))
+            {
+                viewerState.structureFactorLogScale = logScale;
+                markStructureFactorDirty(viewerState);
+            }
+
+            bool suppressCentralPeak = viewerState.structureFactorSuppressCentralPeak;
+            if (ImGui::Checkbox("Suppress k=0 peak", &suppressCentralPeak))
+            {
+                viewerState.structureFactorSuppressCentralPeak = suppressCentralPeak;
+                markStructureFactorDirty(viewerState);
+            }
+
+            bool visibleOnly = viewerState.structureFactorUseVisibleParticlesOnly;
+            if (ImGui::Checkbox("Visible particles only", &visibleOnly))
+            {
+                viewerState.structureFactorUseVisibleParticlesOnly = visibleOnly;
+                markStructureFactorDirty(viewerState);
+            }
+
+            ImGui::Text("Status: %s",
+                        viewerState.structureFactorDirty ? "stale - recompute needed"
+                                                         : "up to date");
+
+            if (viewerState.structureFactorDirty && structureFactorResources != nullptr
+                && structureFactorResources->enabled)
+            {
+                ImGui::TextWrapped("The current structure factor is stale and no longer matches the scene orientation.");
+            }
+
+            if (structureFactorResources != nullptr && !structureFactorResources->statusText.empty())
+            {
+                ImGui::TextWrapped("%s", structureFactorResources->statusText.c_str());
+            }
+
+            if (structureFactorResources != nullptr && structureFactorResources->enabled
+                && bgfx::isValid(structureFactorResources->colorTexture))
+            {
+                ImGui::Text("Last compute: %.1f ms using %zu particles",
+                            structureFactorResources->computeMilliseconds,
+                            structureFactorResources->particleCount);
+                const float sofqImageSize = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                ImGui::Image(structureFactorResources->colorTexture,
+                             ImVec2(sofqImageSize, sofqImageSize));
+            }
+            else if (structureFactorResources != nullptr
+                     && !structureFactorResources->disableReason.empty())
+            {
+                ImGui::TextWrapped("Structure factor unavailable: %s",
+                                   structureFactorResources->disableReason.c_str());
             }
         }
+
+        
     }
 
     if (markPickDirty)

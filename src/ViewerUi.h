@@ -18,6 +18,7 @@ uint16_t computeRenderViewportWidth(uint16_t windowWidth, bool showUi);
 bool isInRenderViewport(const ViewerState &viewerState, double mouseX, double mouseY);
 void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem,
                         const BondDiagramResources *bondDiagramResources,
+                        const StructureFactorResources *structureFactorResources,
                         TrajectoryReader::FileType particleFileType,
                         const std::string &loadedPath,
                         size_t currentFrame, size_t totalFrames,

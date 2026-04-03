@@ -119,6 +119,15 @@ struct ViewerState
     bool bondDiagramViewDirty = true;
     bool bondDiagramRenderRequested = false;
     float bondDiagramPointScale = 0.05f;
+    bool structureFactorDirty = true;
+    bool structureFactorPendingCompute = false;
+    bool structureFactorAutoUpdate = false;
+    bool structureFactorLogScale = true;
+    bool structureFactorSuppressCentralPeak = true;
+    bool structureFactorUseVisibleParticlesOnly = false;
+    uint16_t structureFactorImageSize = 192u;
+    int structureFactorMaxModeX = 40;
+    int structureFactorMaxModeY = 40;
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
 };
@@ -148,6 +157,18 @@ struct BondDiagramResources
     std::string disableReason;
 };
 
+struct StructureFactorResources
+{
+    bgfx::TextureHandle colorTexture = BGFX_INVALID_HANDLE;
+    uint16_t width = 0;
+    uint16_t height = 0;
+    bool enabled = false;
+    std::string disableReason;
+    std::string statusText;
+    float computeMilliseconds = 0.0f;
+    size_t particleCount = 0;
+};
+
 float computeCutPlaneStep(const SimulationBox &simulationBox);
 uint16_t clampPickCoordinate(double value, int extent);
 uint16_t mapWindowYToPickY(uint16_t windowY, uint16_t height);
@@ -160,6 +181,7 @@ void markMobilitySystemDirty(ViewerState &state);
 void markNearestNeighborRenderSystemsDirty(ViewerState &state);
 void markBondDiagramGeometryDirty(ViewerState &state);
 void markBondDiagramViewDirty(ViewerState &state);
+void markStructureFactorDirty(ViewerState &state);
 void markPickBufferDirty(ViewerState &state);
 bool hasValidPickBuffer(const ViewerState &state);
 bool hideSelectedParticles(ParticleSystem &particleSystem,
@@ -182,6 +204,10 @@ bool createPickResources(PickResources &pickResources, uint16_t width, uint16_t 
 void destroyBondDiagramResources(BondDiagramResources &bondDiagramResources);
 bool createBondDiagramResources(BondDiagramResources &bondDiagramResources,
                                 uint16_t width, uint16_t height);
+void destroyStructureFactorResources(StructureFactorResources &structureFactorResources);
+bool updateStructureFactorTexture(StructureFactorResources &structureFactorResources,
+                                  uint16_t width, uint16_t height,
+                                  const std::vector<uint8_t> &rgba8Pixels);
 float computeInitialCameraDistance(const SimulationBox &simulationBox);
 float computeInitialFarPlane(float cameraDistance, const SimulationBox &simulationBox);
 float computeInitialOrthoHalfHeight(const SimulationBox &simulationBox, float aspectRatio);

@@ -9,6 +9,7 @@ namespace
 
 constexpr float kInitialViewMargin = 1.10f;
 constexpr uint32_t kPickBytesPerPixel = 4u;
+constexpr uint32_t kPreviewTextureBytesPerPixel = 4u;
 
 }
 
@@ -19,6 +20,11 @@ void markAllHelperSystemsDirty(ViewerState &state)
     state.nearestNeighborRenderSystemsDirty = true;
     state.polygonRenderSystemsDirty = true;
     state.mobilitySystemDirty = true;
+    state.structureFactorDirty = true;
+    if (state.structureFactorAutoUpdate)
+    {
+        state.structureFactorPendingCompute = true;
+    }
 }
 
 void markVisibilityDependentHelperSystemsDirty(ViewerState &state)
@@ -58,6 +64,15 @@ void markBondDiagramGeometryDirty(ViewerState &state)
 void markBondDiagramViewDirty(ViewerState &state)
 {
     state.bondDiagramViewDirty = true;
+}
+
+void markStructureFactorDirty(ViewerState &state)
+{
+    state.structureFactorDirty = true;
+    if (state.structureFactorAutoUpdate)
+    {
+        state.structureFactorPendingCompute = true;
+    }
 }
 
 float computeCutPlaneStep(const SimulationBox &simulationBox)
@@ -498,6 +513,98 @@ bool createBondDiagramResources(BondDiagramResources &bondDiagramResources,
     return true;
 }
 
+void destroyStructureFactorResources(StructureFactorResources &structureFactorResources)
+{
+    if (bgfx::isValid(structureFactorResources.colorTexture))
+    {
+        bgfx::destroy(structureFactorResources.colorTexture);
+    }
+
+    structureFactorResources.colorTexture = BGFX_INVALID_HANDLE;
+    structureFactorResources.width = 0;
+    structureFactorResources.height = 0;
+    structureFactorResources.enabled = false;
+    structureFactorResources.disableReason.clear();
+    structureFactorResources.statusText.clear();
+    structureFactorResources.computeMilliseconds = 0.0f;
+    structureFactorResources.particleCount = 0u;
+}
+
+bool updateStructureFactorTexture(StructureFactorResources &structureFactorResources,
+                                  uint16_t width, uint16_t height,
+                                  const std::vector<uint8_t> &rgba8Pixels)
+{
+    structureFactorResources.disableReason.clear();
+
+    if (width == 0 || height == 0)
+    {
+        structureFactorResources.enabled = false;
+        structureFactorResources.disableReason = "preview size is zero";
+        return false;
+    }
+
+    const size_t expectedSize =
+        size_t(width) * size_t(height) * size_t(kPreviewTextureBytesPerPixel);
+    if (rgba8Pixels.size() != expectedSize)
+    {
+        structureFactorResources.enabled = false;
+        structureFactorResources.disableReason = "invalid preview pixel data";
+        return false;
+    }
+
+    constexpr uint64_t kTextureFlags = BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT
+                                       | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+
+    bgfx::TextureFormat::Enum colorFormat = bgfx::TextureFormat::RGBA8;
+    if (!bgfx::isTextureValid(0, false, 1, colorFormat, kTextureFlags))
+    {
+        colorFormat = bgfx::TextureFormat::BGRA8;
+        if (!bgfx::isTextureValid(0, false, 1, colorFormat, kTextureFlags))
+        {
+            structureFactorResources.enabled = false;
+            structureFactorResources.disableReason = "RGBA8/BGRA8 preview texture unsupported";
+            return false;
+        }
+    }
+
+    std::vector<uint8_t> uploadPixels;
+    const uint8_t *uploadData = rgba8Pixels.data();
+    if (colorFormat == bgfx::TextureFormat::BGRA8)
+    {
+        uploadPixels = rgba8Pixels;
+        for (size_t index = 0; index + 3u < uploadPixels.size(); index += 4u)
+        {
+            std::swap(uploadPixels[index + 0u], uploadPixels[index + 2u]);
+        }
+        uploadData = uploadPixels.data();
+    }
+
+    const bool needsNewTexture = !bgfx::isValid(structureFactorResources.colorTexture)
+                                 || structureFactorResources.width != width
+                                 || structureFactorResources.height != height;
+    if (needsNewTexture)
+    {
+        destroyStructureFactorResources(structureFactorResources);
+        structureFactorResources.colorTexture =
+            bgfx::createTexture2D(width, height, false, 1, colorFormat, kTextureFlags);
+        if (!bgfx::isValid(structureFactorResources.colorTexture))
+        {
+            structureFactorResources.enabled = false;
+            structureFactorResources.disableReason = "failed to create preview texture";
+            return false;
+        }
+    }
+
+    const bgfx::Memory *memory = bgfx::copy(uploadData, static_cast<uint32_t>(expectedSize));
+    bgfx::updateTexture2D(structureFactorResources.colorTexture, 0, 0,
+                          0, 0, width, height, memory);
+
+    structureFactorResources.width = width;
+    structureFactorResources.height = height;
+    structureFactorResources.enabled = true;
+    return true;
+}
+
 float computeInitialCameraDistance(const SimulationBox &simulationBox)
 {
     const bx::Vec3 boxSize = simulationBox.size();
@@ -533,4 +640,5 @@ void applySceneRotation(ViewerState &state, float angleX, float angleY, float an
     bx::mtxMul(updatedRotation, state.sceneRotation, deltaRotation);
     bx::memCopy(state.sceneRotation, updatedRotation, sizeof(updatedRotation));
     markBondDiagramViewDirty(state);
+    markStructureFactorDirty(state);
 }

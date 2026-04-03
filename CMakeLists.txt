@@ -91,6 +91,7 @@ add_executable(cvt
     src/ScreenshotSupport.cpp
     src/SimulationBox.cpp
     src/SphereType.cpp
+    src/StructureFactor.cpp
     src/TrajectoryReader.cpp
     src/ViewerSupport.cpp
     src/ViewerUi.cpp

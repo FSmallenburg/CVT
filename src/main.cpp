@@ -15,6 +15,7 @@
 #include "ScreenshotSupport.h"
 #include "SimulationBox.h"
 #include "SphereType.h"
+#include "StructureFactor.h"
 #include "TrajectoryReader.h"
 #include "ViewerSupport.h"
 #include "ViewerUi.h"
@@ -52,6 +53,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <system_error>
 #include <vector>
 
@@ -838,6 +840,53 @@ void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &partic
     {
         markColorDependentHelperSystemsDirty(viewerState);
     }
+}
+
+void updateStructureFactorPreview(ViewerState &viewerState,
+                                  const SimulationBox &simulationBox,
+                                  const ParticleSystem &particleSystem,
+                                  StructureFactorResources &structureFactorResources)
+{
+    StructureFactorSettings settings;
+    settings.previewSize = viewerState.structureFactorImageSize;
+    settings.maxModeX = viewerState.structureFactorMaxModeX;
+    settings.maxModeY = viewerState.structureFactorMaxModeY;
+    settings.logScale = viewerState.structureFactorLogScale;
+    settings.suppressCentralPeak = viewerState.structureFactorSuppressCentralPeak;
+    settings.useVisibleParticlesOnly = viewerState.structureFactorUseVisibleParticlesOnly;
+    settings.allowOutOfPlaneModes =
+        viewerState.fileDimensionality == TrajectoryReader::Dimensionality::ThreeDimensional;
+    std::copy(std::begin(viewerState.sceneRotation), std::end(viewerState.sceneRotation),
+              settings.sceneRotation.begin());
+
+    StructureFactorImage image;
+    std::string error;
+    if (!computeStructureFactorImage(particleSystem, simulationBox, settings, image, error))
+    {
+        destroyStructureFactorResources(structureFactorResources);
+        structureFactorResources.statusText = error;
+        viewerState.structureFactorDirty = true;
+        return;
+    }
+
+    if (!updateStructureFactorTexture(structureFactorResources,
+                                      image.width, image.height, image.rgba8Pixels))
+    {
+        structureFactorResources.statusText =
+            structureFactorResources.disableReason.empty()
+                ? "Failed to upload the structure factor preview texture."
+                : structureFactorResources.disableReason;
+        viewerState.structureFactorDirty = true;
+        return;
+    }
+
+    structureFactorResources.computeMilliseconds = image.computeMilliseconds;
+    structureFactorResources.particleCount = image.particleCount;
+    std::ostringstream statusStream;
+    statusStream << "S(kx, ky) preview updated for " << image.particleCount
+                 << " particles.";
+    structureFactorResources.statusText = statusStream.str();
+    viewerState.structureFactorDirty = false;
 }
 
 bool usesPeriodicNeighborGrid(const ViewerState &viewerState,
@@ -2389,6 +2438,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                   const bgfx::VertexLayout &layout,
                                   TrajectoryReader::FileType particleFileType,
                                   const SimulationBox &simulationBox,
+                                  StructureFactorResources &structureFactorResources,
                                   float particleSizeScale,
                                   uint16_t &sphereStacks, uint16_t &sphereSlices,
                                   float cutPlaneStep, float cutPlaneMinSceneZ,
@@ -2504,6 +2554,13 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         }
         viewerState.pendingRefreshAnalysisResults = false;
         markPickBufferDirty(viewerState);
+    }
+
+    if (viewerState.structureFactorPendingCompute)
+    {
+        updateStructureFactorPreview(viewerState, simulationBox,
+                                     particleSystem, structureFactorResources);
+        viewerState.structureFactorPendingCompute = false;
     }
 
     if (viewerState.pendingDescribeSelection)
@@ -2903,6 +2960,8 @@ int main(int argc, char **argv)
         BondRenderSystems nearestNeighborRenderSystems;
         PolygonRenderSystems polygonRenderSystems;
         BondDiagramResources bondDiagramResources;
+        StructureFactorResources structureFactorResources;
+        structureFactorResources.statusText = "Click Compute preview to generate S(kx, ky).";
         TrajectoryReader::FileType particleFileType = TrajectoryReader::FileType::Sphere;
 
         // Load shaders
@@ -3056,7 +3115,7 @@ int main(int argc, char **argv)
             handleTrajectoryFrameChange(viewerState, currentFrame, totalFrames, loadedPath,
                                         trajectoryReader.get(), particleSystem, simulationBox);
             processPendingActions(viewerState, particleSystem, layout, particleFileType,
-                                  simulationBox,
+                                  simulationBox, structureFactorResources,
                                   viewerState.particleSizeScale,
                                   sphereStacks,
                                   sphereSlices, cutPlaneStep, cutPlaneMinSceneZ,
@@ -3104,7 +3163,7 @@ int main(int argc, char **argv)
             s_uiScrollY = 0.0f;
 
             drawViewerControls(viewerState, particleSystem, &bondDiagramResources,
-                               particleFileType,
+                               &structureFactorResources, particleFileType,
                                loadedPath, currentFrame, totalFrames,
                                static_cast<uint16_t>(width), static_cast<uint16_t>(height),
                                cutPlaneMinSceneZ, cutPlaneMaxSceneZ);
@@ -3382,6 +3441,7 @@ int main(int argc, char **argv)
 
         destroyPickResources(pickResources);
         destroyBondDiagramResources(bondDiagramResources);
+        destroyStructureFactorResources(structureFactorResources);
         ImGuiBgfx::destroy();
         if (bgfx::isValid(pickProgram))
         {

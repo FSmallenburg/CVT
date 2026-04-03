@@ -15,3 +15,5 @@ snapshot_*.png
 third_party/bgfx/.build/
 third_party/bx/.build/
 third_party/bimg/.build/
+
+samplefiles
