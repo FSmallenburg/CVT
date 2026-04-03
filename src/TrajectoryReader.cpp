@@ -90,11 +90,11 @@ TrajectoryReader::Dimensionality detectDimensionality(TrajectoryReader::FileType
     return TrajectoryReader::Dimensionality::ThreeDimensional;
 }
 
-bool readNextDataLine(std::istream &input, std::string &line, std::streamoff *offset = nullptr)
+bool readNextDataLine(std::istream &input, std::string &line, std::streampos *offset = nullptr)
 {
     while (true)
     {
-        std::streamoff lineOffset = static_cast<std::streamoff>(input.tellg());
+        const std::streampos lineOffset = input.tellg();
         if (!std::getline(input, line))
         {
             return false;
@@ -266,7 +266,7 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
         return false;
     }
 
-    std::ifstream input(m_path);
+    std::ifstream input(m_path, std::ios::binary);
     if (!input)
     {
         m_error = "Failed to open trajectory file: " + m_path;
@@ -571,7 +571,7 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
 
 bool TrajectoryReader::scanFrames()
 {
-    std::ifstream input(m_path);
+    std::ifstream input(m_path, std::ios::binary);
     if (!input)
     {
         m_error = "Failed to open trajectory file: " + m_path;
@@ -579,7 +579,7 @@ bool TrajectoryReader::scanFrames()
     }
 
     std::string line;
-    std::streamoff frameOffset = 0;
+    std::streampos frameOffset = std::streampos(0);
     while (readNextDataLine(input, line, &frameOffset))
     {
         size_t particleCount = 0;

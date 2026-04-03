@@ -44,7 +44,7 @@ class TrajectoryReader
 
     std::string m_path;
     mutable std::string m_error;
-    std::vector<std::streamoff> m_frameOffsets;
+    std::vector<std::streampos> m_frameOffsets;
     FileType m_fileType = FileType::Sphere;
     Dimensionality m_dimensionality = Dimensionality::ThreeDimensional;
 };
