@@ -6,7 +6,7 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build-debug/cvt",
-      "args": ["TestInputFiles/testmov.sph"],
+      "args": ["TestInputFiles/testmov.dsk"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "environment": [],
