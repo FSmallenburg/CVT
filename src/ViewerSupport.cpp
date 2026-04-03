@@ -12,6 +12,54 @@ constexpr uint32_t kPickBytesPerPixel = 4u;
 
 }
 
+void markAllHelperSystemsDirty(ViewerState &state)
+{
+    state.patchRenderSystemsDirty = true;
+    state.bondRenderSystemsDirty = true;
+    state.nearestNeighborRenderSystemsDirty = true;
+    state.polygonRenderSystemsDirty = true;
+    state.mobilitySystemDirty = true;
+}
+
+void markVisibilityDependentHelperSystemsDirty(ViewerState &state)
+{
+    markAllHelperSystemsDirty(state);
+}
+
+void markColorDependentHelperSystemsDirty(ViewerState &state)
+{
+    state.bondRenderSystemsDirty = true;
+    state.nearestNeighborRenderSystemsDirty = true;
+    state.polygonRenderSystemsDirty = true;
+}
+
+void markBondLikeHelperSystemsDirty(ViewerState &state)
+{
+    state.bondRenderSystemsDirty = true;
+    state.nearestNeighborRenderSystemsDirty = true;
+}
+
+void markMobilitySystemDirty(ViewerState &state)
+{
+    state.mobilitySystemDirty = true;
+}
+
+void markNearestNeighborRenderSystemsDirty(ViewerState &state)
+{
+    state.nearestNeighborRenderSystemsDirty = true;
+}
+
+void markBondDiagramGeometryDirty(ViewerState &state)
+{
+    state.bondDiagramGeometryDirty = true;
+    state.bondDiagramViewDirty = true;
+}
+
+void markBondDiagramViewDirty(ViewerState &state)
+{
+    state.bondDiagramViewDirty = true;
+}
+
 float computeCutPlaneStep(const SimulationBox &simulationBox)
 {
     const bx::Vec3 boxSize = simulationBox.size();
@@ -353,6 +401,103 @@ bool createPickResources(PickResources &pickResources, uint16_t width, uint16_t 
     return true;
 }
 
+void destroyBondDiagramResources(BondDiagramResources &bondDiagramResources)
+{
+    if (bgfx::isValid(bondDiagramResources.frameBuffer))
+    {
+        bgfx::destroy(bondDiagramResources.frameBuffer);
+    }
+
+    if (!bgfx::isValid(bondDiagramResources.frameBuffer))
+    {
+        if (bgfx::isValid(bondDiagramResources.colorTexture))
+        {
+            bgfx::destroy(bondDiagramResources.colorTexture);
+        }
+        if (bgfx::isValid(bondDiagramResources.depthTexture))
+        {
+            bgfx::destroy(bondDiagramResources.depthTexture);
+        }
+    }
+
+    bondDiagramResources.colorTexture = BGFX_INVALID_HANDLE;
+    bondDiagramResources.depthTexture = BGFX_INVALID_HANDLE;
+    bondDiagramResources.frameBuffer = BGFX_INVALID_HANDLE;
+    bondDiagramResources.width = 0;
+    bondDiagramResources.height = 0;
+    bondDiagramResources.enabled = false;
+    bondDiagramResources.disableReason.clear();
+}
+
+bool createBondDiagramResources(BondDiagramResources &bondDiagramResources,
+                                uint16_t width, uint16_t height)
+{
+    destroyBondDiagramResources(bondDiagramResources);
+
+    constexpr uint64_t kColorFlags = BGFX_TEXTURE_RT | BGFX_SAMPLER_MIN_POINT
+                                     | BGFX_SAMPLER_MAG_POINT | BGFX_SAMPLER_U_CLAMP
+                                     | BGFX_SAMPLER_V_CLAMP;
+    constexpr uint64_t kDepthFlags = BGFX_TEXTURE_RT_WRITE_ONLY | BGFX_SAMPLER_U_CLAMP
+                                     | BGFX_SAMPLER_V_CLAMP;
+
+    bgfx::TextureFormat::Enum colorFormat = bgfx::TextureFormat::RGBA8;
+    if (!bgfx::isTextureValid(0, false, 1, colorFormat, kColorFlags))
+    {
+        colorFormat = bgfx::TextureFormat::BGRA8;
+        if (!bgfx::isTextureValid(0, false, 1, colorFormat, kColorFlags))
+        {
+            bondDiagramResources.disableReason = "RGBA8/BGRA8 preview render target unsupported";
+            return false;
+        }
+    }
+
+    bgfx::TextureFormat::Enum depthFormat = bgfx::TextureFormat::D24S8;
+    if (!bgfx::isTextureValid(0, false, 1, depthFormat, kDepthFlags))
+    {
+        depthFormat = bgfx::TextureFormat::D32F;
+        if (!bgfx::isTextureValid(0, false, 1, depthFormat, kDepthFlags))
+        {
+            bondDiagramResources.disableReason = "preview depth render target unsupported";
+            return false;
+        }
+    }
+
+    bondDiagramResources.colorTexture =
+        bgfx::createTexture2D(width, height, false, 1, colorFormat, kColorFlags);
+    bondDiagramResources.depthTexture =
+        bgfx::createTexture2D(width, height, false, 1, depthFormat, kDepthFlags);
+    if (!bgfx::isValid(bondDiagramResources.colorTexture)
+        || !bgfx::isValid(bondDiagramResources.depthTexture))
+    {
+        destroyBondDiagramResources(bondDiagramResources);
+        bondDiagramResources.disableReason = "failed to create preview textures";
+        return false;
+    }
+
+    bgfx::Attachment attachments[2];
+    attachments[0].init(bondDiagramResources.colorTexture);
+    attachments[1].init(bondDiagramResources.depthTexture);
+    if (!bgfx::isFrameBufferValid(2, attachments))
+    {
+        destroyBondDiagramResources(bondDiagramResources);
+        bondDiagramResources.disableReason = "preview framebuffer invalid";
+        return false;
+    }
+
+    bondDiagramResources.frameBuffer = bgfx::createFrameBuffer(2, attachments, true);
+    if (!bgfx::isValid(bondDiagramResources.frameBuffer))
+    {
+        destroyBondDiagramResources(bondDiagramResources);
+        bondDiagramResources.disableReason = "failed to create preview framebuffer";
+        return false;
+    }
+
+    bondDiagramResources.width = width;
+    bondDiagramResources.height = height;
+    bondDiagramResources.enabled = true;
+    return true;
+}
+
 float computeInitialCameraDistance(const SimulationBox &simulationBox)
 {
     const bx::Vec3 boxSize = simulationBox.size();
@@ -387,4 +532,5 @@ void applySceneRotation(ViewerState &state, float angleX, float angleY, float an
     float updatedRotation[16];
     bx::mtxMul(updatedRotation, state.sceneRotation, deltaRotation);
     bx::memCopy(state.sceneRotation, updatedRotation, sizeof(updatedRotation));
+    markBondDiagramViewDirty(state);
 }

@@ -4,6 +4,7 @@
 #include "CylinderType.h"
 #include "ImGuiBgfx.h"
 #include "Mesh.h"
+#include "OctahedronType.h"
 #include "PatchCapType.h"
 #include "PatchConeType.h"
 #include "PatchPlacement.h"
@@ -228,7 +229,8 @@ constexpr double kClickDragThresholdPixels = 4.0;
 constexpr bgfx::ViewId kMainView = 0;
 constexpr bgfx::ViewId kPickView = 1;
 constexpr bgfx::ViewId kBlitView = 2;
-constexpr bgfx::ViewId kUiView = 3;
+constexpr bgfx::ViewId kBondDiagramView = 3;
+constexpr bgfx::ViewId kUiView = 4;
 constexpr float kSphereRadius = 1.0f;
 constexpr uint16_t kDefaultArrowSlices = 12;
 constexpr uint16_t kDefaultSphereStacks = 10;
@@ -239,8 +241,17 @@ constexpr uint16_t kSphereResolutionStep = 2;
 constexpr float kOrientationEpsilon = 1.0e-6f;
 constexpr float kParticleSizeScaleStep = 0.01f;
 constexpr float kMinParticleSizeScale = 0.01f;
+constexpr float kFpsSmoothingTimeConstant = 0.25f;
 constexpr uint8_t kLightingLevelCount = 30u;
 constexpr uint32_t kMaxNeighborsPerParticle = 50u;
+constexpr uint16_t kBondDiagramPreviewSize = 192u;
+constexpr uint16_t kBondDiagramSphereStacks = 10u;
+constexpr uint16_t kBondDiagramSphereSlices = 10u;
+constexpr float kBondDiagramCoreRadius = 0.98f;
+constexpr float kBondDiagramMarkerRadius = 1.05f;
+constexpr float kBondDiagramCameraDistance = 4.0f;
+constexpr float kBondDiagramOrthoHalfExtent = 1.35f;
+constexpr std::array<float, 4> kBondDiagramCoreColor = {0.82f, 0.84f, 0.88f, 1.0f};
 constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
 float s_uiScrollX = 0.0f;
 float s_uiScrollY = 0.0f;
@@ -345,6 +356,11 @@ std::unique_ptr<ParticleType> createCubeParticleType(const bgfx::VertexLayout &l
     return std::make_unique<CubeType>(layout);
 }
 
+std::unique_ptr<ParticleType> createOctahedronParticleType(const bgfx::VertexLayout &layout)
+{
+    return std::make_unique<OctahedronType>(layout);
+}
+
 std::unique_ptr<ParticleType> createPolygonParticleType(const bgfx::VertexLayout &layout,
                                                         uint16_t sideCount)
 {
@@ -413,6 +429,54 @@ std::array<float, 4> orientationColor(const bx::Vec3 &direction)
             std::abs(direction.z) * inverseLength, 1.0f};
 }
 
+std::array<float, 4> analysisGradientColor(float value)
+{
+    const float clampedValue = std::clamp(value, 0.0f, 1.0f);
+    if (clampedValue <= 0.5f)
+    {
+        const float t = clampedValue / 0.5f;
+        return {
+            0.5f * t,
+            0.5f * t,
+            1.0f - 0.5f * t,
+            1.0f,
+        };
+    }
+
+    const float t = (clampedValue - 0.5f) / 0.5f;
+    return {
+        0.5f + 0.5f * t,
+        0.5f - 0.5f * t,
+        0.5f - 0.5f * t,
+        1.0f,
+    };
+}
+
+std::array<float, 4> hueColor(float hue)
+{
+    const float wrappedHue = hue - std::floor(hue);
+    const float scaledHue = wrappedHue * 6.0f;
+    const int sector = static_cast<int>(std::floor(scaledHue));
+    const float fraction = scaledHue - float(sector);
+    const float q = 1.0f - fraction;
+
+    switch (sector)
+    {
+    case 0:
+        return {1.0f, fraction, 0.0f, 1.0f};
+    case 1:
+        return {q, 1.0f, 0.0f, 1.0f};
+    case 2:
+        return {0.0f, 1.0f, fraction, 1.0f};
+    case 3:
+        return {0.0f, q, 1.0f, 1.0f};
+    case 4:
+        return {fraction, 0.0f, 1.0f, 1.0f};
+    default:
+        return {1.0f, 0.0f, q, 1.0f};
+    }
+}
+
 std::array<float, 4> resolveParticleColor(const Particle &particle, size_t particleIndex,
                                          ColorMode colorMode,
                                          const std::vector<PatchyParticleData> *patchMetadata,
@@ -473,6 +537,176 @@ void applyColorMode(ParticleSystem &particleSystem, ColorMode colorMode,
                                               patchMetadata,
                                               supportsOrientationMode,
                                               uniformUsesOrientation);
+    }
+}
+
+void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &particleSystem)
+{
+    if (!particleSystem.hasNeighborAnalysis())
+    {
+        particleSystem.clearAnalysisResults();
+        return;
+    }
+
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    const bool isTwoDimensional =
+        viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
+    const float symmetryOrder =
+        float(std::clamp<uint8_t>(viewerState.bondOrientationalOrder, 2u, 6u));
+
+    particleSystem.resizeAnalysisResults(neighborLists.size(),
+                                         viewerState.bondOrientationalOrder);
+    std::vector<ParticleAnalysisData> &analysisResults = particleSystem.analysisResults();
+    for (size_t index = 0; index < neighborLists.size(); ++index)
+    {
+        const std::vector<NearestNeighborData> &neighbors = neighborLists[index];
+        ParticleAnalysisData &analysis = analysisResults[index];
+        analysis.neighborCount = static_cast<uint32_t>(neighbors.size());
+        analysis.bondOrientationalMagnitude = 0.0f;
+        analysis.bondOrientationalPhase = 0.0f;
+
+        if (!isTwoDimensional || neighbors.empty())
+        {
+            continue;
+        }
+
+        float cosSum = 0.0f;
+        float sinSum = 0.0f;
+        for (const NearestNeighborData &neighbor : neighbors)
+        {
+            const float theta = std::atan2(neighbor.displacement.y,
+                                           neighbor.displacement.x);
+            const float angle = -symmetryOrder * theta;
+            cosSum += std::cos(angle);
+            sinSum += std::sin(angle);
+        }
+
+        analysis.bondOrientationalMagnitude =
+            std::sqrt(cosSum * cosSum + sinSum * sinSum) / float(neighbors.size());
+        analysis.bondOrientationalPhase = std::atan2(sinSum, cosSum);
+    }
+}
+
+void applyAnalysisColorMode(ParticleSystem &particleSystem, const ViewerState &viewerState)
+{
+    if (!viewerState.neighborAnalysisValid
+        || viewerState.analysisColorMode == AnalysisColorMode::Disabled)
+    {
+        return;
+    }
+
+    std::vector<Particle> &particles = particleSystem.particles();
+    if (!particleSystem.hasAnalysisResults(viewerState.bondOrientationalOrder))
+    {
+        return;
+    }
+
+    const std::vector<ParticleAnalysisData> &analysisResults = particleSystem.analysisResults();
+    const size_t particleCount = bx::min(particles.size(), analysisResults.size());
+
+    switch (viewerState.analysisColorMode)
+    {
+    case AnalysisColorMode::Disabled:
+        return;
+    case AnalysisColorMode::NeighborCount:
+        for (size_t index = 0; index < particleCount; ++index)
+        {
+            const uint32_t neighborCount = analysisResults[index].neighborCount;
+            particles[index].color = colorFromLetter(
+                static_cast<char>('A' + (neighborCount % kParticlePaletteColorCount)));
+        }
+        return;
+    case AnalysisColorMode::BondOrientationalOrderMagnitude:
+    case AnalysisColorMode::BondOrientationalOrderPhase:
+        if (viewerState.fileDimensionality != TrajectoryReader::Dimensionality::TwoDimensional)
+        {
+            return;
+        }
+
+        for (size_t index = 0; index < particleCount; ++index)
+        {
+            const ParticleAnalysisData &analysis = analysisResults[index];
+            if (analysis.neighborCount == 0u)
+            {
+                particles[index].color =
+                    viewerState.analysisColorMode
+                            == AnalysisColorMode::BondOrientationalOrderPhase
+                        ? hueColor(0.0f)
+                        : analysisGradientColor(0.0f);
+                continue;
+            }
+
+            if (viewerState.analysisColorMode
+                == AnalysisColorMode::BondOrientationalOrderPhase)
+            {
+                const float normalizedPhase =
+                    (analysis.bondOrientationalPhase + bx::kPi) / (2.0f * bx::kPi);
+                particles[index].color = hueColor(normalizedPhase);
+            }
+            else
+            {
+                particles[index].color =
+                    analysisGradientColor(analysis.bondOrientationalMagnitude);
+            }
+        }
+        return;
+    }
+}
+
+void applyAnalysisColorMode(ParticleSystem &targetParticleSystem,
+                            const ParticleSystem &analysisSourceParticleSystem,
+                            const ViewerState &viewerState)
+{
+    if (!viewerState.neighborAnalysisValid
+        || viewerState.analysisColorMode == AnalysisColorMode::Disabled
+        || !analysisSourceParticleSystem.hasAnalysisResults(viewerState.bondOrientationalOrder))
+    {
+        return;
+    }
+
+    const std::vector<Particle> &sourceParticles = analysisSourceParticleSystem.particles();
+    const std::vector<ParticleAnalysisData> &analysisResults =
+        analysisSourceParticleSystem.analysisResults();
+    const size_t sourceParticleCount = bx::min(sourceParticles.size(), analysisResults.size());
+
+    std::unordered_map<uint32_t, size_t> sourceIndexById;
+    sourceIndexById.reserve(sourceParticleCount);
+    for (size_t index = 0; index < sourceParticleCount; ++index)
+    {
+        sourceIndexById.emplace(sourceParticles[index].id, index);
+    }
+
+    std::vector<Particle> &targetParticles = targetParticleSystem.particles();
+    for (Particle &particle : targetParticles)
+    {
+        const auto sourceIndexIt = sourceIndexById.find(particle.id);
+        if (sourceIndexIt == sourceIndexById.end())
+        {
+            continue;
+        }
+
+        const ParticleAnalysisData &analysis = analysisResults[sourceIndexIt->second];
+        switch (viewerState.analysisColorMode)
+        {
+        case AnalysisColorMode::Disabled:
+            return;
+        case AnalysisColorMode::NeighborCount:
+            particle.color = colorFromLetter(
+                static_cast<char>('A' + (analysis.neighborCount % kParticlePaletteColorCount)));
+            break;
+        case AnalysisColorMode::BondOrientationalOrderMagnitude:
+            particle.color = analysis.neighborCount == 0u
+                                 ? analysisGradientColor(0.0f)
+                                 : analysisGradientColor(analysis.bondOrientationalMagnitude);
+            break;
+        case AnalysisColorMode::BondOrientationalOrderPhase:
+            particle.color = analysis.neighborCount == 0u
+                                 ? hueColor(0.0f)
+                                 : hueColor((analysis.bondOrientationalPhase + bx::kPi)
+                                            / (2.0f * bx::kPi));
+            break;
+        }
     }
 }
 
@@ -598,6 +832,12 @@ void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &partic
 {
     viewerState.neighborAnalysisValid = false;
     particleSystem.clearNeighborAnalysis();
+    markNearestNeighborRenderSystemsDirty(viewerState);
+    markBondDiagramGeometryDirty(viewerState);
+    if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+    {
+        markColorDependentHelperSystemsDirty(viewerState);
+    }
 }
 
 bool usesPeriodicNeighborGrid(const ViewerState &viewerState,
@@ -1516,6 +1756,110 @@ void rebuildMobilitySystem(const ParticleSystem &particleSystem,
     }
 }
 
+void rebuildBondDiagramSystems(const ParticleSystem &particleSystem,
+                               const ViewerState &viewerState,
+                               ParticleSystem &coreSystem,
+                               ParticleSystem &markerSystem)
+{
+    coreSystem.clear();
+    markerSystem.clear();
+
+    Particle core;
+    core.id = 1u;
+    core.position = {0.0f, 0.0f, 0.0f};
+    core.baseColor = kBondDiagramCoreColor;
+    core.color = core.baseColor;
+    core.visible = true;
+    core.setUniformScale(kBondDiagramCoreRadius);
+    coreSystem.addParticle(core);
+
+    if (!particleSystem.hasNeighborAnalysis())
+    {
+        return;
+    }
+
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    const std::vector<Particle> &particles = particleSystem.particles();
+    uint32_t markerId = 2u;
+    for (size_t particleIndex = 0; particleIndex < neighborLists.size(); ++particleIndex)
+    {
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            if (neighbor.neighborIndex >= neighborLists.size()
+                || neighbor.neighborIndex >= particles.size()
+                || particleIndex >= particles.size()
+                || particleIndex >= neighbor.neighborIndex)
+            {
+                continue;
+            }
+
+            bx::Vec3 direction = neighbor.displacement;
+            const float directionLength = bx::length(direction);
+            if (directionLength <= 1.0e-6f)
+            {
+                continue;
+            }
+
+            direction = bx::mul(direction, 1.0f / directionLength);
+            Particle forwardMarker;
+            forwardMarker.id = markerId++;
+            forwardMarker.position = bx::mul(direction, kBondDiagramMarkerRadius);
+            forwardMarker.baseColor = particles[particleIndex].baseColor;
+            forwardMarker.color = forwardMarker.baseColor;
+            forwardMarker.visible = true;
+            forwardMarker.setUniformScale(viewerState.bondDiagramPointScale);
+            markerSystem.addParticle(forwardMarker);
+
+            Particle reverseMarker;
+            reverseMarker.id = markerId++;
+            reverseMarker.position = bx::mul(direction, -kBondDiagramMarkerRadius);
+            reverseMarker.baseColor = particles[neighbor.neighborIndex].baseColor;
+            reverseMarker.color = reverseMarker.baseColor;
+            reverseMarker.visible = true;
+            reverseMarker.setUniformScale(viewerState.bondDiagramPointScale);
+            markerSystem.addParticle(reverseMarker);
+        }
+    }
+}
+
+void renderBondDiagramPreview(const ViewerState &viewerState,
+                              const BondDiagramResources &bondDiagramResources,
+                              ParticleSystem &coreSystem,
+                              ParticleSystem &markerSystem,
+                              bgfx::ProgramHandle program)
+{
+    if (!bondDiagramResources.enabled || !bgfx::isValid(program))
+    {
+        return;
+    }
+
+    float view[16];
+    float proj[16];
+    bx::mtxLookAt(view, {0.0f, 0.0f, kBondDiagramCameraDistance}, s_cameraTarget,
+                  bx::Vec3{0.0f, 1.0f, 0.0f}, bx::Handedness::Right);
+    bx::mtxOrtho(proj, -kBondDiagramOrthoHalfExtent, kBondDiagramOrthoHalfExtent,
+                 -kBondDiagramOrthoHalfExtent, kBondDiagramOrthoHalfExtent,
+                 0.1f, 10.0f, 0.0f, bgfx::getCaps()->homogeneousDepth,
+                 bx::Handedness::Right);
+
+    float sceneTransform[16];
+    bx::memCopy(sceneTransform, viewerState.sceneRotation, sizeof(sceneTransform));
+
+    bgfx::setViewRect(kBondDiagramView, 0, 0, bondDiagramResources.width,
+                      bondDiagramResources.height);
+    bgfx::setViewFrameBuffer(kBondDiagramView, bondDiagramResources.frameBuffer);
+    bgfx::setViewTransform(kBondDiagramView, view, proj);
+
+    const bx::Vec3 zeroOffset{0.0f, 0.0f, 0.0f};
+    coreSystem.render(kBondDiagramView, program, sceneTransform, kParticleRenderState,
+                      zeroOffset, 1.0f, nullptr, false, nullptr, nullptr, false,
+                      false, 0.0f);
+    markerSystem.render(kBondDiagramView, program, sceneTransform, kParticleRenderState,
+                        zeroOffset, 1.0f, nullptr, false, nullptr, nullptr, false,
+                        false, 0.0f);
+}
+
 } // namespace
 
 static ViewerState *getViewerState(GLFWwindow *window)
@@ -1575,6 +1919,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
         case GLFW_KEY_ENTER:
         case GLFW_KEY_KP_ENTER:
             bx::mtxIdentity(state->sceneRotation);
+            markBondDiagramViewDirty(*state);
             markPickBufferDirty(*state);
             break;
         case GLFW_KEY_LEFT:
@@ -1660,6 +2005,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                 if(action == GLFW_PRESS && !(mods & GLFW_MOD_SHIFT))
                 {
                     state->wrapParticlesToBox = !state->wrapParticlesToBox;
+                    markBondLikeHelperSystemsDirty(*state);
                     markPickBufferDirty(*state);
                 }
             }       
@@ -1735,6 +2081,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                     (static_cast<uint8_t>(state->colorMode) + 1u)
                     % static_cast<uint8_t>(ColorMode::Count);
                 state->colorMode = static_cast<ColorMode>(nextMode);
+                markColorDependentHelperSystemsDirty(*state);
             }
             break;
         case GLFW_KEY_N:
@@ -1754,6 +2101,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             {
                 state->lightingLevelIndex =
                     static_cast<uint8_t>((state->lightingLevelIndex + 1u) % kLightingLevelCount);
+                markBondDiagramViewDirty(*state);
             }
             break;
         case GLFW_KEY_I:
@@ -2021,7 +2369,9 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         viewerState.hasPreviousFramePositions = true;
         noteEncounteredParticleTypes(viewerState, particleSystem);
         invalidateNeighborAnalysis(viewerState, particleSystem);
+        viewerState.pendingFindNeighbors = viewerState.autoFindNeighbors;
         applyParticleVisibilityFilters(particleSystem, viewerState);
+        markAllHelperSystemsDirty(viewerState);
         markPickBufferDirty(viewerState);
         return;
     }
@@ -2044,6 +2394,11 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                   float cutPlaneStep, float cutPlaneMinSceneZ,
                                   float cutPlaneMaxSceneZ, int &exitCode)
 {
+    if (viewerState.autoFindNeighbors && !viewerState.neighborAnalysisValid)
+    {
+        viewerState.pendingFindNeighbors = true;
+    }
+
     if (viewerState.pendingHideSelected)
     {
         const bool hiddenChanged = hideSelectedParticles(particleSystem,
@@ -2053,6 +2408,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                                                       viewerState);
         if (hiddenChanged || visibilityChanged)
         {
+            markVisibilityDependentHelperSystemsDirty(viewerState);
             markPickBufferDirty(viewerState);
         }
         viewerState.pendingHideSelected = false;
@@ -2067,6 +2423,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                                                       viewerState);
         if (hiddenChanged || visibilityChanged)
         {
+            markVisibilityDependentHelperSystemsDirty(viewerState);
             markPickBufferDirty(viewerState);
         }
         viewerState.pendingRevealAll = false;
@@ -2103,7 +2460,49 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         findNearestNeighbors(viewerState, simulationBox, particleSystem);
         viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
+        markNearestNeighborRenderSystemsDirty(viewerState);
+        markBondDiagramGeometryDirty(viewerState);
+        if (viewerState.neighborAnalysisValid)
+        {
+            computeAnalysisResults(viewerState, particleSystem);
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
+        else
+        {
+            particleSystem.clearAnalysisResults();
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
         viewerState.pendingFindNeighbors = false;
+        viewerState.pendingRefreshAnalysisResults = false;
+        markPickBufferDirty(viewerState);
+    }
+
+    if (viewerState.pendingRefreshAnalysisResults)
+    {
+        if (viewerState.neighborAnalysisValid)
+        {
+            computeAnalysisResults(viewerState, particleSystem);
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+            markPickBufferDirty(viewerState);
+        }
+        else
+        {
+            particleSystem.clearAnalysisResults();
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
+        viewerState.pendingRefreshAnalysisResults = false;
         markPickBufferDirty(viewerState);
     }
 
@@ -2190,7 +2589,8 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         particleSystem.setType(createParticleType(layout, particleFileType,
                                                   sphereStacks, sphereSlices));
-        invalidateNeighborAnalysis(viewerState, particleSystem);
+        markAllHelperSystemsDirty(viewerState);
+        markPickBufferDirty(viewerState);
         if (!hasValidParticleMeshes(particleSystem))
         {
             std::cerr << "Failed to rebuild " << particleTypeName(particleFileType)
@@ -2198,7 +2598,6 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                       << sphereStacks << "x" << sphereSlices << std::endl;
             exitCode = 1;
         }
-        markPickBufferDirty(viewerState);
     }
 }
 
@@ -2240,6 +2639,7 @@ static void updateMouseDrivenInteraction(ViewerState &viewerState, uint16_t widt
                     viewerState.particleTranslation.x += modelTranslation.x;
                     viewerState.particleTranslation.y += modelTranslation.y;
                     viewerState.particleTranslation.z += modelTranslation.z;
+                    markBondLikeHelperSystemsDirty(viewerState);
                 }
             }
             else
@@ -2495,10 +2895,14 @@ int main(int argc, char **argv)
         ParticleSystem particleSystem(
             createSphereParticleType(layout, sphereStacks, sphereSlices));
         ParticleSystem mobilitySystem(createArrowParticleType(layout, kDefaultArrowSlices));
+        ParticleSystem bondDiagramCoreSystem(
+            createSphereParticleType(layout, kBondDiagramSphereStacks, kBondDiagramSphereSlices));
+        ParticleSystem bondDiagramMarkerSystem(createOctahedronParticleType(layout));
         PatchRenderSystems patchRenderSystems;
         BondRenderSystems bondRenderSystems;
         BondRenderSystems nearestNeighborRenderSystems;
         PolygonRenderSystems polygonRenderSystems;
+        BondDiagramResources bondDiagramResources;
         TrajectoryReader::FileType particleFileType = TrajectoryReader::FileType::Sphere;
 
         // Load shaders
@@ -2554,6 +2958,7 @@ int main(int argc, char **argv)
                     noteEncounteredParticleTypes(viewerState, particleSystem);
                     invalidateNeighborAnalysis(viewerState, particleSystem);
                     applyParticleVisibilityFilters(particleSystem, viewerState);
+                    markAllHelperSystemsDirty(viewerState);
                     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
                 }
             }
@@ -2566,6 +2971,8 @@ int main(int argc, char **argv)
 
         bgfx::setViewClear(kMainView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.0f, 0);
         bgfx::setViewClear(kPickView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
+        bgfx::setViewClear(kBondDiagramView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                   0xffffffff, 1.0f, 0);
         const bool uiAvailable = ImGuiBgfx::create(kUiView);
         if (!uiAvailable)
         {
@@ -2598,6 +3005,12 @@ int main(int argc, char **argv)
         {
             std::cerr << "GPU picking disabled: " << pickResources.disableReason << std::endl;
         }
+        if (!createBondDiagramResources(bondDiagramResources, kBondDiagramPreviewSize,
+                                        kBondDiagramPreviewSize))
+        {
+            std::cerr << "Bond diagram preview unavailable: "
+                      << bondDiagramResources.disableReason << std::endl;
+        }
 
         if (exitCode == 0 && (!hasValidParticleMeshes(particleSystem) || !bgfx::isValid(program)))
         {
@@ -2621,7 +3034,7 @@ int main(int argc, char **argv)
         }
 
         uint32_t lastSubmittedFrame = 0;
-    double lastUiFrameTime = glfwGetTime();
+        double lastUiFrameTime = glfwGetTime();
 
         while (exitCode == 0 && !glfwWindowShouldClose(window))
         {
@@ -2671,6 +3084,18 @@ int main(int argc, char **argv)
             const double currentUiFrameTime = glfwGetTime();
             const float uiDeltaTime = static_cast<float>(currentUiFrameTime - lastUiFrameTime);
             lastUiFrameTime = currentUiFrameTime;
+            const float instantaneousFps = uiDeltaTime > 1.0e-6f ? 1.0f / uiDeltaTime : 0.0f;
+            if (viewerState.currentFps <= 0.0f)
+            {
+                viewerState.currentFps = instantaneousFps;
+            }
+            else
+            {
+                const float smoothingAlpha =
+                    1.0f - std::exp(-uiDeltaTime / kFpsSmoothingTimeConstant);
+                viewerState.currentFps +=
+                    smoothingAlpha * (instantaneousFps - viewerState.currentFps);
+            }
             ImGuiBgfx::beginFrame(window, static_cast<uint16_t>(width),
                                   static_cast<uint16_t>(height),
                                   viewerState.mouseX, viewerState.mouseY,
@@ -2678,7 +3103,8 @@ int main(int argc, char **argv)
             s_uiScrollX = 0.0f;
             s_uiScrollY = 0.0f;
 
-            drawViewerControls(viewerState, particleSystem, particleFileType,
+            drawViewerControls(viewerState, particleSystem, &bondDiagramResources,
+                               particleFileType,
                                loadedPath, currentFrame, totalFrames,
                                static_cast<uint16_t>(width), static_cast<uint16_t>(height),
                                cutPlaneMinSceneZ, cutPlaneMaxSceneZ);
@@ -2701,31 +3127,49 @@ int main(int argc, char **argv)
 
             applyColorMode(particleSystem, viewerState.colorMode,
                            particleFileType == TrajectoryReader::FileType::Rod, false);
-            if (isPolygonFileType(particleFileType))
+            applyAnalysisColorMode(particleSystem, viewerState);
+            if (viewerState.bondDiagramGeometryDirty)
+            {
+                rebuildBondDiagramSystems(particleSystem, viewerState,
+                                          bondDiagramCoreSystem,
+                                          bondDiagramMarkerSystem);
+                viewerState.bondDiagramGeometryDirty = false;
+            }
+            if (isPolygonFileType(particleFileType) && viewerState.polygonRenderSystemsDirty)
             {
                 ensurePolygonRenderSystems(layout, particleSystem, polygonRenderSystems);
                 rebuildPolygonRenderSystems(particleSystem, polygonRenderSystems);
+                viewerState.polygonRenderSystemsDirty = false;
             }
-            if (isPatchyFileType(particleFileType))
+            if (isPatchyFileType(particleFileType) && viewerState.patchRenderSystemsDirty)
             {
                 ensurePatchRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
                                          patchRenderSystems);
                 rebuildPatchRenderSystems(particleSystem, patchRenderSystems);
+                viewerState.patchRenderSystemsDirty = false;
+            }
+            if (isPatchyFileType(particleFileType) && viewerState.bondRenderSystemsDirty)
+            {
                 ensureBondRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
                                         bondRenderSystems);
                 rebuildBondRenderSystems(particleSystem, simulationBox,
                                          viewerState.particleTranslation,
                                          viewerState.wrapParticlesToBox,
                                          bondRenderSystems);
+                viewerState.bondRenderSystemsDirty = false;
             }
-            ensureBondRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
-                                    nearestNeighborRenderSystems);
-            if (viewerState.neighborAnalysisValid)
+            if (viewerState.nearestNeighborRenderSystemsDirty)
             {
-                rebuildNearestNeighborRenderSystems(particleSystem, simulationBox,
-                                                    viewerState.particleTranslation,
-                                                    viewerState.wrapParticlesToBox,
-                                                    nearestNeighborRenderSystems);
+                ensureBondRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
+                                        nearestNeighborRenderSystems);
+                if (viewerState.neighborAnalysisValid)
+                {
+                    rebuildNearestNeighborRenderSystems(particleSystem, simulationBox,
+                                                        viewerState.particleTranslation,
+                                                        viewerState.wrapParticlesToBox,
+                                                        nearestNeighborRenderSystems);
+                }
+                viewerState.nearestNeighborRenderSystemsDirty = false;
             }
 
             if (viewerState.bondModeEnabled)
@@ -2748,8 +3192,14 @@ int main(int argc, char **argv)
             }
             else if (viewerState.mobilityModeEnabled)
             {
-                rebuildMobilitySystem(particleSystem, mobilitySystem, viewerState, simulationBox);
+                if (viewerState.mobilitySystemDirty)
+                {
+                    rebuildMobilitySystem(particleSystem, mobilitySystem, viewerState,
+                                          simulationBox);
+                    viewerState.mobilitySystemDirty = false;
+                }
                 applyColorMode(mobilitySystem, viewerState.colorMode, true, true);
+                applyAnalysisColorMode(mobilitySystem, particleSystem, viewerState);
                 mobilitySystem.render(kMainView, program, sceneTransform,
                                       kParticleRenderState,
                                       viewerState.particleTranslation, 1.0f,
@@ -2801,6 +3251,16 @@ int main(int argc, char **argv)
             {
                 renderSimulationBoxWireframe(kMainView, lineProgram, lineLayout,
                                              simulationBox, sceneTransform);
+            }
+
+            if (bondDiagramResources.enabled && viewerState.bondDiagramRenderRequested
+                && viewerState.neighborAnalysisValid
+                && (viewerState.bondDiagramViewDirty || viewerState.bondDiagramGeometryDirty))
+            {
+                renderBondDiagramPreview(viewerState, bondDiagramResources,
+                                         bondDiagramCoreSystem, bondDiagramMarkerSystem,
+                                         program);
+                viewerState.bondDiagramViewDirty = false;
             }
 
             if (pickResources.enabled && viewerState.pendingPickRequest
@@ -2921,6 +3381,7 @@ int main(int argc, char **argv)
         }
 
         destroyPickResources(pickResources);
+        destroyBondDiagramResources(bondDiagramResources);
         ImGuiBgfx::destroy();
         if (bgfx::isValid(pickProgram))
         {

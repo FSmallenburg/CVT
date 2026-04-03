@@ -30,6 +30,13 @@ struct PatchyParticleData
     bx::Vec3 displacement{0.0f, 0.0f, 0.0f};
   };
 
+  struct ParticleAnalysisData
+  {
+    uint32_t neighborCount = 0;
+    float bondOrientationalMagnitude = 0.0f;
+    float bondOrientationalPhase = 0.0f;
+  };
+
 class ParticleSystem
 {
   public:
@@ -54,6 +61,11 @@ class ParticleSystem
     bool hasNeighborAnalysis() const;
     std::vector<std::vector<NearestNeighborData>> &neighborAnalysis();
     const std::vector<std::vector<NearestNeighborData>> &neighborAnalysis() const;
+    void clearAnalysisResults();
+    void resizeAnalysisResults(size_t count, uint8_t bondOrientationalOrder);
+    bool hasAnalysisResults(uint8_t bondOrientationalOrder) const;
+    std::vector<ParticleAnalysisData> &analysisResults();
+    const std::vector<ParticleAnalysisData> &analysisResults() const;
 
     void render(bgfx::ViewId viewId, bgfx::ProgramHandle program, const float *parentTransform,
           uint64_t renderState, const bx::Vec3 &positionOffset = {0.0f, 0.0f, 0.0f},
@@ -70,5 +82,7 @@ class ParticleSystem
     std::vector<Particle> m_particles;
     std::vector<PatchyParticleData> m_patchyMetadata;
     std::vector<std::vector<NearestNeighborData>> m_neighborAnalysis;
+    std::vector<ParticleAnalysisData> m_analysisResults;
+    uint8_t m_cachedBondOrientationalOrder = 0u;
     std::vector<std::vector<float>> m_instanceDataPerPart;
 };

@@ -401,6 +401,72 @@ std::vector<uint16_t> makeBoxIndices()
     };
 }
 
+std::vector<PosNormalVertex> makeOctahedronVertices(float radius)
+{
+    std::vector<PosNormalVertex> vertices;
+    vertices.reserve(24u);
+
+    struct Point
+    {
+        float x;
+        float y;
+        float z;
+    };
+
+    const Point top{0.0f, radius, 0.0f};
+    const Point bottom{0.0f, -radius, 0.0f};
+    const Point east{radius, 0.0f, 0.0f};
+    const Point west{-radius, 0.0f, 0.0f};
+    const Point north{0.0f, 0.0f, radius};
+    const Point south{0.0f, 0.0f, -radius};
+
+    const auto appendFace = [&](const Point &a, const Point &b, const Point &c) {
+        const float abX = b.x - a.x;
+        const float abY = b.y - a.y;
+        const float abZ = b.z - a.z;
+        const float acX = c.x - a.x;
+        const float acY = c.y - a.y;
+        const float acZ = c.z - a.z;
+        float normalX = abY * acZ - abZ * acY;
+        float normalY = abZ * acX - abX * acZ;
+        float normalZ = abX * acY - abY * acX;
+        const float normalLength = std::sqrt(normalX * normalX + normalY * normalY
+                                             + normalZ * normalZ);
+        if (normalLength > 1.0e-6f)
+        {
+            normalX /= normalLength;
+            normalY /= normalLength;
+            normalZ /= normalLength;
+        }
+
+        vertices.push_back({a.x, a.y, a.z, normalX, normalY, normalZ});
+        vertices.push_back({b.x, b.y, b.z, normalX, normalY, normalZ});
+        vertices.push_back({c.x, c.y, c.z, normalX, normalY, normalZ});
+    };
+
+    appendFace(top, north, east);
+    appendFace(top, east, south);
+    appendFace(top, south, west);
+    appendFace(top, west, north);
+    appendFace(bottom, east, north);
+    appendFace(bottom, south, east);
+    appendFace(bottom, west, south);
+    appendFace(bottom, north, west);
+
+    return vertices;
+}
+
+std::vector<uint16_t> makeOctahedronIndices()
+{
+    std::vector<uint16_t> indices(24u);
+    for (uint16_t index = 0; index < indices.size(); ++index)
+    {
+        indices[index] = index;
+    }
+
+    return indices;
+}
+
 std::vector<PosNormalVertex> makeRegularPolygonVertices(uint16_t sideCount)
 {
     std::vector<PosNormalVertex> vertices;
@@ -551,6 +617,13 @@ Mesh Mesh::createBox(float halfExtent, const bgfx::VertexLayout &layout)
 {
     Mesh mesh;
     mesh.upload(makeBoxVertices(halfExtent), makeBoxIndices(), layout);
+    return mesh;
+}
+
+Mesh Mesh::createOctahedron(float radius, const bgfx::VertexLayout &layout)
+{
+    Mesh mesh;
+    mesh.upload(makeOctahedronVertices(radius), makeOctahedronIndices(), layout);
     return mesh;
 }
 

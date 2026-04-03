@@ -28,15 +28,16 @@ class Mesh
     static Mesh createSphere(float radius, uint16_t stacks, uint16_t slices,
                              const bgfx::VertexLayout &layout);
     static Mesh createCylinder(float radius, float length, uint16_t slices,
-           const bgfx::VertexLayout &layout);
+                               const bgfx::VertexLayout &layout);
     static Mesh createHemisphere(float radius, uint16_t stacks, uint16_t slices,
-           const bgfx::VertexLayout &layout);
-        static Mesh createSphericalCap(float radius, float cosHalfAngle, uint16_t stacks,
-              uint16_t slices, const bgfx::VertexLayout &layout);
+                                 const bgfx::VertexLayout &layout);
+    static Mesh createSphericalCap(float radius, float cosHalfAngle, uint16_t stacks,
+                                   uint16_t slices, const bgfx::VertexLayout &layout);
     static Mesh createCone(float radius, float height, uint16_t slices,
-         const bgfx::VertexLayout &layout);
+                           const bgfx::VertexLayout &layout);
     static Mesh createBox(float halfExtent, const bgfx::VertexLayout &layout);
-        static Mesh createRegularPolygon(uint16_t sideCount, const bgfx::VertexLayout &layout);
+    static Mesh createOctahedron(float radius, const bgfx::VertexLayout &layout);
+    static Mesh createRegularPolygon(uint16_t sideCount, const bgfx::VertexLayout &layout);
 
     bool upload(const std::vector<PosNormalVertex> &vertices, const std::vector<uint16_t> &indices,
                 const bgfx::VertexLayout &layout);

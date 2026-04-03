@@ -52,6 +52,7 @@ add_executable(cvt
     src/main.cpp
     src/ArrowType.cpp
     src/Mesh.cpp
+    src/OctahedronType.cpp
     src/PatchCapType.cpp
     src/PatchConeType.cpp
     src/PatchPlacement.cpp

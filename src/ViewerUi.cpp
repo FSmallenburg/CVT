@@ -2,8 +2,9 @@
 
 #include "ImGuiBgfx.h"
 
+#include "imgui.h"
+
 #include <bx/math.h>
-#include <dear-imgui/imgui.h>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +21,40 @@ constexpr float kUiPanelWidthFraction = 1.0f / 3.0f;
 constexpr uint16_t kMinUiPanelWidth = 360u;
 constexpr uint16_t kMinRenderViewportWidth = 640u;
 constexpr float kMinParticleSizeScale = 0.01f;
+
+int analysisColorModeComboIndex(AnalysisColorMode analysisColorMode)
+{
+    switch (analysisColorMode)
+    {
+    case AnalysisColorMode::Disabled:
+        return 0;
+    case AnalysisColorMode::NeighborCount:
+        return 1;
+    case AnalysisColorMode::BondOrientationalOrderMagnitude:
+        return 2;
+    case AnalysisColorMode::BondOrientationalOrderPhase:
+        return 3;
+    }
+
+    return 0;
+}
+
+AnalysisColorMode analysisColorModeFromComboIndex(int comboIndex, bool supportsPsi6)
+{
+    switch (comboIndex)
+    {
+    case 1:
+        return AnalysisColorMode::NeighborCount;
+    case 2:
+        return supportsPsi6 ? AnalysisColorMode::BondOrientationalOrderMagnitude
+                            : AnalysisColorMode::NeighborCount;
+    case 3:
+        return supportsPsi6 ? AnalysisColorMode::BondOrientationalOrderPhase
+                            : AnalysisColorMode::NeighborCount;
+    default:
+        return AnalysisColorMode::Disabled;
+    }
+}
 
 }
 
@@ -123,12 +158,15 @@ bool isInRenderViewport(const ViewerState &viewerState, double mouseX, double mo
 }
 
 void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem,
+                        const BondDiagramResources *bondDiagramResources,
                         TrajectoryReader::FileType particleFileType,
                         const std::string &loadedPath,
                         size_t currentFrame, size_t totalFrames,
                         uint16_t windowWidth, uint16_t windowHeight,
                         float cutPlaneMinSceneZ, float cutPlaneMaxSceneZ)
 {
+    viewerState.bondDiagramRenderRequested = false;
+
     if (!viewerState.showUi || !ImGuiBgfx::isAvailable())
     {
         return;
@@ -152,6 +190,9 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
     }
 
     ImGui::Text("File: %s", loadedPath.empty() ? "<none>" : loadedPath.c_str());
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 110.0f);
+    ImGui::Text("FPS: %.1f", viewerState.currentFps);
     ImGui::Text("Particle type: %s", particleTypeName(particleFileType));
     ImGui::Text("Visible: %zu", countVisibleParticles(particleSystem));
     ImGui::Text("Selected: %zu", viewerState.selectedIds.size());
@@ -171,7 +212,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
     ImGui::Separator();
 
-    if (ImGui::CollapsingHeader("Basic controls", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader("Basic controls"))
     {
         if (ImGui::Checkbox("Show simulation box (b)", &viewerState.showBox))
         {
@@ -179,6 +220,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         }
         if (ImGui::Checkbox("Wrap particles to box (w)", &viewerState.wrapParticlesToBox))
         {
+            markBondLikeHelperSystemsDirty(viewerState);
             markPickDirty = true;
         }
 
@@ -219,6 +261,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                              int(kLightingLevelCount - 1u)))
         {
             viewerState.lightingLevelIndex = static_cast<uint8_t>(lightingLevelIndex);
+            markBondDiagramViewDirty(viewerState);
         }
 
         static const char *kColorModeLabels[] = {
@@ -233,6 +276,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                          kColorModeLabels, IM_ARRAYSIZE(kColorModeLabels)))
         {
             viewerState.colorMode = static_cast<ColorMode>(colorModeIndex);
+            markColorDependentHelperSystemsDirty(viewerState);
         }
 
         if (viewerState.maxSeenParticleTypeIndex > 0u)
@@ -250,6 +294,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 {
                     viewerState.particleTypeVisible[typeIndex] = typeVisible;
                     applyParticleVisibilityFilters(particleSystem, viewerState);
+                    markVisibilityDependentHelperSystemsDirty(viewerState);
                     markPickDirty = true;
                 }
             }
@@ -300,17 +345,43 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
     if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        const bool supportsPsi6 =
+            viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
+        if (!supportsPsi6
+            && (viewerState.analysisColorMode
+                    == AnalysisColorMode::BondOrientationalOrderMagnitude
+                || viewerState.analysisColorMode
+                    == AnalysisColorMode::BondOrientationalOrderPhase))
+        {
+            viewerState.analysisColorMode = AnalysisColorMode::Disabled;
+            markColorDependentHelperSystemsDirty(viewerState);
+        }
+
         float neighborCutoffFactor = viewerState.neighborCutoffFactor;
         if (ImGui::SliderFloat("Neighbor cutoff factor", &neighborCutoffFactor,
-                               1.0f, 3.0f, "%.2f"))
+                               1.0f, 2.0f, "%.2f"))
         {
             viewerState.neighborCutoffFactor = neighborCutoffFactor;
             viewerState.neighborAnalysisValid = false;
             particleSystem.clearNeighborAnalysis();
+            markNearestNeighborRenderSystemsDirty(viewerState);
+            markBondDiagramGeometryDirty(viewerState);
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+            viewerState.pendingFindNeighbors = viewerState.autoFindNeighbors;
             markPickDirty = true;
         }
 
         if (ImGui::Button("Find neighbors"))
+        {
+            viewerState.pendingFindNeighbors = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("auto", &viewerState.autoFindNeighbors)
+            && viewerState.autoFindNeighbors
+            && !viewerState.neighborAnalysisValid)
         {
             viewerState.pendingFindNeighbors = true;
         }
@@ -328,6 +399,94 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
         ImGui::Text("Neighbors: %s",
                     viewerState.neighborAnalysisValid ? "computed" : "not computed");
+
+        ImGui::BeginDisabled(!viewerState.neighborAnalysisValid);
+        int analysisColorModeIndex =
+            analysisColorModeComboIndex(viewerState.analysisColorMode);
+        if (supportsPsi6)
+        {
+            static const char *kAnalysisColorModeLabels2D[] = {
+                "None",
+                "Neighbor count",
+                "Bond-orientational order: magnitude",
+                "Bond-orientational order: phase",
+            };
+            if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
+                             kAnalysisColorModeLabels2D,
+                             IM_ARRAYSIZE(kAnalysisColorModeLabels2D)))
+            {
+                viewerState.analysisColorMode =
+                    analysisColorModeFromComboIndex(analysisColorModeIndex, true);
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
+        else
+        {
+            static const char *kAnalysisColorModeLabels3D[] = {
+                "None",
+                "Neighbor count",
+            };
+            analysisColorModeIndex = bx::min(analysisColorModeIndex, 1);
+            if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
+                             kAnalysisColorModeLabels3D,
+                             IM_ARRAYSIZE(kAnalysisColorModeLabels3D)))
+            {
+                viewerState.analysisColorMode =
+                    analysisColorModeFromComboIndex(analysisColorModeIndex, false);
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
+        ImGui::EndDisabled();
+
+        const bool usesBondOrientationalColor =
+            viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderMagnitude
+            || viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderPhase;
+        ImGui::BeginDisabled(!supportsPsi6 || !usesBondOrientationalColor);
+        int symmetryOrderIndex = int(viewerState.bondOrientationalOrder) - 2;
+        static const char *kBondOrientationalOrderLabels[] = {
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+        };
+        if (ImGui::Combo("Bond-order symmetry", &symmetryOrderIndex,
+                         kBondOrientationalOrderLabels,
+                         IM_ARRAYSIZE(kBondOrientationalOrderLabels)))
+        {
+            viewerState.bondOrientationalOrder =
+                static_cast<uint8_t>(symmetryOrderIndex + 2);
+            viewerState.pendingRefreshAnalysisResults = viewerState.neighborAnalysisValid;
+        }
+        ImGui::EndDisabled();
+
+        if (viewerState.neighborAnalysisValid
+            && ImGui::CollapsingHeader("Bond diagram"))
+        {
+            viewerState.bondDiagramRenderRequested = true;
+            ImGui::Separator();
+            if (bondDiagramResources != nullptr && bondDiagramResources->enabled
+                && bgfx::isValid(bondDiagramResources->colorTexture))
+            {
+                const float previewSize = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                ImGui::Image(bondDiagramResources->colorTexture,
+                             ImVec2(previewSize, previewSize));
+            }
+            else if (bondDiagramResources != nullptr
+                     && !bondDiagramResources->disableReason.empty())
+            {
+                ImGui::TextWrapped("Preview unavailable: %s",
+                                   bondDiagramResources->disableReason.c_str());
+            }
+
+            float bondDiagramPointScale = viewerState.bondDiagramPointScale;
+            if (ImGui::SliderFloat("Point size", &bondDiagramPointScale,
+                                   0.01f, 0.12f, "%.3f"))
+            {
+                viewerState.bondDiagramPointScale = bondDiagramPointScale;
+                markBondDiagramGeometryDirty(viewerState);
+            }
+        }
     }
 
     if (markPickDirty)

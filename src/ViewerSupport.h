@@ -24,6 +24,14 @@ enum class ColorMode : uint8_t
     Count,
 };
 
+enum class AnalysisColorMode : uint8_t
+{
+    Disabled = 0,
+    NeighborCount,
+    BondOrientationalOrderMagnitude,
+    BondOrientationalOrderPhase,
+};
+
 struct ViewerState
 {
     ViewerState()
@@ -35,6 +43,11 @@ struct ViewerState
     bool showUi = true;
     bool showStats = false;
     bool showBox = true;
+    bool patchRenderSystemsDirty = true;
+    bool bondRenderSystemsDirty = true;
+    bool nearestNeighborRenderSystemsDirty = true;
+    bool polygonRenderSystemsDirty = true;
+    bool mobilitySystemDirty = true;
     uint16_t renderViewportWidth = 0;
     uint16_t renderViewportHeight = 0;
     uint16_t uiPanelWidth = 0;
@@ -55,14 +68,17 @@ struct ViewerState
     bool jumpToFirstFrame = false;
     bool jumpToLastFrame = false;
     float orthoZoom = 1.0f;
+    float currentFps = 0.0f;
     uint8_t lightingLevelIndex = 14u;
     float particleSizeScale = 1.0f;
     bool wrapParticlesToBox = true;
     TrajectoryReader::Dimensionality fileDimensionality =
         TrajectoryReader::Dimensionality::ThreeDimensional;
     float neighborCutoffFactor = 1.3f;
+    bool autoFindNeighbors = false;
     bool neighborAnalysisValid = false;
     bool pendingFindNeighbors = false;
+    bool pendingRefreshAnalysisResults = false;
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     uint8_t maxSeenParticleTypeIndex = 0u;
@@ -95,8 +111,14 @@ struct ViewerState
     uint32_t lastPickedId = 0;
     bool pendingScreenshotRequest = false;
     ColorMode colorMode = ColorMode::FileDefault;
+    AnalysisColorMode analysisColorMode = AnalysisColorMode::Disabled;
+    uint8_t bondOrientationalOrder = 6u;
     bool mobilityModeEnabled = false;
     bool bondModeEnabled = false;
+    bool bondDiagramGeometryDirty = true;
+    bool bondDiagramViewDirty = true;
+    bool bondDiagramRenderRequested = false;
+    float bondDiagramPointScale = 0.05f;
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
 };
@@ -115,10 +137,29 @@ struct PickResources
     std::string disableReason;
 };
 
+struct BondDiagramResources
+{
+    bgfx::TextureHandle colorTexture = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle depthTexture = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle frameBuffer = BGFX_INVALID_HANDLE;
+    uint16_t width = 0;
+    uint16_t height = 0;
+    bool enabled = false;
+    std::string disableReason;
+};
+
 float computeCutPlaneStep(const SimulationBox &simulationBox);
 uint16_t clampPickCoordinate(double value, int extent);
 uint16_t mapWindowYToPickY(uint16_t windowY, uint16_t height);
 uint32_t decodeParticleId(const uint8_t *pixel, bgfx::TextureFormat::Enum colorFormat);
+void markAllHelperSystemsDirty(ViewerState &state);
+void markVisibilityDependentHelperSystemsDirty(ViewerState &state);
+void markColorDependentHelperSystemsDirty(ViewerState &state);
+void markBondLikeHelperSystemsDirty(ViewerState &state);
+void markMobilitySystemDirty(ViewerState &state);
+void markNearestNeighborRenderSystemsDirty(ViewerState &state);
+void markBondDiagramGeometryDirty(ViewerState &state);
+void markBondDiagramViewDirty(ViewerState &state);
 void markPickBufferDirty(ViewerState &state);
 bool hasValidPickBuffer(const ViewerState &state);
 bool hideSelectedParticles(ParticleSystem &particleSystem,
@@ -138,6 +179,9 @@ bool applyParticleVisibilityFilters(ParticleSystem &particleSystem,
 void resolvePendingPickRequest(ViewerState &state, const PickResources &pickResources);
 void destroyPickResources(PickResources &pickResources);
 bool createPickResources(PickResources &pickResources, uint16_t width, uint16_t height);
+void destroyBondDiagramResources(BondDiagramResources &bondDiagramResources);
+bool createBondDiagramResources(BondDiagramResources &bondDiagramResources,
+                                uint16_t width, uint16_t height);
 float computeInitialCameraDistance(const SimulationBox &simulationBox);
 float computeInitialFarPlane(float cameraDistance, const SimulationBox &simulationBox);
 float computeInitialOrthoHalfHeight(const SimulationBox &simulationBox, float aspectRatio);

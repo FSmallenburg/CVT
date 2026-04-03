@@ -76,6 +76,7 @@ void ParticleSystem::clear()
     m_particles.clear();
     m_patchyMetadata.clear();
     m_neighborAnalysis.clear();
+    clearAnalysisResults();
 }
 
 void ParticleSystem::addParticle(const Particle &particle)
@@ -116,12 +117,14 @@ const std::vector<PatchyParticleData> &ParticleSystem::patchyMetadata() const
 void ParticleSystem::clearNeighborAnalysis()
 {
     m_neighborAnalysis.clear();
+    clearAnalysisResults();
 }
 
 void ParticleSystem::resizeNeighborAnalysis(size_t count)
 {
     m_neighborAnalysis.clear();
     m_neighborAnalysis.resize(count);
+    clearAnalysisResults();
 }
 
 bool ParticleSystem::hasNeighborAnalysis() const
@@ -137,6 +140,36 @@ std::vector<std::vector<NearestNeighborData>> &ParticleSystem::neighborAnalysis(
 const std::vector<std::vector<NearestNeighborData>> &ParticleSystem::neighborAnalysis() const
 {
     return m_neighborAnalysis;
+}
+
+void ParticleSystem::clearAnalysisResults()
+{
+    m_analysisResults.clear();
+    m_cachedBondOrientationalOrder = 0u;
+}
+
+void ParticleSystem::resizeAnalysisResults(size_t count, uint8_t bondOrientationalOrder)
+{
+    m_analysisResults.clear();
+    m_analysisResults.resize(count);
+    m_cachedBondOrientationalOrder = bondOrientationalOrder;
+}
+
+bool ParticleSystem::hasAnalysisResults(uint8_t bondOrientationalOrder) const
+{
+    return !m_analysisResults.empty()
+           && m_analysisResults.size() == m_particles.size()
+           && m_cachedBondOrientationalOrder == bondOrientationalOrder;
+}
+
+std::vector<ParticleAnalysisData> &ParticleSystem::analysisResults()
+{
+    return m_analysisResults;
+}
+
+const std::vector<ParticleAnalysisData> &ParticleSystem::analysisResults() const
+{
+    return m_analysisResults;
 }
 
 void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
