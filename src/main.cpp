@@ -871,12 +871,16 @@ void logStructureFactorRenderUpdate(StructureFactorResources &structureFactorRes
                                    uint16_t renderSize,
                                    const std::string &gpuError)
 {
-    const bool shouldLog = !lowResDuringInteraction
-                           || !structureFactorResources.hasLoggedRenderMode
-                           || structureFactorResources.lastRenderUsedGpu != usedGpu
-                           || structureFactorResources.lastRenderWasLowRes
-                                  != lowResDuringInteraction
-                           || structureFactorResources.lastRenderSize != renderSize;
+    const bool unexpectedCpuFallback = !usedGpu
+                                       && !gpuError.empty()
+                                       && gpuError != "disabled by the Use GPU toggle";
+    const bool shouldLog = unexpectedCpuFallback
+                           && (!lowResDuringInteraction
+                               || !structureFactorResources.hasLoggedRenderMode
+                               || structureFactorResources.lastRenderUsedGpu != usedGpu
+                               || structureFactorResources.lastRenderWasLowRes
+                                      != lowResDuringInteraction
+                               || structureFactorResources.lastRenderSize != renderSize);
 
     structureFactorResources.hasLoggedRenderMode = true;
     structureFactorResources.lastRenderUsedGpu = usedGpu;
@@ -888,16 +892,11 @@ void logStructureFactorRenderUpdate(StructureFactorResources &structureFactorRes
         return;
     }
 
-    std::cout << "Structure factor: "
-              << (usedGpu ? "GPU direct-sum" : "CPU fallback")
+    std::cout << "Structure factor: CPU fallback"
               << (lowResDuringInteraction ? " lower-resolution during interaction" : " render")
               << " at " << renderSize << "x" << renderSize
-              << " using " << structureFactorResources.particleCount << " particles";
-    if (!usedGpu && !gpuError.empty())
-    {
-        std::cout << " (GPU path unavailable: " << gpuError << ')';
-    }
-    std::cout << '.' << std::endl;
+              << " using " << structureFactorResources.particleCount << " particles"
+              << " (GPU path unavailable: " << gpuError << ")." << std::endl;
 }
 
 void updateStructureFactorPreview(ViewerState &viewerState,
@@ -969,7 +968,18 @@ void updateStructureFactorPreview(ViewerState &viewerState,
 
     structureFactorResources.computeMilliseconds = image.computeMilliseconds;
     structureFactorResources.particleCount = image.particleCount;
-    structureFactorResources.statusText.clear();
+    if (viewerState.structureFactorUseGpu
+        && !gpuError.empty()
+        && gpuError != "disabled by the Use GPU toggle")
+    {
+        structureFactorResources.statusText =
+            "Warning: rendered the structure factor on the CPU because the GPU path was unavailable: "
+            + gpuError;
+    }
+    else
+    {
+        structureFactorResources.statusText.clear();
+    }
     logStructureFactorRenderUpdate(structureFactorResources, false,
                                    lowResDuringInteraction, settings.previewSize, gpuError);
     viewerState.structureFactorDirty = false;
@@ -3342,7 +3352,6 @@ int main(int argc, char **argv)
         PolygonRenderSystems polygonRenderSystems;
         BondDiagramResources bondDiagramResources;
         StructureFactorResources structureFactorResources;
-        structureFactorResources.statusText = "Click Compute structure factor to generate S(kx, ky).";
         TrajectoryReader::FileType particleFileType = TrajectoryReader::FileType::Sphere;
 
         // Load shaders
