@@ -3,6 +3,7 @@
 #include "ParticleSystem.h"
 #include "SimulationBox.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -36,8 +37,20 @@ struct StructureFactorImage
     std::vector<uint8_t> rgba8Pixels;
 };
 
+struct StructureFactorGpuParticleData
+{
+    uint16_t width = 0;
+    uint16_t height = 0;
+    size_t particleCount = 0;
+    std::vector<float> rgba32fPixels;
+};
+
 bool computeStructureFactorImage(const ParticleSystem &particleSystem,
                                  const SimulationBox &simulationBox,
                                  const StructureFactorSettings &settings,
                                  StructureFactorImage &image,
                                  std::string &error);
+bool buildStructureFactorGpuParticleData(const ParticleSystem &particleSystem,
+                                         const StructureFactorSettings &settings,
+                                         StructureFactorGpuParticleData &data,
+                                         std::string &error);

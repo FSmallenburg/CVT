@@ -494,31 +494,51 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
         if (ImGui::CollapsingHeader("Structure factor"))
         {
-            if (ImGui::Button("Compute struc"))
+            if (ImGui::Button("Compute structure factor"))
             {
+                viewerState.structureFactorInteractionLowResActive = false;
                 markStructureFactorDirty(viewerState);
                 viewerState.structureFactorPendingCompute = true;
             }
             ImGui::SameLine();
             if (ImGui::Checkbox("Auto update##StructureFactor",
-                                &viewerState.structureFactorAutoUpdate)
-                && viewerState.structureFactorAutoUpdate
-                && viewerState.structureFactorDirty)
+                                &viewerState.structureFactorAutoUpdate))
             {
-                viewerState.structureFactorPendingCompute = true;
+                if (!viewerState.structureFactorAutoUpdate)
+                {
+                    viewerState.structureFactorInteractionLowResActive = false;
+                }
+                else if (viewerState.structureFactorDirty)
+                {
+                    viewerState.structureFactorPendingCompute = true;
+                }
+            }
+
+            bool useGpu = viewerState.structureFactorUseGpu;
+            if (ImGui::Checkbox("Use GPU##StructureFactor", &useGpu))
+            {
+                viewerState.structureFactorInteractionLowResActive = false;
+                viewerState.structureFactorUseGpu = useGpu;
+                markStructureFactorDirty(viewerState);
+                if (viewerState.structureFactorAutoUpdate)
+                {
+                    viewerState.structureFactorPendingCompute = true;
+                }
             }
 
             int maxMode = viewerState.structureFactorMaxModeX;
             if (ImGui::SliderInt("Max |k-mode|", &maxMode, 4, 128))
             {
+                viewerState.structureFactorInteractionLowResActive = false;
                 viewerState.structureFactorMaxModeX = maxMode;
                 viewerState.structureFactorMaxModeY = maxMode;
                 markStructureFactorDirty(viewerState);
             }
 
             int sofqPixels = int(viewerState.structureFactorImageSize);
-            if (ImGui::SliderInt("Pixels", &sofqPixels, 64, 384))
+            if (ImGui::SliderInt("Image resolution", &sofqPixels, 64, 384))
             {
+                viewerState.structureFactorInteractionLowResActive = false;
                 viewerState.structureFactorImageSize =
                     static_cast<uint16_t>(std::clamp(sofqPixels, 64, 384));
                 markStructureFactorDirty(viewerState);
@@ -527,6 +547,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             bool logScale = viewerState.structureFactorLogScale;
             if (ImGui::Checkbox("Log scale##StructureFactor", &logScale))
             {
+                viewerState.structureFactorInteractionLowResActive = false;
                 viewerState.structureFactorLogScale = logScale;
                 markStructureFactorDirty(viewerState);
             }
@@ -534,6 +555,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             bool suppressCentralPeak = viewerState.structureFactorSuppressCentralPeak;
             if (ImGui::Checkbox("Suppress k=0 peak", &suppressCentralPeak))
             {
+                viewerState.structureFactorInteractionLowResActive = false;
                 viewerState.structureFactorSuppressCentralPeak = suppressCentralPeak;
                 markStructureFactorDirty(viewerState);
             }
@@ -541,7 +563,13 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             bool visibleOnly = viewerState.structureFactorUseVisibleParticlesOnly;
             if (ImGui::Checkbox("Visible particles only", &visibleOnly))
             {
+                viewerState.structureFactorInteractionLowResActive = false;
                 viewerState.structureFactorUseVisibleParticlesOnly = visibleOnly;
+                ++viewerState.structureFactorDataRevision;
+                if (viewerState.structureFactorDataRevision == 0u)
+                {
+                    viewerState.structureFactorDataRevision = 1u;
+                }
                 markStructureFactorDirty(viewerState);
             }
 

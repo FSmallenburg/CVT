@@ -122,12 +122,15 @@ struct ViewerState
     bool structureFactorDirty = true;
     bool structureFactorPendingCompute = false;
     bool structureFactorAutoUpdate = false;
+    bool structureFactorUseGpu = true;
+    bool structureFactorInteractionLowResActive = false;
     bool structureFactorLogScale = true;
     bool structureFactorSuppressCentralPeak = true;
     bool structureFactorUseVisibleParticlesOnly = false;
     uint16_t structureFactorImageSize = 192u;
     int structureFactorMaxModeX = 40;
     int structureFactorMaxModeY = 40;
+    uint32_t structureFactorDataRevision = 1u;
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
 };
@@ -160,13 +163,31 @@ struct BondDiagramResources
 struct StructureFactorResources
 {
     bgfx::TextureHandle colorTexture = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle frameBuffer = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle particleDataTexture = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle gpuProgram = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle particleDataSampler = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle params0Uniform = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle params1Uniform = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle params2Uniform = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle rotationUniform = BGFX_INVALID_HANDLE;
     uint16_t width = 0;
     uint16_t height = 0;
+    uint16_t particleTextureWidth = 0;
+    uint16_t particleTextureHeight = 0;
+    bgfx::TextureFormat::Enum particleTextureFormat = bgfx::TextureFormat::Count;
     bool enabled = false;
+    bool gpuPathInitialized = false;
+    bool gpuPathAvailable = false;
     std::string disableReason;
     std::string statusText;
     float computeMilliseconds = 0.0f;
     size_t particleCount = 0;
+    uint32_t particleDataRevision = 0u;
+    bool hasLoggedRenderMode = false;
+    bool lastRenderUsedGpu = false;
+    bool lastRenderWasLowRes = false;
+    uint16_t lastRenderSize = 0u;
 };
 
 float computeCutPlaneStep(const SimulationBox &simulationBox);
@@ -205,6 +226,8 @@ void destroyBondDiagramResources(BondDiagramResources &bondDiagramResources);
 bool createBondDiagramResources(BondDiagramResources &bondDiagramResources,
                                 uint16_t width, uint16_t height);
 void destroyStructureFactorResources(StructureFactorResources &structureFactorResources);
+bool createStructureFactorRenderTarget(StructureFactorResources &structureFactorResources,
+                                       uint16_t width, uint16_t height);
 bool updateStructureFactorTexture(StructureFactorResources &structureFactorResources,
                                   uint16_t width, uint16_t height,
                                   const std::vector<uint8_t> &rgba8Pixels);

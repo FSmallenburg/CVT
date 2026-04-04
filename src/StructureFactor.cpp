@@ -51,6 +51,39 @@ bx::Vec3 rotateScreenWaveVectorToBoxFrame(const std::array<float, 16> &rotation,
     };
 }
 
+bool collectStructureFactorParticles(const ParticleSystem &particleSystem,
+                                     bool useVisibleParticlesOnly,
+                                     std::vector<const Particle *> &sampledParticles,
+                                     std::string &error)
+{
+    sampledParticles.clear();
+    sampledParticles.reserve(particleSystem.particles().size());
+    for (const Particle &particle : particleSystem.particles())
+    {
+        if (!useVisibleParticlesOnly || particle.visible)
+        {
+            sampledParticles.push_back(&particle);
+        }
+    }
+
+    if (sampledParticles.empty())
+    {
+        error = useVisibleParticlesOnly
+                    ? "No visible particles are available for the structure factor image."
+                    : "No particles are available for the structure factor image.";
+        return false;
+    }
+
+    return true;
+}
+
+uint16_t chooseParticleTextureSide(size_t particleCount)
+{
+    const double sideLength = std::ceil(std::sqrt(double(std::max<size_t>(particleCount, 1u))));
+    return static_cast<uint16_t>(std::clamp<uint32_t>(static_cast<uint32_t>(sideLength),
+                                                      1u, 4096u));
+}
+
 float structureFactorValueForIndex(const std::vector<const Particle *> &sampledParticles,
                                    const ReciprocalIndex &index,
                                    double stepX, double stepY, double stepZ,
@@ -127,7 +160,7 @@ bool computeStructureFactorImage(const ParticleSystem &particleSystem,
 
     if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
     {
-        error = "Structure factor preview currently requires a rectangular simulation box.";
+        error = "Structure factor rendering currently requires a rectangular simulation box.";
         return false;
     }
 
@@ -147,20 +180,9 @@ bool computeStructureFactorImage(const ParticleSystem &particleSystem,
     }
 
     std::vector<const Particle *> sampledParticles;
-    sampledParticles.reserve(particleSystem.particles().size());
-    for (const Particle &particle : particleSystem.particles())
+    if (!collectStructureFactorParticles(particleSystem, settings.useVisibleParticlesOnly,
+                                         sampledParticles, error))
     {
-        if (!settings.useVisibleParticlesOnly || particle.visible)
-        {
-            sampledParticles.push_back(&particle);
-        }
-    }
-
-    if (sampledParticles.empty())
-    {
-        error = settings.useVisibleParticlesOnly
-                    ? "No visible particles are available for the structure factor preview."
-                    : "No particles are available for the structure factor preview.";
         return false;
     }
 
@@ -279,5 +301,39 @@ bool computeStructureFactorImage(const ParticleSystem &particleSystem,
     const auto endTime = std::chrono::steady_clock::now();
     image.computeMilliseconds =
         std::chrono::duration<float, std::milli>(endTime - startTime).count();
+    return true;
+}
+
+bool buildStructureFactorGpuParticleData(const ParticleSystem &particleSystem,
+                                         const StructureFactorSettings &settings,
+                                         StructureFactorGpuParticleData &data,
+                                         std::string &error)
+{
+    error.clear();
+    data = {};
+
+    std::vector<const Particle *> sampledParticles;
+    if (!collectStructureFactorParticles(particleSystem, settings.useVisibleParticlesOnly,
+                                         sampledParticles, error))
+    {
+        return false;
+    }
+
+    data.particleCount = sampledParticles.size();
+    data.width = chooseParticleTextureSide(sampledParticles.size());
+    data.height = static_cast<uint16_t>((sampledParticles.size() + data.width - 1u)
+                                        / data.width);
+    data.rgba32fPixels.assign(size_t(data.width) * size_t(data.height) * 4u, 0.0f);
+
+    for (size_t particleIndex = 0; particleIndex < sampledParticles.size(); ++particleIndex)
+    {
+        const Particle &particle = *sampledParticles[particleIndex];
+        const size_t pixelIndex = particleIndex * 4u;
+        data.rgba32fPixels[pixelIndex + 0u] = particle.position.x;
+        data.rgba32fPixels[pixelIndex + 1u] = particle.position.y;
+        data.rgba32fPixels[pixelIndex + 2u] = particle.position.z;
+        data.rgba32fPixels[pixelIndex + 3u] = 1.0f;
+    }
+
     return true;
 }
