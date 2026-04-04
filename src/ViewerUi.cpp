@@ -299,6 +299,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     markPickDirty = true;
                 }
             }
+            ImGui::TextDisabled("Hotkeys: 1-8 toggle species, Shift+1-8 solo.");
         }
 
         bool cutPlaneEnabled = viewerState.cutPlaneEnabled;

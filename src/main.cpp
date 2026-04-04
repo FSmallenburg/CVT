@@ -257,6 +257,8 @@ constexpr float kBondDiagramMarkerRadius = 1.05f;
 constexpr float kBondDiagramCameraDistance = 4.0f;
 constexpr float kBondDiagramOrthoHalfExtent = 1.35f;
 constexpr std::array<float, 4> kBondDiagramCoreColor = {0.82f, 0.84f, 0.88f, 1.0f};
+constexpr std::array<float, 4> kBondDiagramMixedBondGray = {0.65f, 0.65f, 0.65f, 1.0f};
+constexpr float kBondDiagramMixedBondGrayWeight = 0.30f;
 constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
 float s_uiScrollX = 0.0f;
 float s_uiScrollY = 0.0f;
@@ -442,6 +444,45 @@ uint16_t polygonSideCount(const Particle &particle)
     return static_cast<uint16_t>(std::max(0.0f, std::round(particle.sizeParams[1])));
 }
 
+int particleTypeHotkeyIndex(int key)
+{
+    switch (key)
+    {
+    case GLFW_KEY_1:
+    case GLFW_KEY_KP_1:
+        return 0;
+    case GLFW_KEY_2:
+    case GLFW_KEY_KP_2:
+        return 1;
+    case GLFW_KEY_3:
+    case GLFW_KEY_KP_3:
+        return 2;
+    case GLFW_KEY_4:
+    case GLFW_KEY_KP_4:
+        return 3;
+    case GLFW_KEY_5:
+    case GLFW_KEY_KP_5:
+        return 4;
+    case GLFW_KEY_6:
+    case GLFW_KEY_KP_6:
+        return 5;
+    case GLFW_KEY_7:
+    case GLFW_KEY_KP_7:
+        return 6;
+    case GLFW_KEY_8:
+    case GLFW_KEY_KP_8:
+        return 7;
+    case GLFW_KEY_9:
+    case GLFW_KEY_KP_9:
+        return 8;
+    case GLFW_KEY_0:
+    case GLFW_KEY_KP_0:
+        return 9;
+    default:
+        return -1;
+    }
+}
+
 std::array<float, 4> orientationColor(const bx::Vec3 &direction)
 {
     const float length = bx::length(direction);
@@ -501,6 +542,36 @@ std::array<float, 4> hueColor(float hue)
     default:
         return {1.0f, 0.0f, q, 1.0f};
     }
+}
+
+std::array<float, 4> mixColor(const std::array<float, 4> &first,
+                              const std::array<float, 4> &second,
+                              float secondWeight)
+{
+    const float clampedSecondWeight = std::clamp(secondWeight, 0.0f, 1.0f);
+    const float firstWeight = 1.0f - clampedSecondWeight;
+    return {
+        first[0] * firstWeight + second[0] * clampedSecondWeight,
+        first[1] * firstWeight + second[1] * clampedSecondWeight,
+        first[2] * firstWeight + second[2] * clampedSecondWeight,
+        first[3] * firstWeight + second[3] * clampedSecondWeight,
+    };
+}
+
+std::array<float, 4> bondDiagramColorForParticles(const Particle &firstParticle,
+                                                  const Particle &secondParticle)
+{
+    const std::array<float, 4> firstTypeColor = colorFromLetter(firstParticle.typeLabel);
+    const std::array<float, 4> secondTypeColor = colorFromLetter(secondParticle.typeLabel);
+    if (std::toupper(static_cast<unsigned char>(firstParticle.typeLabel))
+        == std::toupper(static_cast<unsigned char>(secondParticle.typeLabel)))
+    {
+        return firstTypeColor;
+    }
+
+    const std::array<float, 4> mixedTypeColor = mixColor(firstTypeColor, secondTypeColor, 0.5f);
+    return mixColor(mixedTypeColor, kBondDiagramMixedBondGray,
+                    kBondDiagramMixedBondGrayWeight);
 }
 
 std::array<float, 4> resolveParticleColor(const Particle &particle, size_t particleIndex,
@@ -1943,6 +2014,17 @@ void rebuildBondDiagramSystems(const ParticleSystem &particleSystem,
                 continue;
             }
 
+            const Particle &sourceParticle = particles[particleIndex];
+            const Particle &targetParticle = particles[neighbor.neighborIndex];
+            const bool sourceSpeciesVisible =
+                isParticleTypeVisible(viewerState, sourceParticle.typeLabel);
+            const bool targetSpeciesVisible =
+                isParticleTypeVisible(viewerState, targetParticle.typeLabel);
+            if (!sourceSpeciesVisible && !targetSpeciesVisible)
+            {
+                continue;
+            }
+
             bx::Vec3 direction = neighbor.displacement;
             const float directionLength = bx::length(direction);
             if (directionLength <= 1.0e-6f)
@@ -1951,10 +2033,13 @@ void rebuildBondDiagramSystems(const ParticleSystem &particleSystem,
             }
 
             direction = bx::mul(direction, 1.0f / directionLength);
+            const std::array<float, 4> bondColor =
+                bondDiagramColorForParticles(sourceParticle, targetParticle);
+
             Particle forwardMarker;
             forwardMarker.id = markerId++;
             forwardMarker.position = bx::mul(direction, kBondDiagramMarkerRadius);
-            forwardMarker.baseColor = particles[particleIndex].baseColor;
+            forwardMarker.baseColor = bondColor;
             forwardMarker.color = forwardMarker.baseColor;
             forwardMarker.visible = true;
             forwardMarker.setUniformScale(viewerState.bondDiagramPointScale);
@@ -1963,7 +2048,7 @@ void rebuildBondDiagramSystems(const ParticleSystem &particleSystem,
             Particle reverseMarker;
             reverseMarker.id = markerId++;
             reverseMarker.position = bx::mul(direction, -kBondDiagramMarkerRadius);
-            reverseMarker.baseColor = particles[neighbor.neighborIndex].baseColor;
+            reverseMarker.baseColor = bondColor;
             reverseMarker.color = reverseMarker.baseColor;
             reverseMarker.visible = true;
             reverseMarker.setUniformScale(viewerState.bondDiagramPointScale);
@@ -2355,6 +2440,25 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
 
     if (action == GLFW_RELEASE)
     {
+        return;
+    }
+
+    const int particleTypeHotkey = particleTypeHotkeyIndex(key);
+    if (action == GLFW_PRESS
+        && particleTypeHotkey >= 0
+        && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT | GLFW_MOD_SUPER)) == 0)
+    {
+        if ((mods & GLFW_MOD_SHIFT) != 0)
+        {
+            state->particleTypeVisible.fill(false);
+            state->particleTypeVisible[particleTypeHotkey] = true;
+        }
+        else
+        {
+            state->particleTypeVisible[particleTypeHotkey] =
+                !state->particleTypeVisible[particleTypeHotkey];
+        }
+        state->pendingApplyParticleTypeVisibility = true;
         return;
     }
 
@@ -2934,6 +3038,14 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
             markPickBufferDirty(viewerState);
         }
         viewerState.pendingOverlapCheck = false;
+    }
+
+    if (viewerState.pendingApplyParticleTypeVisibility)
+    {
+        applyParticleVisibilityFilters(particleSystem, viewerState);
+        markVisibilityDependentHelperSystemsDirty(viewerState);
+        markPickBufferDirty(viewerState);
+        viewerState.pendingApplyParticleTypeVisibility = false;
     }
 
     if (viewerState.pendingInvertSelected)

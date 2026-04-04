@@ -101,6 +101,7 @@ void markAllHelperSystemsDirty(ViewerState &state)
 void markVisibilityDependentHelperSystemsDirty(ViewerState &state)
 {
     markAllHelperSystemsDirty(state);
+    markBondDiagramGeometryDirty(state);
 }
 
 void markColorDependentHelperSystemsDirty(ViewerState &state)

@@ -91,6 +91,7 @@ struct ViewerState
     bool pendingSelectBonded = false;
     bool pendingDescribeSelection = false;
     bool pendingAlignViewToSelection = false;
+    bool pendingApplyParticleTypeVisibility = false;
     bool pendingDescribeVisibleCount = false;
     bool pendingUnselect = false;
     bool pendingIncreaseSphereResolution = false;
