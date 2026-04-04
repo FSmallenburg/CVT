@@ -551,6 +551,33 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 markStructureFactorDirty(viewerState);
             }
 
+            int blurRadius = int(viewerState.structureFactorBlurRadius);
+            if (ImGui::SliderInt("Blur radius", &blurRadius, 0, 2))
+            {
+                viewerState.structureFactorInteractionLowResActive = false;
+                viewerState.structureFactorBlurRadius =
+                    static_cast<uint8_t>(std::clamp(blurRadius, 0, 2));
+                markStructureFactorDirty(viewerState);
+            }
+
+            float colorRangeMin = viewerState.structureFactorColorRangeMin;
+            if (ImGui::SliderFloat("Minimum intensity", &colorRangeMin, 0.0f, 0.99f, "%.2f"))
+            {
+                viewerState.structureFactorInteractionLowResActive = false;
+                viewerState.structureFactorColorRangeMin =
+                    std::clamp(colorRangeMin, 0.0f, viewerState.structureFactorColorRangeMax - 0.01f);
+                markStructureFactorDirty(viewerState);
+            }
+
+            float colorRangeMax = viewerState.structureFactorColorRangeMax;
+            if (ImGui::SliderFloat("Maximum intensity", &colorRangeMax, 0.01f, 1.0f, "%.2f"))
+            {
+                viewerState.structureFactorInteractionLowResActive = false;
+                viewerState.structureFactorColorRangeMax =
+                    std::clamp(colorRangeMax, viewerState.structureFactorColorRangeMin + 0.01f, 1.0f);
+                markStructureFactorDirty(viewerState);
+            }
+
             bool logScale = viewerState.structureFactorLogScale;
             if (ImGui::Checkbox("Log scale##StructureFactor", &logScale))
             {

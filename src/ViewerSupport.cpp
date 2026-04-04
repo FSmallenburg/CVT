@@ -51,15 +51,26 @@ void resetStructureFactorPreviewTexture(StructureFactorResources &structureFacto
     {
         bgfx::destroy(structureFactorResources.frameBuffer);
     }
+    if (bgfx::isValid(structureFactorResources.intensityFrameBuffer))
+    {
+        bgfx::destroy(structureFactorResources.intensityFrameBuffer);
+    }
 
     if (!bgfx::isValid(structureFactorResources.frameBuffer)
         && bgfx::isValid(structureFactorResources.colorTexture))
     {
         bgfx::destroy(structureFactorResources.colorTexture);
     }
+    if (!bgfx::isValid(structureFactorResources.intensityFrameBuffer)
+        && bgfx::isValid(structureFactorResources.intensityTexture))
+    {
+        bgfx::destroy(structureFactorResources.intensityTexture);
+    }
 
     structureFactorResources.colorTexture = BGFX_INVALID_HANDLE;
     structureFactorResources.frameBuffer = BGFX_INVALID_HANDLE;
+    structureFactorResources.intensityTexture = BGFX_INVALID_HANDLE;
+    structureFactorResources.intensityFrameBuffer = BGFX_INVALID_HANDLE;
     structureFactorResources.width = 0;
     structureFactorResources.height = 0;
     structureFactorResources.enabled = false;
@@ -138,7 +149,7 @@ void markStructureFactorDirty(ViewerState &state)
 float computeCutPlaneStep(const SimulationBox &simulationBox)
 {
     const bx::Vec3 boxSize = simulationBox.size();
-    return boxSize.z * 0.002f;
+    return boxSize.z * 0.01f;
 }
 
 uint16_t clampPickCoordinate(double value, int extent)
@@ -693,9 +704,17 @@ void destroyStructureFactorResources(StructureFactorResources &structureFactorRe
     {
         bgfx::destroy(structureFactorResources.gpuProgram);
     }
+    if (bgfx::isValid(structureFactorResources.colorizeProgram))
+    {
+        bgfx::destroy(structureFactorResources.colorizeProgram);
+    }
     if (bgfx::isValid(structureFactorResources.particleDataSampler))
     {
         bgfx::destroy(structureFactorResources.particleDataSampler);
+    }
+    if (bgfx::isValid(structureFactorResources.intensitySampler))
+    {
+        bgfx::destroy(structureFactorResources.intensitySampler);
     }
     if (bgfx::isValid(structureFactorResources.params0Uniform))
     {
@@ -713,14 +732,26 @@ void destroyStructureFactorResources(StructureFactorResources &structureFactorRe
     {
         bgfx::destroy(structureFactorResources.rotationUniform);
     }
+    if (bgfx::isValid(structureFactorResources.colorParamsUniform))
+    {
+        bgfx::destroy(structureFactorResources.colorParamsUniform);
+    }
+    if (bgfx::isValid(structureFactorResources.colorRangeUniform))
+    {
+        bgfx::destroy(structureFactorResources.colorRangeUniform);
+    }
 
     structureFactorResources.particleDataTexture = BGFX_INVALID_HANDLE;
     structureFactorResources.gpuProgram = BGFX_INVALID_HANDLE;
+    structureFactorResources.colorizeProgram = BGFX_INVALID_HANDLE;
     structureFactorResources.particleDataSampler = BGFX_INVALID_HANDLE;
+    structureFactorResources.intensitySampler = BGFX_INVALID_HANDLE;
     structureFactorResources.params0Uniform = BGFX_INVALID_HANDLE;
     structureFactorResources.params1Uniform = BGFX_INVALID_HANDLE;
     structureFactorResources.params2Uniform = BGFX_INVALID_HANDLE;
     structureFactorResources.rotationUniform = BGFX_INVALID_HANDLE;
+    structureFactorResources.colorParamsUniform = BGFX_INVALID_HANDLE;
+    structureFactorResources.colorRangeUniform = BGFX_INVALID_HANDLE;
     structureFactorResources.particleTextureWidth = 0;
     structureFactorResources.particleTextureHeight = 0;
     structureFactorResources.particleTextureFormat = bgfx::TextureFormat::Count;
@@ -759,23 +790,39 @@ bool createStructureFactorRenderTarget(StructureFactorResources &structureFactor
 
     structureFactorResources.colorTexture =
         bgfx::createTexture2D(width, height, false, 1, colorFormat, kColorFlags);
-    if (!bgfx::isValid(structureFactorResources.colorTexture))
+    structureFactorResources.intensityTexture =
+        bgfx::createTexture2D(width, height, false, 1, colorFormat, kColorFlags);
+    if (!bgfx::isValid(structureFactorResources.colorTexture)
+        || !bgfx::isValid(structureFactorResources.intensityTexture))
     {
+        resetStructureFactorPreviewTexture(structureFactorResources);
         structureFactorResources.disableReason = "failed to create structure-factor render target";
         return false;
     }
 
-    bgfx::Attachment attachment;
-    attachment.init(structureFactorResources.colorTexture);
-    if (!bgfx::isFrameBufferValid(1, &attachment))
+    bgfx::Attachment colorAttachment;
+    colorAttachment.init(structureFactorResources.colorTexture);
+    if (!bgfx::isFrameBufferValid(1, &colorAttachment))
     {
         resetStructureFactorPreviewTexture(structureFactorResources);
         structureFactorResources.disableReason = "structure-factor framebuffer invalid";
         return false;
     }
 
-    structureFactorResources.frameBuffer = bgfx::createFrameBuffer(1, &attachment, true);
-    if (!bgfx::isValid(structureFactorResources.frameBuffer))
+    bgfx::Attachment intensityAttachment;
+    intensityAttachment.init(structureFactorResources.intensityTexture);
+    if (!bgfx::isFrameBufferValid(1, &intensityAttachment))
+    {
+        resetStructureFactorPreviewTexture(structureFactorResources);
+        structureFactorResources.disableReason = "structure-factor intensity framebuffer invalid";
+        return false;
+    }
+
+    structureFactorResources.frameBuffer = bgfx::createFrameBuffer(1, &colorAttachment, true);
+    structureFactorResources.intensityFrameBuffer =
+        bgfx::createFrameBuffer(1, &intensityAttachment, true);
+    if (!bgfx::isValid(structureFactorResources.frameBuffer)
+        || !bgfx::isValid(structureFactorResources.intensityFrameBuffer))
     {
         resetStructureFactorPreviewTexture(structureFactorResources);
         structureFactorResources.disableReason = "failed to create structure-factor framebuffer";

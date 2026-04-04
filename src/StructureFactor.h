@@ -12,6 +12,9 @@
 struct StructureFactorSettings
 {
     uint16_t previewSize = 192u;
+    uint8_t blurRadius = 1u;
+    float colorRangeMin = 0.0f;
+    float colorRangeMax = 1.0f;
     int maxModeX = 40;
     int maxModeY = 40;
     bool logScale = true;

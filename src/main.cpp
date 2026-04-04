@@ -225,7 +225,7 @@ namespace
 constexpr float kZoomPerWheelStep = 0.9f;
 constexpr float kMinOrthoZoom = 0.05f;
 constexpr float kMaxOrthoZoom = 100.0f;
-constexpr float kMouseRotationScale = 0.01f;
+constexpr float kMouseRotationScale = 0.005f;
 constexpr float kMouseTranslationScale = 2.0f;
 constexpr double kClickDragThresholdPixels = 4.0;
 constexpr bgfx::ViewId kMainView = 0;
@@ -234,6 +234,7 @@ constexpr bgfx::ViewId kBlitView = 2;
 constexpr bgfx::ViewId kBondDiagramView = 3;
 constexpr bgfx::ViewId kUiView = 4;
 constexpr bgfx::ViewId kStructureFactorView = 5;
+constexpr bgfx::ViewId kStructureFactorColorView = 6;
 constexpr float kSphereRadius = 1.0f;
 constexpr uint16_t kDefaultArrowSlices = 12;
 constexpr uint16_t kDefaultSphereStacks = 10;
@@ -913,6 +914,9 @@ void updateStructureFactorPreview(ViewerState &viewerState,
                                : viewerState.structureFactorImageSize;
     settings.maxModeX = viewerState.structureFactorMaxModeX;
     settings.maxModeY = viewerState.structureFactorMaxModeY;
+    settings.blurRadius = viewerState.structureFactorBlurRadius;
+    settings.colorRangeMin = viewerState.structureFactorColorRangeMin;
+    settings.colorRangeMax = viewerState.structureFactorColorRangeMax;
     settings.logScale = viewerState.structureFactorLogScale;
     settings.suppressCentralPeak = viewerState.structureFactorSuppressCentralPeak;
     settings.useVisibleParticlesOnly = viewerState.structureFactorUseVisibleParticlesOnly;
@@ -2015,6 +2019,8 @@ bool ensureStructureFactorGpuResources(StructureFactorResources &structureFactor
     structureFactorResources.gpuPathInitialized = true;
     structureFactorResources.particleDataSampler =
         bgfx::createUniform("s_particleData", bgfx::UniformType::Sampler);
+    structureFactorResources.intensitySampler =
+        bgfx::createUniform("s_sfIntensity", bgfx::UniformType::Sampler);
     structureFactorResources.params0Uniform =
         bgfx::createUniform("u_sfParams0", bgfx::UniformType::Vec4);
     structureFactorResources.params1Uniform =
@@ -2023,10 +2029,17 @@ bool ensureStructureFactorGpuResources(StructureFactorResources &structureFactor
         bgfx::createUniform("u_sfParams2", bgfx::UniformType::Vec4);
     structureFactorResources.rotationUniform =
         bgfx::createUniform("u_sfRotation", bgfx::UniformType::Vec4, 3);
+    structureFactorResources.colorParamsUniform =
+        bgfx::createUniform("u_sfColorParams", bgfx::UniformType::Vec4);
+    structureFactorResources.colorRangeUniform =
+        bgfx::createUniform("u_sfColorRange", bgfx::UniformType::Vec4);
 
-    bgfx::ShaderHandle vs = loadShader("shaders/vs_structure_factor.bin");
-    bgfx::ShaderHandle fs = loadShader("shaders/fs_structure_factor.bin");
-    if (!bgfx::isValid(vs) || !bgfx::isValid(fs))
+    bgfx::ShaderHandle computeVs = loadShader("shaders/vs_structure_factor.bin");
+    bgfx::ShaderHandle computeFs = loadShader("shaders/fs_structure_factor.bin");
+    bgfx::ShaderHandle colorVs = loadShader("shaders/vs_structure_factor.bin");
+    bgfx::ShaderHandle colorFs = loadShader("shaders/fs_structure_factor_color.bin");
+    if (!bgfx::isValid(computeVs) || !bgfx::isValid(computeFs)
+        || !bgfx::isValid(colorVs) || !bgfx::isValid(colorFs))
     {
         structureFactorResources.disableReason =
             "GPU structure-factor shaders are unavailable; run compileshaders.sh to build them.";
@@ -2034,11 +2047,13 @@ bool ensureStructureFactorGpuResources(StructureFactorResources &structureFactor
         return false;
     }
 
-    structureFactorResources.gpuProgram = bgfx::createProgram(vs, fs, true);
-    if (!bgfx::isValid(structureFactorResources.gpuProgram))
+    structureFactorResources.gpuProgram = bgfx::createProgram(computeVs, computeFs, true);
+    structureFactorResources.colorizeProgram = bgfx::createProgram(colorVs, colorFs, true);
+    if (!bgfx::isValid(structureFactorResources.gpuProgram)
+        || !bgfx::isValid(structureFactorResources.colorizeProgram))
     {
         structureFactorResources.disableReason =
-            "failed to create the GPU structure-factor shader program";
+            "failed to create the GPU structure-factor shader programs";
         structureFactorResources.gpuPathAvailable = false;
         return false;
     }
@@ -2245,13 +2260,28 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
         settings.sceneRotation[4], settings.sceneRotation[5], settings.sceneRotation[6], 0.0f,
         settings.sceneRotation[8], settings.sceneRotation[9], settings.sceneRotation[10], 0.0f,
     };
+    const float colorParams[4] = {
+        structureFactorResources.width > 0u ? 1.0f / float(structureFactorResources.width) : 0.0f,
+        structureFactorResources.height > 0u ? 1.0f / float(structureFactorResources.height) : 0.0f,
+        float(settings.blurRadius),
+        0.0f,
+    };
+    const float colorRangeMin = std::clamp(settings.colorRangeMin, 0.0f, 0.99f);
+    const float colorRangeMax = std::clamp(settings.colorRangeMax,
+                                           colorRangeMin + 0.01f, 1.0f);
+    const float colorRange[4] = {
+        colorRangeMin,
+        colorRangeMax,
+        1.0f / (colorRangeMax - colorRangeMin),
+        0.0f,
+    };
 
-    bgfx::setViewName(kStructureFactorView, "StructureFactor");
+    bgfx::setViewName(kStructureFactorView, "StructureFactorCompute");
     bgfx::setViewRect(kStructureFactorView, 0, 0,
                       structureFactorResources.width, structureFactorResources.height);
-    bgfx::setViewFrameBuffer(kStructureFactorView, structureFactorResources.frameBuffer);
+    bgfx::setViewFrameBuffer(kStructureFactorView, structureFactorResources.intensityFrameBuffer);
     bgfx::setViewTransform(kStructureFactorView, nullptr, nullptr);
-    bgfx::setViewClear(kStructureFactorView, BGFX_CLEAR_COLOR, 0x040406ff);
+    bgfx::setViewClear(kStructureFactorView, BGFX_CLEAR_COLOR, 0x000000ff);
 
     bgfx::setUniform(structureFactorResources.params0Uniform, params0);
     bgfx::setUniform(structureFactorResources.params1Uniform, params1);
@@ -2261,6 +2291,19 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
                      structureFactorResources.particleDataTexture);
     submitStructureFactorFullscreenTriangle(kStructureFactorView,
                                             structureFactorResources.gpuProgram);
+
+    bgfx::setViewName(kStructureFactorColorView, "StructureFactorColor");
+    bgfx::setViewRect(kStructureFactorColorView, 0, 0,
+                      structureFactorResources.width, structureFactorResources.height);
+    bgfx::setViewFrameBuffer(kStructureFactorColorView, structureFactorResources.frameBuffer);
+    bgfx::setViewTransform(kStructureFactorColorView, nullptr, nullptr);
+    bgfx::setViewClear(kStructureFactorColorView, BGFX_CLEAR_COLOR, 0x040406ff);
+    bgfx::setUniform(structureFactorResources.colorParamsUniform, colorParams);
+    bgfx::setUniform(structureFactorResources.colorRangeUniform, colorRange);
+    bgfx::setTexture(0, structureFactorResources.intensitySampler,
+                     structureFactorResources.intensityTexture);
+    submitStructureFactorFullscreenTriangle(kStructureFactorColorView,
+                                            structureFactorResources.colorizeProgram);
 
     structureFactorResources.particleCount = particleCount;
     structureFactorResources.enabled = true;
@@ -2549,7 +2592,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             }
             break;
         case GLFW_KEY_PERIOD:
-            if (action == GLFW_PRESS)
+            if (action == GLFW_PRESS || action == GLFW_REPEAT)
             {
                 if ((mods & GLFW_MOD_SHIFT) != 0)
                 {
@@ -2562,7 +2605,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             }
             break;
         case GLFW_KEY_COMMA:
-            if (action == GLFW_PRESS)
+            if (action == GLFW_PRESS || action == GLFW_REPEAT)
             {
                 if ((mods & GLFW_MOD_SHIFT) != 0)
                 {
@@ -2680,6 +2723,21 @@ static void glfw_scrollCallback(GLFWwindow *window, double xoffset, double yoffs
     s_uiScrollY += static_cast<float>(yoffset);
     if (state == nullptr || yoffset == 0.0 || ImGuiBgfx::wantsMouseCapture())
     {
+        return;
+    }
+
+    const int mods = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS
+                             || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS
+                         ? GLFW_MOD_CONTROL
+                         : 0;
+
+    if ((mods & GLFW_MOD_CONTROL) != 0)
+    {
+        if (state->cutPlaneEnabled)
+        {
+            state->pendingCutPlaneStep -= static_cast<int>(std::lround(yoffset));
+            markPickBufferDirty(*state);
+        }
         return;
     }
 

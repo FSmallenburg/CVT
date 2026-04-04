@@ -118,6 +118,6 @@ void main()
         normalized = intensity * max(u_sfParams0.w, 0.0);
     }
 
-    vec3 color = structureFactorColor(clamp(normalized, 0.0, 1.0));
-    gl_FragColor = vec4(color, 1.0);
+    float clampedNormalized = clamp(normalized, 0.0, 1.0);
+    gl_FragColor = vec4(clampedNormalized, clampedNormalized, clampedNormalized, 1.0);
 }

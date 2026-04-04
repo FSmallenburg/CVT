@@ -135,6 +135,88 @@ std::array<float, 4> structureFactorColor(float t)
     };
 }
 
+float blurKernelWeight(int distance, uint8_t radius)
+{
+    if (radius == 0u)
+    {
+        return distance == 0 ? 1.0f : 0.0f;
+    }
+
+    if (radius == 1u)
+    {
+        switch (distance)
+        {
+        case 0: return 2.0f;
+        case 1: return 1.0f;
+        default: return 0.0f;
+        }
+    }
+
+    switch (distance)
+    {
+    case 0: return 6.0f;
+    case 1: return 4.0f;
+    case 2: return 1.0f;
+    default: return 0.0f;
+    }
+}
+
+std::vector<float> blurScalarImage(const std::vector<float> &values,
+                                   uint16_t width, uint16_t height,
+                                   uint8_t radius)
+{
+    if (radius == 0u || width == 0u || height == 0u || values.empty())
+    {
+        return values;
+    }
+
+    std::vector<float> horizontal(values.size(), 0.0f);
+    std::vector<float> blurred(values.size(), 0.0f);
+    const int blurRadius = std::min<int>(radius, 2);
+
+    for (uint16_t y = 0; y < height; ++y)
+    {
+        for (uint16_t x = 0; x < width; ++x)
+        {
+            float weightedSum = 0.0f;
+            float totalWeight = 0.0f;
+            for (int dx = -blurRadius; dx <= blurRadius; ++dx)
+            {
+                const uint16_t sampleX = static_cast<uint16_t>(std::clamp<int>(int(x) + dx,
+                                                                               0,
+                                                                               int(width) - 1));
+                const float weight = blurKernelWeight(std::abs(dx), radius);
+                weightedSum += values[size_t(y) * size_t(width) + size_t(sampleX)] * weight;
+                totalWeight += weight;
+            }
+            horizontal[size_t(y) * size_t(width) + size_t(x)] =
+                totalWeight > 0.0f ? (weightedSum / totalWeight) : 0.0f;
+        }
+    }
+
+    for (uint16_t y = 0; y < height; ++y)
+    {
+        for (uint16_t x = 0; x < width; ++x)
+        {
+            float weightedSum = 0.0f;
+            float totalWeight = 0.0f;
+            for (int dy = -blurRadius; dy <= blurRadius; ++dy)
+            {
+                const uint16_t sampleY = static_cast<uint16_t>(std::clamp<int>(int(y) + dy,
+                                                                               0,
+                                                                               int(height) - 1));
+                const float weight = blurKernelWeight(std::abs(dy), radius);
+                weightedSum += horizontal[size_t(sampleY) * size_t(width) + size_t(x)] * weight;
+                totalWeight += weight;
+            }
+            blurred[size_t(y) * size_t(width) + size_t(x)] =
+                totalWeight > 0.0f ? (weightedSum / totalWeight) : 0.0f;
+        }
+    }
+
+    return blurred;
+}
+
 } // namespace
 
 bool computeStructureFactorImage(const ParticleSystem &particleSystem,
@@ -271,6 +353,7 @@ bool computeStructureFactorImage(const ParticleSystem &particleSystem,
     image.displayMin = displayMin;
     image.displayMax = displayMax;
 
+    std::vector<float> normalizedValues(size_t(image.width) * size_t(image.height), 0.0f);
     for (uint16_t pixelY = 0; pixelY < image.height; ++pixelY)
     {
         for (uint16_t pixelX = 0; pixelX < image.width; ++pixelX)
@@ -283,7 +366,25 @@ bool computeStructureFactorImage(const ParticleSystem &particleSystem,
                 value = displayMin;
             }
 
-            const float t = std::clamp((value - displayMin) / (displayMax - displayMin),
+            normalizedValues[sourceIndex] =
+                std::clamp((value - displayMin) / (displayMax - displayMin), 0.0f, 1.0f);
+        }
+    }
+
+    normalizedValues = blurScalarImage(normalizedValues, image.width, image.height,
+                                       settings.blurRadius);
+
+    const float colorRangeMin = std::clamp(settings.colorRangeMin, 0.0f, 0.99f);
+    const float colorRangeMax = std::clamp(settings.colorRangeMax,
+                                           colorRangeMin + 0.01f, 1.0f);
+
+    for (uint16_t pixelY = 0; pixelY < image.height; ++pixelY)
+    {
+        for (uint16_t pixelX = 0; pixelX < image.width; ++pixelX)
+        {
+            const size_t sourceIndex = size_t(pixelY) * size_t(image.width) + size_t(pixelX);
+            const float t = std::clamp((normalizedValues[sourceIndex] - colorRangeMin)
+                                           / (colorRangeMax - colorRangeMin),
                                        0.0f, 1.0f);
             const std::array<float, 4> color = structureFactorColor(t);
             const size_t pixelIndex = sourceIndex * 4u;
