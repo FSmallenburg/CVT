@@ -322,6 +322,13 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             viewerState.pendingInvertSelected = true;
         }
 
+        ImGui::BeginDisabled(viewerState.selectedIds.size() != 2u);
+        if (ImGui::Button("Align view to selection (a)"))
+        {
+            viewerState.pendingAlignViewToSelection = true;
+        }
+        ImGui::EndDisabled();
+
         if (ImGui::Button("Screenshot (p)"))
         {
             viewerState.pendingScreenshotRequest = true;

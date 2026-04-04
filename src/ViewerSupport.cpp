@@ -3,13 +3,47 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <iostream>
+#include <vector>
 
 namespace
 {
 
 constexpr float kInitialViewMargin = 1.10f;
+constexpr float kAlignViewEpsilon = 1.0e-6f;
 constexpr uint32_t kPickBytesPerPixel = 4u;
 constexpr uint32_t kPreviewTextureBytesPerPixel = 4u;
+
+const Particle *findParticleById(const ParticleSystem &particleSystem, uint32_t particleId)
+{
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const auto particleIt = std::find_if(
+        particles.begin(), particles.end(),
+        [particleId](const Particle &particle) { return particle.id == particleId; });
+    return particleIt != particles.end() ? &(*particleIt) : nullptr;
+}
+
+bx::Vec3 rotateVector(const float *rotationTransform, const bx::Vec3 &vector)
+{
+    return {
+        rotationTransform[0] * vector.x + rotationTransform[4] * vector.y
+            + rotationTransform[8] * vector.z,
+        rotationTransform[1] * vector.x + rotationTransform[5] * vector.y
+            + rotationTransform[9] * vector.z,
+        rotationTransform[2] * vector.x + rotationTransform[6] * vector.y
+            + rotationTransform[10] * vector.z,
+    };
+}
+
+bx::Vec3 chooseFallbackAxis(const bx::Vec3 &direction)
+{
+    bx::Vec3 axis = bx::cross(direction, bx::Vec3{0.0f, 1.0f, 0.0f});
+    if (bx::length(axis) <= kAlignViewEpsilon)
+    {
+        axis = bx::cross(direction, bx::Vec3{1.0f, 0.0f, 0.0f});
+    }
+    return axis;
+}
 
 void resetStructureFactorPreviewTexture(StructureFactorResources &structureFactorResources)
 {
@@ -203,6 +237,114 @@ void invertSelection(ParticleSystem &particleSystem,
             selectedIds.insert(particle.id);
         }
     }
+}
+
+bool alignViewToSelectedParticles(ViewerState &state,
+                                  const ParticleSystem &particleSystem,
+                                  const SimulationBox &simulationBox)
+{
+    if (state.selectedIds.size() != 2u)
+    {
+        std::cout << "Align view requires exactly two selected particles." << std::endl;
+        return false;
+    }
+
+    std::vector<uint32_t> sortedIds(state.selectedIds.begin(), state.selectedIds.end());
+    std::sort(sortedIds.begin(), sortedIds.end());
+
+    const Particle *firstParticle = findParticleById(particleSystem, sortedIds[0]);
+    const Particle *secondParticle = findParticleById(particleSystem, sortedIds[1]);
+    if (firstParticle == nullptr || secondParticle == nullptr)
+    {
+        std::cout << "Could not resolve both selected particle IDs in the current frame."
+                  << std::endl;
+        return false;
+    }
+
+    //Note that we are not applying periodic wrapping to the particle positions here, 
+    //so if the selected particles are on opposite sides of the box the view will be 
+    //aligned to the long vector connecting them.
+    bx::Vec3 displacement = {
+        secondParticle->position.x - firstParticle->position.x,
+        secondParticle->position.y - firstParticle->position.y,
+        secondParticle->position.z - firstParticle->position.z,
+    };
+    
+
+    const float displacementLength = bx::length(displacement);
+    if (!(displacementLength > kAlignViewEpsilon))
+    {
+        std::cout << "Selected particles occupy the same position; view alignment skipped."
+                  << std::endl;
+        return false;
+    }
+
+    const bx::Vec3 modelDirection = {
+        displacement.x / displacementLength,
+        displacement.y / displacementLength,
+        displacement.z / displacementLength,
+    };
+
+    bx::Vec3 sceneDirection = rotateVector(state.sceneRotation, modelDirection);
+    const float sceneDirectionLength = bx::length(sceneDirection);
+    if (!(sceneDirectionLength > kAlignViewEpsilon))
+    {
+        return false;
+    }
+
+    sceneDirection = {
+        sceneDirection.x / sceneDirectionLength,
+        sceneDirection.y / sceneDirectionLength,
+        sceneDirection.z / sceneDirectionLength,
+    };
+
+    const bx::Vec3 targetDirection = {
+        0.0f,
+        0.0f,
+        sceneDirection.z >= 0.0f ? 1.0f : -1.0f,
+    };
+
+    const float dotProduct = std::clamp(bx::dot(sceneDirection, targetDirection), -1.0f, 1.0f);
+    if (dotProduct >= 1.0f - 1.0e-5f)
+    {
+        return true;
+    }
+
+    // bx uses row-vector transforms (`bx::mul(vec, mat)`), so to rotate the current
+    // scene-space direction onto the view axis we need a delta matrix `D` such that
+    // `sceneDirection * D == targetDirection`. That means post-multiplying the current
+    // scene rotation and using the axis that rotates target<-source in row-vector form.
+    bx::Vec3 rotationAxis = bx::cross(targetDirection, sceneDirection);
+    float rotationAxisLength = bx::length(rotationAxis);
+    if (!(rotationAxisLength > kAlignViewEpsilon))
+    {
+        rotationAxis = chooseFallbackAxis(sceneDirection);
+        rotationAxisLength = bx::length(rotationAxis);
+        if (!(rotationAxisLength > kAlignViewEpsilon))
+        {
+            return false;
+        }
+    }
+
+    rotationAxis = {
+        rotationAxis.x / rotationAxisLength,
+        rotationAxis.y / rotationAxisLength,
+        rotationAxis.z / rotationAxisLength,
+    };
+
+    float deltaRotation[16];
+    bx::mtxFromQuaternion(deltaRotation,
+                          bx::fromAxisAngle(rotationAxis, std::acos(dotProduct)));
+
+    float updatedRotation[16];
+    bx::mtxMul(updatedRotation, state.sceneRotation, deltaRotation);
+    bx::memCopy(state.sceneRotation, updatedRotation, sizeof(updatedRotation));
+
+    state.structureFactorInteractionLowResActive = false;
+    markBondDiagramViewDirty(state);
+    markStructureFactorDirty(state);
+    markPickBufferDirty(state);
+    return true;
 }
 
 bool revealAllParticles(ParticleSystem &particleSystem,

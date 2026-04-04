@@ -2445,6 +2445,13 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                 }
             }
             break;
+        case GLFW_KEY_A:
+            if (action == GLFW_PRESS
+                && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT | GLFW_MOD_SUPER)) == 0)
+            {
+                state->pendingAlignViewToSelection = true;
+            }
+            break;
         case GLFW_KEY_D:
             if (action == GLFW_PRESS)
             {
@@ -2937,6 +2944,12 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         viewerState.pendingDescribeSelection = false;
     }
 
+    if (viewerState.pendingAlignViewToSelection)
+    {
+        alignViewToSelectedParticles(viewerState, particleSystem, simulationBox);
+        viewerState.pendingAlignViewToSelection = false;
+    }
+
     if (viewerState.pendingDescribeVisibleCount)
     {
         printVisibleParticleCount(particleSystem);
@@ -3111,7 +3124,7 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                             (int)viewerState.selectedIds.size(), viewerState.lastPickedId,
                             particleTypeName(particleFileType), sphereStacks, sphereSlices);
         bgfx::dbgTextPrintf(0, 3, 0x0f,
-                            "Drag rotates. Shift+drag translates. D prints selection. V prints visible count.");
+                            "Drag rotates. Shift+drag translates. A aligns to a selected pair. D/V print info.");
     }
     else
     {
@@ -3119,7 +3132,7 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                             (int)viewerState.selectedIds.size(), viewerState.lastPickedId,
                             particleTypeName(particleFileType), sphereStacks, sphereSlices);
         bgfx::dbgTextPrintf(0, 3, 0x0f,
-                            "Drag rotates. Shift+drag translates. D prints selection. V prints visible count.");
+                            "Drag rotates. Shift+drag translates. A aligns to a selected pair. D/V print info.");
     }
     bgfx::dbgTextPrintf(0, 4, 0x0f,
                         "Enter resets rotation. B toggles box. Shift+B toggles bonds. P saves PNG.");

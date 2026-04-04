@@ -90,6 +90,7 @@ struct ViewerState
     bool pendingInvertSelected = false;
     bool pendingSelectBonded = false;
     bool pendingDescribeSelection = false;
+    bool pendingAlignViewToSelection = false;
     bool pendingDescribeVisibleCount = false;
     bool pendingUnselect = false;
     bool pendingIncreaseSphereResolution = false;
@@ -210,6 +211,9 @@ bool hideSelectedParticles(ParticleSystem &particleSystem,
                            std::unordered_set<uint32_t> &hiddenIds);
 void invertSelection(ParticleSystem &particleSystem,
                      std::unordered_set<uint32_t> &selectedIds);
+bool alignViewToSelectedParticles(ViewerState &state,
+                                  const ParticleSystem &particleSystem,
+                                  const SimulationBox &simulationBox);
 bool revealAllParticles(ParticleSystem &particleSystem,
                         std::unordered_set<uint32_t> &hiddenIds);
 bool applyHiddenParticles(ParticleSystem &particleSystem,
