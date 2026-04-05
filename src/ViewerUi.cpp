@@ -3,6 +3,7 @@
 #include "ImGuiBgfx.h"
 
 #include "imgui.h"
+#include <implot.h>
 
 #include <bx/math.h>
 
@@ -10,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 namespace
 {
@@ -56,6 +58,102 @@ AnalysisColorMode analysisColorModeFromComboIndex(int comboIndex, bool supportsP
     }
 }
 
+struct SizeDistributionData
+{
+    std::vector<float> binCounts;
+    std::vector<float> binCenters;
+    size_t sampleCount = 0u;
+    float minValue = 0.0f;
+    float maxValue = 0.0f;
+    float plotMinValue = 0.0f;
+    float plotMaxValue = 0.0f;
+    float meanValue = 0.0f;
+    float standardDeviation = 0.0f;
+    float maxBinCount = 0.0f;
+    float binWidth = 0.0f;
+};
+
+SizeDistributionData buildSizeDistributionData(const ParticleSystem &particleSystem,
+                                               bool visibleOnly,
+                                               uint16_t requestedBinCount)
+{
+    SizeDistributionData data;
+
+    std::vector<float> diameters;
+    diameters.reserve(particleSystem.particles().size());
+    for (const Particle &particle : particleSystem.particles())
+    {
+        if (visibleOnly && !particle.visible)
+        {
+            continue;
+        }
+        diameters.push_back(2.0f * particle.sizeParams[0]);
+    }
+
+    data.sampleCount = diameters.size();
+    if (diameters.empty())
+    {
+        return data;
+    }
+
+    data.minValue = *std::min_element(diameters.begin(), diameters.end());
+    data.maxValue = *std::max_element(diameters.begin(), diameters.end());
+
+    double sum = 0.0;
+    for (float diameter : diameters)
+    {
+        sum += static_cast<double>(diameter);
+    }
+    data.meanValue = static_cast<float>(sum / static_cast<double>(diameters.size()));
+
+    double squaredDifferenceSum = 0.0;
+    for (float diameter : diameters)
+    {
+        const double delta = static_cast<double>(diameter) - static_cast<double>(data.meanValue);
+        squaredDifferenceSum += delta * delta;
+    }
+    data.standardDeviation = static_cast<float>(
+        std::sqrt(squaredDifferenceSum / static_cast<double>(diameters.size())));
+
+    const uint16_t binCount = bx::max<uint16_t>(requestedBinCount, 1u);
+    data.binCounts.assign(binCount, 0.0f);
+    data.binCenters.assign(binCount, 0.0f);
+
+    const float valueSpan = data.maxValue - data.minValue;
+    data.plotMinValue = data.minValue;
+    data.plotMaxValue = data.maxValue;
+    if (valueSpan <= 1.0e-6f)
+    {
+        const float halfSpan = bx::max(1.0e-4f,
+                                       0.05f * bx::max(std::abs(data.meanValue), 1.0f));
+        data.plotMinValue = data.meanValue - halfSpan;
+        data.plotMaxValue = data.meanValue + halfSpan;
+    }
+
+    data.binWidth = (data.plotMaxValue - data.plotMinValue) / float(binCount);
+    if (data.binWidth <= 1.0e-6f)
+    {
+        data.binWidth = 1.0f;
+    }
+
+    for (uint16_t binIndex = 0u; binIndex < binCount; ++binIndex)
+    {
+        data.binCenters[binIndex] = data.plotMinValue
+                                    + (float(binIndex) + 0.5f) * data.binWidth;
+    }
+
+    const float inverseBinWidth = 1.0f / data.binWidth;
+    for (float diameter : diameters)
+    {
+        int binIndex = static_cast<int>((diameter - data.plotMinValue) * inverseBinWidth);
+        binIndex = std::clamp(binIndex, 0, int(binCount) - 1);
+        data.binCounts[static_cast<size_t>(binIndex)] += 1.0f;
+    }
+
+    data.maxBinCount = *std::max_element(data.binCounts.begin(), data.binCounts.end());
+    return data;
+}
+
 }
 
 const char *particleTypeName(TrajectoryReader::FileType fileType)
@@ -64,6 +162,8 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
     {
     case TrajectoryReader::FileType::Disk:
         return "disk";
+    case TrajectoryReader::FileType::OrderedSphere:
+        return "ordered sphere";
     case TrajectoryReader::FileType::Rod:
         return "rod";
     case TrajectoryReader::FileType::Cube:
@@ -82,7 +182,7 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
     return "sphere";
 }
 
-const char *colorModeName(ColorMode colorMode)
+std::string colorModeName(ColorMode colorMode, const ViewerState &viewerState)
 {
     switch (colorMode)
     {
@@ -96,8 +196,21 @@ const char *colorModeName(ColorMode colorMode)
         return "orientation";
     case ColorMode::BondCount:
         return "bonds";
+    case ColorMode::ParticleSize:
+        return "size";
     case ColorMode::Count:
         break;
+    }
+
+    const size_t colorModeIndex = static_cast<size_t>(colorMode);
+    const size_t firstOrderParameterMode = static_cast<size_t>(ColorMode::Count);
+    if (colorModeIndex >= firstOrderParameterMode)
+    {
+        const size_t orderParameterIndex = colorModeIndex - firstOrderParameterMode;
+        if (orderParameterIndex < viewerState.orderParameterCount)
+        {
+            return "order " + std::to_string(orderParameterIndex + 1u);
+        }
     }
 
     return "unknown";
@@ -265,16 +378,34 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             markBondDiagramViewDirty(viewerState);
         }
 
-        static const char *kColorModeLabels[] = {
+        clampColorModeToAvailable(viewerState);
+        std::vector<std::string> colorModeLabels = {
             "File default",
             "Palette cycle",
             "Uniform",
             "Orientation",
             "Bond count",
+            "Particle size",
         };
+        for (uint16_t orderParameterIndex = 0u;
+             orderParameterIndex < viewerState.orderParameterCount;
+             ++orderParameterIndex)
+        {
+            colorModeLabels.push_back("Order parameter "
+                                      + std::to_string(orderParameterIndex + 1u));
+        }
+
+        std::vector<const char *> colorModeLabelPointers;
+        colorModeLabelPointers.reserve(colorModeLabels.size());
+        for (const std::string &label : colorModeLabels)
+        {
+            colorModeLabelPointers.push_back(label.c_str());
+        }
+
         int colorModeIndex = static_cast<int>(viewerState.colorMode);
         if (ImGui::Combo("Color mode", &colorModeIndex,
-                         kColorModeLabels, IM_ARRAYSIZE(kColorModeLabels)))
+                         colorModeLabelPointers.data(),
+                         static_cast<int>(colorModeLabelPointers.size())))
         {
             viewerState.colorMode = static_cast<ColorMode>(colorModeIndex);
             markColorDependentHelperSystemsDirty(viewerState);
@@ -642,6 +773,71 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             {
                 ImGui::TextWrapped("Structure factor unavailable: %s",
                                    structureFactorResources->disableReason.c_str());
+            }
+        }
+
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Size distribution"))
+        {
+            bool useVisibleOnly = viewerState.sizeDistributionUseVisibleOnly;
+            if (ImGui::Checkbox("Visible particles only##SizeDistribution", &useVisibleOnly))
+            {
+                viewerState.sizeDistributionUseVisibleOnly = useVisibleOnly;
+            }
+
+            int binCount = int(viewerState.sizeDistributionBinCount);
+            if (ImGui::SliderInt("Bins##SizeDistribution", &binCount, 4, 128))
+            {
+                viewerState.sizeDistributionBinCount =
+                    static_cast<uint16_t>(std::clamp(binCount, 4, 128));
+            }
+
+            const SizeDistributionData sizeDistribution =
+                buildSizeDistributionData(particleSystem,
+                                          viewerState.sizeDistributionUseVisibleOnly,
+                                          viewerState.sizeDistributionBinCount);
+            if (sizeDistribution.sampleCount == 0u)
+            {
+                ImGui::TextDisabled("No particles available for the current filter.");
+            }
+            else
+            {
+                ImGui::Text("Count: %zu", sizeDistribution.sampleCount);
+                ImGui::Text("Mean diameter: %.4f", sizeDistribution.meanValue);
+                ImGui::Text("SD: %.4f", sizeDistribution.standardDeviation);
+                ImGui::Text("Polydispersity: %.4f", sizeDistribution.standardDeviation / sizeDistribution.meanValue);
+                ImGui::Text("Range: [%.4f, %.4f]", sizeDistribution.minValue,
+                            sizeDistribution.maxValue);
+
+                const float plotWidth =
+                    bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                if (ImPlot::GetCurrentContext() != nullptr
+                    && ImPlot::BeginPlot("##SizeDistributionPlot",
+                                         ImVec2(plotWidth, 180.0f),
+                                         ImPlotFlags_NoLegend))
+                {
+                    ImPlot::SetupAxes("Diameter", "Count",
+                                      ImPlotAxisFlags_AutoFit,
+                                      ImPlotAxisFlags_AutoFit);
+                    ImPlot::PlotBars("Count",
+                                     sizeDistribution.binCenters.data(),
+                                     sizeDistribution.binCounts.data(),
+                                     static_cast<int>(sizeDistribution.binCounts.size()),
+                                     static_cast<double>(sizeDistribution.binWidth) * 0.95);
+                    ImPlot::EndPlot();
+                }
+                else
+                {
+                    std::string overlayText = std::to_string(sizeDistribution.sampleCount)
+                                              + " particles";
+                    ImGui::PlotHistogram("##SizeDistributionPlotFallback",
+                                         sizeDistribution.binCounts.data(),
+                                         static_cast<int>(sizeDistribution.binCounts.size()),
+                                         0, overlayText.c_str(), 0.0f,
+                                         bx::max(1.0f, sizeDistribution.maxBinCount),
+                                         ImVec2(plotWidth, 160.0f));
+                }
+                ImGui::TextDisabled("Histogram uses particle diameters from the current snapshot.");
             }
         }
 

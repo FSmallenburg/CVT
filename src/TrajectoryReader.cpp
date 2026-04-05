@@ -39,6 +39,10 @@ std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path
     {
         return TrajectoryReader::FileType::Sphere;
     }
+    if (extension == ".osph")
+    {
+        return TrajectoryReader::FileType::OrderedSphere;
+    }
     if (extension == ".dsk")
     {
         return TrajectoryReader::FileType::Disk;
@@ -80,6 +84,7 @@ TrajectoryReader::Dimensionality detectDimensionality(TrajectoryReader::FileType
     case TrajectoryReader::FileType::Patchy2D:
         return TrajectoryReader::Dimensionality::TwoDimensional;
     case TrajectoryReader::FileType::Sphere:
+    case TrajectoryReader::FileType::OrderedSphere:
     case TrajectoryReader::FileType::Rod:
     case TrajectoryReader::FileType::Cube:
     case TrajectoryReader::FileType::Patchy:
@@ -205,12 +210,12 @@ TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
         if (extension.empty())
         {
             m_error = "Unsupported trajectory file extension in " + m_path
-                      + ". Expected one of: .sph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
+                      + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
         }
         else
         {
             m_error = "Unsupported trajectory file extension '" + extension + "' in "
-                      + m_path + ". Expected one of: .sph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
+                      + m_path + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
         }
         return;
     }
@@ -309,6 +314,8 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
 
     particleSystem.clear();
     particleSystem.reserve(particleCount);
+
+    std::optional<size_t> expectedOrderParameterCount;
 
     for (size_t particleIndex = 0; particleIndex < particleCount; ++particleIndex)
     {
@@ -560,6 +567,35 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 return setParticleError("sphere particles require a radius after xyz");
             }
             particle.setUniformScale(radius);
+
+            if (m_fileType == FileType::OrderedSphere)
+            {
+                float orderParameter = 0.0f;
+                while (particleStream >> orderParameter)
+                {
+                    particle.orderParameters.push_back(orderParameter);
+                }
+
+                if (!particleStream.eof())
+                {
+                    return setParticleError("invalid order-parameter value in ordered sphere line");
+                }
+                if (particle.orderParameters.empty())
+                {
+                    return setParticleError(
+                        "ordered sphere particles require one or more order parameters after the radius");
+                }
+
+                if (!expectedOrderParameterCount.has_value())
+                {
+                    expectedOrderParameterCount = particle.orderParameters.size();
+                }
+                else if (particle.orderParameters.size() != *expectedOrderParameterCount)
+                {
+                    return setParticleError(
+                        "ordered sphere particles must all provide the same number of order parameters");
+                }
+            }
         }
 
         particleSystem.addParticle(particle);

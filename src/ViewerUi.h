@@ -9,7 +9,7 @@
 #include <string>
 
 const char *particleTypeName(TrajectoryReader::FileType fileType);
-const char *colorModeName(ColorMode colorMode);
+std::string colorModeName(ColorMode colorMode, const ViewerState &viewerState);
 float lightingScaleFromIndex(uint8_t lightingLevelIndex);
 size_t countVisibleParticles(const ParticleSystem &particleSystem);
 void printVisibleParticleCount(const ParticleSystem &particleSystem);

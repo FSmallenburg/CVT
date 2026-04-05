@@ -13,7 +13,8 @@ class TrajectoryReader
     enum class FileType
     {
         Sphere,
-    Disk,
+        OrderedSphere,
+        Disk,
         Rod,
         Cube,
         Polygon,

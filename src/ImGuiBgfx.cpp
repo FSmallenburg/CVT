@@ -5,6 +5,7 @@
 #include <bx/allocator.h>
 #include <bx/math.h>
 #include <dear-imgui/imgui.h>
+#include <implot.h>
 #include <GLFW/glfw3.h>
 
 #include "fs_ocornut_imgui.bin.h"
@@ -390,6 +391,7 @@ struct Context
         }
         ImGui::SetAllocatorFunctions(imguiAlloc, imguiFree, allocator);
         ImGui::CreateContext();
+        ImPlot::CreateContext();
 
         ImGuiIO &io = ImGui::GetIO();
         io.IniFilename = nullptr;
@@ -467,6 +469,10 @@ struct Context
         {
             bgfx::destroy(program);
             program = BGFX_INVALID_HANDLE;
+        }
+        if (ImPlot::GetCurrentContext() != nullptr)
+        {
+            ImPlot::DestroyContext();
         }
         if (ImGui::GetCurrentContext() != nullptr)
         {

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 class Particle
 {
@@ -18,6 +19,7 @@ class Particle
     std::array<float, 4> baseColor{1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> color{1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> sizeParams{1.0f, 1.0f, 1.0f, 1.0f};
+    std::vector<float> orderParameters;
     bool visible = true;
     bool hasOrientationMatrix = false;
     uint32_t id = 0;

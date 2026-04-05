@@ -14,13 +14,14 @@
 #include <unordered_set>
 #include <vector>
 
-enum class ColorMode : uint8_t
+enum class ColorMode : uint16_t
 {
     FileDefault = 0,
     PaletteCycle,
     Uniform,
     Orientation,
     BondCount,
+    ParticleSize,
     Count,
 };
 
@@ -82,6 +83,9 @@ struct ViewerState
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     uint8_t maxSeenParticleTypeIndex = 0u;
+    uint16_t orderParameterCount = 0u;
+    bool sizeDistributionUseVisibleOnly = true;
+    uint16_t sizeDistributionBinCount = 32u;
     std::unordered_set<uint32_t> selectedIds;
     std::unordered_set<uint32_t> hiddenIds;
     bool pendingHideSelected = false;
@@ -216,6 +220,8 @@ void markBondDiagramViewDirty(ViewerState &state);
 void markStructureFactorDirty(ViewerState &state);
 void markPickBufferDirty(ViewerState &state);
 bool hasValidPickBuffer(const ViewerState &state);
+size_t availableColorModeCount(const ViewerState &state);
+void clampColorModeToAvailable(ViewerState &state);
 bool hideSelectedParticles(ParticleSystem &particleSystem,
                            std::unordered_set<uint32_t> &selectedIds,
                            std::unordered_set<uint32_t> &hiddenIds);

@@ -202,6 +202,20 @@ bool hasValidPickBuffer(const ViewerState &state)
     return state.pickBufferValid && state.cachedPickRevision == state.pickSceneRevision;
 }
 
+size_t availableColorModeCount(const ViewerState &state)
+{
+    return static_cast<size_t>(ColorMode::Count)
+           + static_cast<size_t>(state.orderParameterCount);
+}
+
+void clampColorModeToAvailable(ViewerState &state)
+{
+    if (static_cast<size_t>(state.colorMode) >= availableColorModeCount(state))
+    {
+        state.colorMode = ColorMode::FileDefault;
+    }
+}
+
 bool hideSelectedParticles(ParticleSystem &particleSystem,
                            std::unordered_set<uint32_t> &selectedIds,
                            std::unordered_set<uint32_t> &hiddenIds)
@@ -412,11 +426,16 @@ bool isParticleTypeVisible(const ViewerState &state, char typeLabel)
 
 void noteEncounteredParticleTypes(ViewerState &state, const ParticleSystem &particleSystem)
 {
+    state.orderParameterCount = 0u;
     for (const Particle &particle : particleSystem.particles())
     {
         state.maxSeenParticleTypeIndex = std::max(state.maxSeenParticleTypeIndex,
                                                   particleTypeIndex(particle.typeLabel));
+        state.orderParameterCount = static_cast<uint16_t>(
+            std::max<size_t>(static_cast<size_t>(state.orderParameterCount),
+                             particle.orderParameters.size()));
     }
+    clampColorModeToAvailable(state);
 }
 
 bool applyParticleVisibilityFilters(ParticleSystem &particleSystem,

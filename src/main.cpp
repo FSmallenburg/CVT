@@ -401,6 +401,7 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
                                                  uint16_t slices)
 {
     if (fileType == TrajectoryReader::FileType::Sphere
+        || fileType == TrajectoryReader::FileType::OrderedSphere
         || fileType == TrajectoryReader::FileType::Disk)
     {
         return createSphereParticleType(layout, stacks, slices);
@@ -424,6 +425,7 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
 bool isSphereLikeFileType(TrajectoryReader::FileType fileType)
 {
     return fileType == TrajectoryReader::FileType::Sphere
+           || fileType == TrajectoryReader::FileType::OrderedSphere
            || fileType == TrajectoryReader::FileType::Disk;
 }
 
@@ -519,6 +521,83 @@ std::array<float, 4> analysisGradientColor(float value)
     };
 }
 
+std::array<float, 4> orderParameterGradientColor(float value)
+{
+    const float clampedValue = std::clamp(value, 0.0f, 1.0f);
+    constexpr std::array<float, 4> kLowColor = {0.0f, 0.0f, 1.0f, 1.0f};
+    constexpr std::array<float, 4> kMidColor = {0.82f, 0.82f, 0.82f, 1.0f};
+    constexpr std::array<float, 4> kHighColor = {1.0f, 0.0f, 0.0f, 1.0f};
+
+    if (clampedValue <= 0.5f)
+    {
+        const float t = clampedValue / 0.5f;
+        return {
+            kLowColor[0] * (1.0f - t) + kMidColor[0] * t,
+            kLowColor[1] * (1.0f - t) + kMidColor[1] * t,
+            kLowColor[2] * (1.0f - t) + kMidColor[2] * t,
+            1.0f,
+        };
+    }
+
+    const float t = (clampedValue - 0.5f) / 0.5f;
+    return {
+        kMidColor[0] * (1.0f - t) + kHighColor[0] * t,
+        kMidColor[1] * (1.0f - t) + kHighColor[1] * t,
+        kMidColor[2] * (1.0f - t) + kHighColor[2] * t,
+        1.0f,
+    };
+}
+
+struct ParticleSizeColorStats
+{
+    float mean = 0.0f;
+    float standardDeviation = 0.0f;
+};
+
+ParticleSizeColorStats computeParticleSizeColorStats(const std::vector<Particle> &particles)
+{
+    ParticleSizeColorStats stats;
+    if (particles.empty())
+    {
+        return stats;
+    }
+
+    double sizeSum = 0.0;
+    for (const Particle &particle : particles)
+    {
+        sizeSum += static_cast<double>(particle.sizeParams[0]);
+    }
+    stats.mean = static_cast<float>(sizeSum / static_cast<double>(particles.size()));
+
+    double squaredDifferenceSum = 0.0;
+    for (const Particle &particle : particles)
+    {
+        const double delta = static_cast<double>(particle.sizeParams[0])
+                             - static_cast<double>(stats.mean);
+        squaredDifferenceSum += delta * delta;
+    }
+    stats.standardDeviation = static_cast<float>(
+        std::sqrt(squaredDifferenceSum / static_cast<double>(particles.size())));
+    return stats;
+}
+
+float normalizedParticleSizeValue(float particleSize, const ParticleSizeColorStats &stats)
+{
+    if (!(stats.standardDeviation > 1.0e-6f))
+    {
+        return 0.5f;
+    }
+
+    const float minSize = stats.mean - 2.0f * stats.standardDeviation;
+    const float maxSize = stats.mean + 2.0f * stats.standardDeviation;
+    if (!(maxSize > minSize + 1.0e-6f))
+    {
+        return 0.5f;
+    }
+
+    return std::clamp((particleSize - minSize) / (maxSize - minSize), 0.0f, 1.0f);
+}
+
 std::array<float, 4> hueColor(float hue)
 {
     const float wrappedHue = hue - std::floor(hue);
@@ -576,6 +655,7 @@ std::array<float, 4> bondDiagramColorForParticles(const Particle &firstParticle,
 
 std::array<float, 4> resolveParticleColor(const Particle &particle, size_t particleIndex,
                                          ColorMode colorMode,
+                                         const ParticleSizeColorStats &particleSizeColorStats,
                                          const std::vector<PatchyParticleData> *patchMetadata,
                                          bool supportsOrientationMode,
                                          bool uniformUsesOrientation)
@@ -602,8 +682,22 @@ std::array<float, 4> resolveParticleColor(const Particle &particle, size_t parti
             return colorFromLetter(static_cast<char>('A' + (bondCount % kParticlePaletteColorCount)));
         }
         return colorFromLetter('A');
+    case ColorMode::ParticleSize:
+        return orderParameterGradientColor(
+            normalizedParticleSizeValue(particle.sizeParams[0], particleSizeColorStats));
     case ColorMode::Count:
         break;
+    }
+
+    const size_t colorModeIndex = static_cast<size_t>(colorMode);
+    const size_t firstOrderParameterMode = static_cast<size_t>(ColorMode::Count);
+    if (colorModeIndex >= firstOrderParameterMode)
+    {
+        const size_t orderParameterIndex = colorModeIndex - firstOrderParameterMode;
+        if (orderParameterIndex < particle.orderParameters.size())
+        {
+            return orderParameterGradientColor(particle.orderParameters[orderParameterIndex]);
+        }
     }
 
     return particle.baseColor;
@@ -625,12 +719,15 @@ void applyColorMode(ParticleSystem &particleSystem, ColorMode colorMode,
                     bool supportsOrientationMode, bool uniformUsesOrientation)
 {
     std::vector<Particle> &particles = particleSystem.particles();
+    const ParticleSizeColorStats particleSizeColorStats =
+        computeParticleSizeColorStats(particles);
     const std::vector<PatchyParticleData> *patchMetadata =
         particleSystem.hasPatchyMetadata() ? &particleSystem.patchyMetadata() : nullptr;
     for (size_t index = 0; index < particles.size(); ++index)
     {
         Particle &particle = particles[index];
         particle.color = resolveParticleColor(particle, index, colorMode,
+                                              particleSizeColorStats,
                                               patchMetadata,
                                               supportsOrientationMode,
                                               uniformUsesOrientation);
@@ -2479,7 +2576,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             markPickBufferDirty(*state);
             break;
         case GLFW_KEY_LEFT:
-            if ((mods & GLFW_MOD_ALT) != 0)
+            if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, 0.0f, 0.5f * bx::kPi, 0.0f);
                 markPickBufferDirty(*state);
@@ -2494,7 +2591,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             }        
             break;
         case GLFW_KEY_RIGHT:
-            if ((mods & GLFW_MOD_ALT) != 0)
+            if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, 0.0f, -0.5f * bx::kPi, 0.0f);
                 markPickBufferDirty(*state);
@@ -2509,14 +2606,14 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             }        
             break;
         case GLFW_KEY_UP:
-            if ((mods & GLFW_MOD_ALT) != 0)
+            if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, 0.5f * bx::kPi, 0.0f, 0.0f);
                 markPickBufferDirty(*state);
             }
             break;
         case GLFW_KEY_DOWN:
-            if ((mods & GLFW_MOD_ALT) != 0)
+            if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, -0.5f * bx::kPi, 0.0f, 0.0f);
                 markPickBufferDirty(*state);
@@ -2640,9 +2737,10 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             }
             else if (action == GLFW_PRESS)
             {
-                const uint8_t nextMode =
-                    (static_cast<uint8_t>(state->colorMode) + 1u)
-                    % static_cast<uint8_t>(ColorMode::Count);
+                clampColorModeToAvailable(*state);
+                const size_t nextMode =
+                    (static_cast<size_t>(state->colorMode) + 1u)
+                    % availableColorModeCount(*state);
                 state->colorMode = static_cast<ColorMode>(nextMode);
                 markColorDependentHelperSystemsDirty(*state);
             }
@@ -3321,11 +3419,13 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                         viewerState.showBox ? "on" : "off",
                         viewerState.mobilityModeEnabled ? "on" : "off",
                         viewerState.bondModeEnabled ? "on" : "off");
+    const std::string currentColorModeLabel =
+        colorModeName(viewerState.colorMode, viewerState);
     bgfx::dbgTextPrintf(0, 6, 0x0f,
                         "Cut plane: %s  z=%.2f  Color: %s  Size: %.2f  Light: %.2f",
                         viewerState.cutPlaneEnabled ? "active" : "off",
                         viewerState.cutPlaneSceneZ,
-                        colorModeName(viewerState.colorMode),
+                        currentColorModeLabel.c_str(),
                         viewerState.particleSizeScale,
                         lightingScaleFromIndex(viewerState.lightingLevelIndex));
     bgfx::dbgTextPrintf(0, 7, 0x0f, "GPU picking: %s",

@@ -95,6 +95,8 @@ add_executable(cvt
     src/TrajectoryReader.cpp
     src/ViewerSupport.cpp
     src/ViewerUi.cpp
+    third_party/implot/implot.cpp
+    third_party/implot/implot_items.cpp
     third_party/bgfx/3rdparty/dear-imgui/imgui.cpp
     third_party/bgfx/3rdparty/dear-imgui/imgui_draw.cpp
     third_party/bgfx/3rdparty/dear-imgui/imgui_tables.cpp
@@ -128,8 +130,10 @@ target_include_directories(cvt PRIVATE
     ${BGFX_DIR}/include
     ${BGFX_DIR}/3rdparty
     ${BGFX_DIR}/examples/common/imgui
+    ${BGFX_DIR}/3rdparty/dear-imgui
     ${BX_DIR}/include
     ${BIMG_DIR}/include
+    ${CMAKE_SOURCE_DIR}/third_party/implot
 )
 
 find_package(glfw3 CONFIG QUIET)
