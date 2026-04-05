@@ -354,6 +354,9 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
     if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        ImGui::Indent();
+        ImGui::TextDisabled("Tools for neighbor metrics, bond diagrams, and S(k).");
+
         if (ImGui::CollapsingHeader("Neighbor analysis"))
         {
             const bool supportsPsi6 =
@@ -500,6 +503,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }         
         }           
 
+        ImGui::Spacing();
         if (ImGui::CollapsingHeader("Structure factor"))
         {
             if (ImGui::Button("Compute structure factor"))
@@ -641,7 +645,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
         }
 
-        
+        ImGui::Unindent();
     }
 
     if (markPickDirty)
