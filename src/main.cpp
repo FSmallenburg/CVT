@@ -183,13 +183,96 @@ fs::path resolveResourcePath(const fs::path &relativePath)
     return {};
 }
 
+const char *shaderOutputDirectoryForRenderer(bgfx::RendererType::Enum rendererType)
+{
+    switch (rendererType)
+    {
+    case bgfx::RendererType::Direct3D11:
+        return "dxbc";
+    case bgfx::RendererType::OpenGL:
+        return "glsl";
+    default:
+        return nullptr;
+    }
+}
+
+fs::path resolveShaderBinaryPath(const char *path)
+{
+    const fs::path relativePath(path);
+    const bgfx::RendererType::Enum rendererType = bgfx::getRendererType();
+    if (const char *shaderDirectory = shaderOutputDirectoryForRenderer(rendererType))
+    {
+        const fs::path rendererSpecificPath =
+            relativePath.parent_path() / shaderDirectory / relativePath.filename();
+        const fs::path resolvedRendererSpecificPath =
+            resolveResourcePath(rendererSpecificPath);
+        if (!resolvedRendererSpecificPath.empty())
+        {
+            return resolvedRendererSpecificPath;
+        }
+
+        if (rendererType != bgfx::RendererType::OpenGL)
+        {
+            return rendererSpecificPath;
+        }
+    }
+
+    const fs::path resolvedPath = resolveResourcePath(relativePath);
+    return resolvedPath.empty() ? relativePath : resolvedPath;
+}
+
+bool initializeBgfxRenderer(bgfx::Init &init)
+{
+#if BX_PLATFORM_WINDOWS
+    constexpr std::array<bgfx::RendererType::Enum, 2> kRendererPreference = {
+        bgfx::RendererType::Direct3D11,
+        bgfx::RendererType::OpenGL,
+    };
+#else
+    constexpr std::array<bgfx::RendererType::Enum, 1> kRendererPreference = {
+        bgfx::RendererType::OpenGL,
+    };
+#endif
+
+    bgfx::RendererType::Enum supportedRenderers[bgfx::RendererType::Count];
+    const uint8_t supportedRendererCount =
+        bgfx::getSupportedRenderers(BX_COUNTOF(supportedRenderers), supportedRenderers);
+
+    for (bgfx::RendererType::Enum rendererType : kRendererPreference)
+    {
+        const bool rendererSupported =
+            std::find(supportedRenderers, supportedRenderers + supportedRendererCount,
+                      rendererType)
+            != (supportedRenderers + supportedRendererCount);
+        if (!rendererSupported)
+        {
+            std::cout << "bgfx renderer backend unavailable: "
+                      << bgfx::getRendererName(rendererType) << std::endl;
+            continue;
+        }
+
+        init.type = rendererType;
+        if (bgfx::init(init))
+        {
+            std::cout << "Using bgfx renderer backend: "
+                      << bgfx::getRendererName(bgfx::getRendererType()) << std::endl;
+            return true;
+        }
+
+        std::cerr << "Failed to initialize bgfx renderer backend: "
+                  << bgfx::getRendererName(rendererType) << std::endl;
+    }
+
+    return false;
+}
+
 } // namespace
 
 // ---- Load shader ----
 bgfx::ShaderHandle loadShader(const char *path)
 {
-    const fs::path shaderPath = resolveResourcePath(fs::path(path));
-    std::ifstream file(shaderPath.empty() ? fs::path(path) : shaderPath, std::ios::binary);
+    const fs::path shaderPath = resolveShaderBinaryPath(path);
+    std::ifstream file(shaderPath, std::ios::binary);
     if (!file)
     {
         std::cerr << "Failed to open shader: " << path;
@@ -3687,12 +3770,11 @@ int main(int argc, char **argv)
 #endif
     int width, height;
     glfwGetWindowSize(window, &width, &height);
-    init.type = bgfx::RendererType::OpenGL;
     init.callback = &screenshotCallback;
     init.resolution.width = (uint32_t)width;
     init.resolution.height = (uint32_t)height;
     init.resolution.reset = BGFX_RESET_VSYNC;
-    if (!bgfx::init(init))
+    if (!initializeBgfxRenderer(init))
         return 1;
 
     {

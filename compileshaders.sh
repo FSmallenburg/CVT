@@ -67,6 +67,7 @@ shaderc=$(find_shaderc) || {
 shader_profile=${BGFX_SHADER_PROFILE:-120}
 # bgfx shaderc supports desktop GLSL profiles up to 150; keep this overridable.
 structure_factor_shader_profile=${BGFX_STRUCTURE_FACTOR_SHADER_PROFILE:-150}
+d3d_shader_profile=${BGFX_D3D_SHADER_PROFILE:-s_5_0}
 include_args=(--varyingdef "${script_dir}/shaders/varying.def.sc" -i "${script_dir}/shaders" -i "${bgfx_include_dir}")
 
 if [[ ! -d "${bgfx_include_dir}" ]]; then
@@ -74,17 +75,72 @@ if [[ ! -d "${bgfx_include_dir}" ]]; then
 	exit 1
 fi
 
+if [[ -n "${BGFX_SHADER_BACKENDS:-}" ]]; then
+	read -r -a shader_backends <<< "${BGFX_SHADER_BACKENDS}"
+else
+	case "${shader_platform}" in
+		windows) shader_backends=(glsl dxbc) ;;
+		*) shader_backends=(glsl) ;;
+	esac
+fi
+
+if [[ ${#shader_backends[@]} -eq 0 ]]; then
+	echo "No shader backends selected. Set BGFX_SHADER_BACKENDS to one or more of: glsl dxbc" >&2
+	exit 1
+fi
+
+backend_platform() {
+	local backend=$1
+	case "${backend}" in
+		glsl) echo "${shader_platform}" ;;
+		dxbc) echo "windows" ;;
+		*)
+			echo "Unsupported shader backend: ${backend}" >&2
+			return 1
+			;;
+	esac
+}
+
+backend_profile() {
+	local backend=$1
+	local profile_kind=$2
+	case "${backend}" in
+		glsl)
+			if [[ "${profile_kind}" == "structure" ]]; then
+				echo "${structure_factor_shader_profile}"
+			else
+				echo "${shader_profile}"
+			fi
+			;;
+		dxbc)
+			echo "${d3d_shader_profile}"
+			;;
+		*)
+			echo "Unsupported shader backend: ${backend}" >&2
+			return 1
+			;;
+	esac
+}
+
 compile_shader() {
 	local input_file=$1
 	local output_file=$2
 	local shader_type=$3
-	local shader_profile_value=$4
+	local backend=$4
+	local profile_kind=$5
+	local shader_backend_platform
+	shader_backend_platform=$(backend_platform "${backend}")
+	local shader_profile_value
+	shader_profile_value=$(backend_profile "${backend}" "${profile_kind}")
+	local output_dir="${script_dir}/shaders/${backend}"
+	mkdir -p "${output_dir}"
+
 	local cmd=(
 		"${shaderc}"
 		-f "${script_dir}/shaders/${input_file}"
-		-o "${script_dir}/shaders/${output_file}"
+		-o "${output_dir}/${output_file}"
 		--type "${shader_type}"
-		--platform "${shader_platform}"
+		--platform "${shader_backend_platform}"
 		-p "${shader_profile_value}"
 		"${include_args[@]}"
 	)
@@ -96,12 +152,16 @@ compile_shader() {
 	"${cmd[@]}"
 }
 
-compile_shader "vs_instancing.sc" "vs_instancing.bin" vertex "${shader_profile}"
-compile_shader "fs_instancing.sc" "fs_instancing.bin" fragment "${shader_profile}"
-compile_shader "vs_picking.sc" "vs_picking.bin" vertex "${shader_profile}"
-compile_shader "fs_picking.sc" "fs_picking.bin" fragment "${shader_profile}"
-compile_shader "vs_lines.sc" "vs_lines.bin" vertex "${shader_profile}"
-compile_shader "fs_lines.sc" "fs_lines.bin" fragment "${shader_profile}"
-compile_shader "vs_structure_factor.sc" "vs_structure_factor.bin" vertex "${structure_factor_shader_profile}"
-compile_shader "fs_structure_factor.sc" "fs_structure_factor.bin" fragment "${structure_factor_shader_profile}"
-compile_shader "fs_structure_factor_color.sc" "fs_structure_factor_color.bin" fragment "${structure_factor_shader_profile}"
+echo "Compiling shaders for backends: ${shader_backends[*]}"
+
+for backend in "${shader_backends[@]}"; do
+	compile_shader "vs_instancing.sc" "vs_instancing.bin" vertex "${backend}" regular
+	compile_shader "fs_instancing.sc" "fs_instancing.bin" fragment "${backend}" regular
+	compile_shader "vs_picking.sc" "vs_picking.bin" vertex "${backend}" regular
+	compile_shader "fs_picking.sc" "fs_picking.bin" fragment "${backend}" regular
+	compile_shader "vs_lines.sc" "vs_lines.bin" vertex "${backend}" regular
+	compile_shader "fs_lines.sc" "fs_lines.bin" fragment "${backend}" regular
+	compile_shader "vs_structure_factor.sc" "vs_structure_factor.bin" vertex "${backend}" structure
+	compile_shader "fs_structure_factor.sc" "fs_structure_factor.bin" fragment "${backend}" structure
+	compile_shader "fs_structure_factor_color.sc" "fs_structure_factor_color.bin" fragment "${backend}" structure
+done
