@@ -2527,6 +2527,18 @@ static void glfw_charCallback(GLFWwindow *window, unsigned int codePoint)
     ImGuiBgfx::addInputCharacter(codePoint);
 }
 
+static void glfw_dropCallback(GLFWwindow *window, int pathCount, const char **paths)
+{
+    ViewerState *state = getViewerState(window);
+    if (state == nullptr || pathCount <= 0 || paths == nullptr || paths[0] == nullptr)
+    {
+        return;
+    }
+
+    state->pendingOpenPath = paths[0];
+    state->pendingOpenDroppedFile = true;
+}
+
 static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     ViewerState *state = getViewerState(window);
@@ -3003,6 +3015,73 @@ static void handleWindowResize(GLFWwindow *window, int &width, int &height,
     }
 }
 
+static bool openTrajectoryFile(const std::string &path,
+                             ViewerState &viewerState,
+                             const bgfx::VertexLayout &layout,
+                             uint16_t sphereStacks, uint16_t sphereSlices,
+                             std::unique_ptr<TrajectoryReader> &trajectoryReader,
+                             ParticleSystem &particleSystem,
+                             TrajectoryReader::FileType &particleFileType,
+                             SimulationBox &simulationBox,
+                             StructureFactorResources &structureFactorResources,
+                             std::string &loadedPath,
+                             size_t &currentFrame,
+                             size_t &totalFrames)
+{
+    std::unique_ptr<TrajectoryReader> openedTrajectory = std::make_unique<TrajectoryReader>(path);
+    if (!openedTrajectory->isOpen())
+    {
+        viewerState.fileOpenStatusMessage = openedTrajectory->error();
+        std::cerr << viewerState.fileOpenStatusMessage << std::endl;
+        return false;
+    }
+
+    ParticleSystem loadedParticleSystem(
+        createParticleType(layout, openedTrajectory->fileType(), sphereStacks, sphereSlices));
+    SimulationBox loadedSimulationBox = simulationBox;
+    if (!openedTrajectory->loadFrame(0, loadedParticleSystem, loadedSimulationBox))
+    {
+        std::cerr << "Failed to load frame 0 from trajectory file: " << path;
+        if (!openedTrajectory->error().empty())
+        {
+            std::cerr << "\n" << openedTrajectory->error();
+        }
+        std::cerr << std::endl;
+        viewerState.fileOpenStatusMessage = "Failed to open trajectory file: " + path;
+        return false;
+    }
+
+    trajectoryReader = std::move(openedTrajectory);
+    particleSystem = std::move(loadedParticleSystem);
+    simulationBox = loadedSimulationBox;
+    loadedPath = path;
+    currentFrame = 0;
+    totalFrames = bx::max<size_t>(trajectoryReader->frameCount(), 1u);
+    particleFileType = trajectoryReader->fileType();
+    viewerState.fileDimensionality = trajectoryReader->dimensionality();
+    viewerState.maxSeenParticleTypeIndex = 0u;
+    viewerState.orderParameterCount = 0u;
+    viewerState.particleTypeVisible.fill(true);
+    viewerState.selectedIds.clear();
+    viewerState.hiddenIds.clear();
+    viewerState.lastPickedId = 0u;
+    viewerState.pendingPickRequest = false;
+    viewerState.pendingPickReadback = false;
+    viewerState.structureFactorInteractionLowResActive = false;
+    noteEncounteredParticleTypes(viewerState, particleSystem);
+    invalidateNeighborAnalysis(viewerState, particleSystem);
+    applyParticleVisibilityFilters(particleSystem, viewerState);
+    markAllHelperSystemsDirty(viewerState);
+    markPickBufferDirty(viewerState);
+    destroyStructureFactorResources(structureFactorResources);
+    markStructureFactorDirty(viewerState);
+    viewerState.structureFactorPendingCompute = viewerState.structureFactorAutoUpdate;
+    snapshotCurrentParticlePositions(particleSystem, viewerState, false);
+    viewerState.fileOpenStatusMessage.clear();
+    std::cout << "Opened trajectory file: " << loadedPath << std::endl;
+    return true;
+}
+
 static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &currentFrame,
                                         size_t totalFrames,
                                         const std::string &loadedPath,
@@ -3081,8 +3160,12 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
 
 static void processPendingActions(ViewerState &viewerState, ParticleSystem &particleSystem,
                                   const bgfx::VertexLayout &layout,
-                                  TrajectoryReader::FileType particleFileType,
-                                  const SimulationBox &simulationBox,
+                                  TrajectoryReader::FileType &particleFileType,
+                                  SimulationBox &simulationBox,
+                                  std::unique_ptr<TrajectoryReader> &trajectoryReader,
+                                  std::string &loadedPath,
+                                  size_t &currentFrame,
+                                  size_t &totalFrames,
                                   StructureFactorResources &structureFactorResources,
                                   float particleSizeScale,
                                   uint16_t &sphereStacks, uint16_t &sphereSlices,
@@ -3092,6 +3175,20 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     if (viewerState.autoFindNeighbors && !viewerState.neighborAnalysisValid)
     {
         viewerState.pendingFindNeighbors = true;
+    }
+
+    if (viewerState.pendingOpenDroppedFile)
+    {
+        if (!viewerState.pendingOpenPath.empty())
+        {
+            openTrajectoryFile(viewerState.pendingOpenPath, viewerState, layout,
+                               sphereStacks, sphereSlices, trajectoryReader,
+                               particleSystem, particleFileType, simulationBox,
+                               structureFactorResources, loadedPath,
+                               currentFrame, totalFrames);
+        }
+        viewerState.pendingOpenPath.clear();
+        viewerState.pendingOpenDroppedFile = false;
     }
 
     if (viewerState.pendingHideSelected)
@@ -3574,6 +3671,7 @@ int main(int argc, char **argv)
     glfwSetCursorPosCallback(window, glfw_mouseCallback);
     glfwSetMouseButtonCallback(window, glfw_mouseButtonCallback);
     glfwSetScrollCallback(window, glfw_scrollCallback);
+    glfwSetDropCallback(window, glfw_dropCallback);
     // Call bgfx::renderFrame before bgfx::init to signal to bgfx not to create a render thread.
     // Most graphics APIs must be used on the same thread that created the window.
     bgfx::renderFrame();
@@ -3647,45 +3745,17 @@ int main(int argc, char **argv)
 
         if (argc > 1)
         {
-            loadedPath = argv[1];
-            trajectoryReader = std::make_unique<TrajectoryReader>(loadedPath);
-            if (!trajectoryReader->isOpen())
-            {
-                std::cerr << trajectoryReader->error() << std::endl;
-                exitCode = 1;
-            }
-            else
-            {
-                particleFileType = trajectoryReader->fileType();
-                viewerState.fileDimensionality = trajectoryReader->dimensionality();
-                particleSystem.setType(createParticleType(layout, particleFileType,
-                                                          sphereStacks, sphereSlices));
-                totalFrames = trajectoryReader->frameCount();
-                if (!trajectoryReader->loadFrame(currentFrame, particleSystem, simulationBox))
-                {
-                    std::cerr << "Failed to load frame 0 from trajectory file: "
-                              << loadedPath;
-                    if (!trajectoryReader->error().empty())
-                    {
-                        std::cerr << "\n" << trajectoryReader->error();
-                    }
-                    std::cerr << std::endl;
-                    exitCode = 1;
-                }
-                else
-                {
-                    noteEncounteredParticleTypes(viewerState, particleSystem);
-                    invalidateNeighborAnalysis(viewerState, particleSystem);
-                    applyParticleVisibilityFilters(particleSystem, viewerState);
-                    markAllHelperSystemsDirty(viewerState);
-                    snapshotCurrentParticlePositions(particleSystem, viewerState, false);
-                }
-            }
+            openTrajectoryFile(argv[1], viewerState, layout,
+                               sphereStacks, sphereSlices, trajectoryReader,
+                               particleSystem, particleFileType, simulationBox,
+                               structureFactorResources, loadedPath,
+                               currentFrame, totalFrames);
         }
         else
         {
-            std::cerr << "No filename given." << std::endl;
-            exitCode = 1;
+            viewerState.fileOpenStatusMessage =
+                "Drop a trajectory file into the window to open it.";
+            std::cout << viewerState.fileOpenStatusMessage << std::endl;
         }
 
         bgfx::setViewClear(kMainView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.0f, 0);
@@ -3775,7 +3845,8 @@ int main(int argc, char **argv)
             handleTrajectoryFrameChange(viewerState, currentFrame, totalFrames, loadedPath,
                                         trajectoryReader.get(), particleSystem, simulationBox);
             processPendingActions(viewerState, particleSystem, layout, particleFileType,
-                                  simulationBox, structureFactorResources,
+                                  simulationBox, trajectoryReader, loadedPath,
+                                  currentFrame, totalFrames, structureFactorResources,
                                   viewerState.particleSizeScale,
                                   sphereStacks,
                                   sphereSlices, cutPlaneStep, cutPlaneMinSceneZ,

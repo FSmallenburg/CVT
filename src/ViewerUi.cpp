@@ -73,47 +73,66 @@ struct SizeDistributionData
     float binWidth = 0.0f;
 };
 
+float sizeDistributionValue(const Particle &particle,
+                            TrajectoryReader::FileType particleFileType)
+{
+    if (particleFileType == TrajectoryReader::FileType::Cube)
+    {
+        return particle.sizeParams[0];
+    }
+
+    return 2.0f * particle.sizeParams[0];
+}
+
+const char *sizeDistributionQuantityLabel(TrajectoryReader::FileType particleFileType)
+{
+    return particleFileType == TrajectoryReader::FileType::Cube
+               ? "Edge length"
+               : "Diameter";
+}
+
 SizeDistributionData buildSizeDistributionData(const ParticleSystem &particleSystem,
+                                               TrajectoryReader::FileType particleFileType,
                                                bool visibleOnly,
                                                uint16_t requestedBinCount)
 {
     SizeDistributionData data;
 
-    std::vector<float> diameters;
-    diameters.reserve(particleSystem.particles().size());
+    std::vector<float> values;
+    values.reserve(particleSystem.particles().size());
     for (const Particle &particle : particleSystem.particles())
     {
         if (visibleOnly && !particle.visible)
         {
             continue;
         }
-        diameters.push_back(2.0f * particle.sizeParams[0]);
+        values.push_back(sizeDistributionValue(particle, particleFileType));
     }
 
-    data.sampleCount = diameters.size();
-    if (diameters.empty())
+    data.sampleCount = values.size();
+    if (values.empty())
     {
         return data;
     }
 
-    data.minValue = *std::min_element(diameters.begin(), diameters.end());
-    data.maxValue = *std::max_element(diameters.begin(), diameters.end());
+    data.minValue = *std::min_element(values.begin(), values.end());
+    data.maxValue = *std::max_element(values.begin(), values.end());
 
     double sum = 0.0;
-    for (float diameter : diameters)
+    for (float value : values)
     {
-        sum += static_cast<double>(diameter);
+        sum += static_cast<double>(value);
     }
-    data.meanValue = static_cast<float>(sum / static_cast<double>(diameters.size()));
+    data.meanValue = static_cast<float>(sum / static_cast<double>(values.size()));
 
     double squaredDifferenceSum = 0.0;
-    for (float diameter : diameters)
+    for (float value : values)
     {
-        const double delta = static_cast<double>(diameter) - static_cast<double>(data.meanValue);
+        const double delta = static_cast<double>(value) - static_cast<double>(data.meanValue);
         squaredDifferenceSum += delta * delta;
     }
     data.standardDeviation = static_cast<float>(
-        std::sqrt(squaredDifferenceSum / static_cast<double>(diameters.size())));
+        std::sqrt(squaredDifferenceSum / static_cast<double>(values.size())));
 
     const uint16_t binCount = bx::max<uint16_t>(requestedBinCount, 1u);
     data.binCounts.assign(binCount, 0.0f);
@@ -143,9 +162,9 @@ SizeDistributionData buildSizeDistributionData(const ParticleSystem &particleSys
     }
 
     const float inverseBinWidth = 1.0f / data.binWidth;
-    for (float diameter : diameters)
+    for (float value : values)
     {
-        int binIndex = static_cast<int>((diameter - data.plotMinValue) * inverseBinWidth);
+        int binIndex = static_cast<int>((value - data.plotMinValue) * inverseBinWidth);
         binIndex = std::clamp(binIndex, 0, int(binCount) - 1);
         data.binCounts[static_cast<size_t>(binIndex)] += 1.0f;
     }
@@ -307,6 +326,10 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
     ImGui::SameLine();
     ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 110.0f);
     ImGui::Text("FPS: %.1f", viewerState.currentFps);
+    if (!viewerState.fileOpenStatusMessage.empty())
+    {
+        ImGui::TextWrapped("%s", viewerState.fileOpenStatusMessage.c_str());
+    }
     ImGui::Text("Particle type: %s", particleTypeName(particleFileType));
     ImGui::Text("Visible: %zu", countVisibleParticles(particleSystem));
     ImGui::Text("Selected: %zu", viewerState.selectedIds.size());
@@ -794,6 +817,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
             const SizeDistributionData sizeDistribution =
                 buildSizeDistributionData(particleSystem,
+                                          particleFileType,
                                           viewerState.sizeDistributionUseVisibleOnly,
                                           viewerState.sizeDistributionBinCount);
             if (sizeDistribution.sampleCount == 0u)
@@ -802,10 +826,15 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
             else
             {
+                const char *sizeQuantityLabel =
+                    sizeDistributionQuantityLabel(particleFileType);
                 ImGui::Text("Count: %zu", sizeDistribution.sampleCount);
-                ImGui::Text("Mean diameter: %.4f", sizeDistribution.meanValue);
+                ImGui::Text("Mean %s: %.4f", sizeQuantityLabel, sizeDistribution.meanValue);
                 ImGui::Text("SD: %.4f", sizeDistribution.standardDeviation);
-                ImGui::Text("Polydispersity: %.4f", sizeDistribution.standardDeviation / sizeDistribution.meanValue);
+                ImGui::Text("Polydispersity: %.4f",
+                            sizeDistribution.meanValue > 1.0e-6f
+                                ? (sizeDistribution.standardDeviation / sizeDistribution.meanValue)
+                                : 0.0f);
                 ImGui::Text("Range: [%.4f, %.4f]", sizeDistribution.minValue,
                             sizeDistribution.maxValue);
 
@@ -816,7 +845,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                          ImVec2(plotWidth, 180.0f),
                                          ImPlotFlags_NoLegend))
                 {
-                    ImPlot::SetupAxes("Diameter", "Count",
+                    ImPlot::SetupAxes(sizeQuantityLabel, "Count",
                                       ImPlotAxisFlags_AutoFit,
                                       ImPlotAxisFlags_AutoFit);
                     ImPlot::PlotBars("Count",
@@ -837,7 +866,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                          bx::max(1.0f, sizeDistribution.maxBinCount),
                                          ImVec2(plotWidth, 160.0f));
                 }
-                ImGui::TextDisabled("Histogram uses particle diameters from the current snapshot.");
+                ImGui::TextDisabled("Histogram uses the current particle size measure for this shape (diameter for spheres/disks, edge length for cubes).");
             }
         }
 

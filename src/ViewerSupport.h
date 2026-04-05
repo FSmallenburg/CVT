@@ -68,6 +68,9 @@ struct ViewerState
     int pendingFrameIndex = -1;
     bool jumpToFirstFrame = false;
     bool jumpToLastFrame = false;
+    bool pendingOpenDroppedFile = false;
+    std::string pendingOpenPath;
+    std::string fileOpenStatusMessage;
     float orthoZoom = 1.0f;
     float currentFps = 0.0f;
     uint8_t lightingLevelIndex = 14u;
