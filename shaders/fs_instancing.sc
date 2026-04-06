@@ -13,9 +13,9 @@ void main()
 
     float diff = max(dot(n, lightDir), 0.0);
 
-    // Ambient + diffuse
-    vec3 ambient = vec3(0.3);
-    vec3 diffuse = vec3(diff);
+    // Ambient + diffuse. Use bgfx splat helpers for cross-backend compatibility.
+    vec3 ambient = vec3_splat(0.3);
+    vec3 diffuse = vec3_splat(diff);
     float lightingScale = u_lightScale.x;
 
     vec3 finalColor = lightingScale * (ambient + diffuse) * v_color.rgb;

@@ -49,6 +49,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cmath>
+#include <complex>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -817,6 +818,171 @@ void applyColorMode(ParticleSystem &particleSystem, ColorMode colorMode,
     }
 }
 
+constexpr uint8_t kMinBondOrientationalOrder = 2u;
+constexpr uint8_t kMaxBondOrientationalOrder2D = 6u;
+constexpr uint8_t kMaxBondOrientationalOrder3D = 8u;
+constexpr size_t kSteinhardtOrderCount =
+    size_t(kMaxBondOrientationalOrder3D - kMinBondOrientationalOrder + 1u);
+constexpr size_t kStoredSteinhardtComponentCount = 42u;
+constexpr float kBondOrientationalVectorEpsilon = 1.0e-6f;
+
+using BondOrderComplex = std::complex<float>;
+using BondOrderVector = std::array<BondOrderComplex, kStoredSteinhardtComponentCount>;
+
+uint8_t clampedBondOrientationalOrder(const ViewerState &viewerState)
+{
+    const uint8_t maximumOrder =
+        viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional
+            ? kMaxBondOrientationalOrder2D
+            : kMaxBondOrientationalOrder3D;
+    return std::clamp<uint8_t>(viewerState.bondOrientationalOrder,
+                               kMinBondOrientationalOrder,
+                               maximumOrder);
+}
+
+constexpr size_t steinhardtArrayIndex(uint8_t order)
+{
+    return size_t(order - kMinBondOrientationalOrder);
+}
+
+constexpr size_t steinhardtComponentOffset(uint8_t order)
+{
+    return size_t((order - kMinBondOrientationalOrder) * (order + 3u) / 2u);
+}
+
+double associatedLegendrePolynomial(int l, int m, double x)
+{
+    x = std::clamp(x, -1.0, 1.0);
+
+    double pmm = 1.0;
+    if (m > 0)
+    {
+        const double sinTheta = std::sqrt(std::max(0.0, 1.0 - x * x));
+        double factor = 1.0;
+        for (int order = 1; order <= m; ++order)
+        {
+            pmm *= -factor * sinTheta;
+            factor += 2.0;
+        }
+    }
+
+    if (l == m)
+    {
+        return pmm;
+    }
+
+    double pmmp1 = x * double(2 * m + 1) * pmm;
+    if (l == m + 1)
+    {
+        return pmmp1;
+    }
+
+    for (int order = m + 2; order <= l; ++order)
+    {
+        const double pll = (double(2 * order - 1) * x * pmmp1
+                            - double(order + m - 1) * pmm)
+                           / double(order - m);
+        pmm = pmmp1;
+        pmmp1 = pll;
+    }
+
+    return pmmp1;
+}
+
+double sphericalHarmonicNormalization(int l, int m)
+{
+    double factorialRatio = 1.0;
+    for (int value = l - m + 1; value <= l + m; ++value)
+    {
+        factorialRatio /= double(value);
+    }
+
+    return std::sqrt(((2.0 * double(l)) + 1.0) * factorialRatio
+                     / (4.0 * double(bx::kPi)));
+}
+
+BondOrderComplex sphericalHarmonicComponent(int l, int m, double cosTheta, double phi)
+{
+    const double amplitude = sphericalHarmonicNormalization(l, m)
+                             * associatedLegendrePolynomial(l, m, cosTheta);
+    const double phase = double(m) * phi;
+    return {
+        float(amplitude * std::cos(phase)),
+        float(amplitude * std::sin(phase)),
+    };
+}
+
+void scaleBondOrderVector(BondOrderVector &bondOrderVector, float scale)
+{
+    for (BondOrderComplex &component : bondOrderVector)
+    {
+        component *= scale;
+    }
+}
+
+float bondOrderMagnitude(const BondOrderVector &bondOrderVector, uint8_t order)
+{
+    const size_t offset = steinhardtComponentOffset(order);
+
+    double sum = double(std::norm(bondOrderVector[offset]));
+    for (uint8_t m = 1u; m <= order; ++m)
+    {
+        sum += 2.0 * double(std::norm(bondOrderVector[offset + m]));
+    }
+
+    const float magnitude = static_cast<float>(
+        std::sqrt((4.0 * double(bx::kPi) / double(2u * order + 1u)) * sum));
+    return std::clamp(magnitude, 0.0f, 1.0f);
+}
+
+std::array<float, 4> resolveAnalysisColor(const ParticleAnalysisData &analysis,
+                                          const ViewerState &viewerState)
+{
+    switch (viewerState.analysisColorMode)
+    {
+    case AnalysisColorMode::Disabled:
+        return colorFromLetter('A');
+    case AnalysisColorMode::NeighborCount:
+        return colorFromLetter(
+            static_cast<char>('A' + (analysis.neighborCount % kParticlePaletteColorCount)));
+    case AnalysisColorMode::BondOrientationalOrderMagnitude:
+        if (viewerState.fileDimensionality != TrajectoryReader::Dimensionality::TwoDimensional)
+        {
+            return colorFromLetter('A');
+        }
+        return analysisGradientColor(analysis.neighborCount == 0u
+                                         ? 0.0f
+                                         : analysis.bondOrientationalMagnitude);
+    case AnalysisColorMode::BondOrientationalOrderPhase:
+        if (viewerState.fileDimensionality != TrajectoryReader::Dimensionality::TwoDimensional)
+        {
+            return colorFromLetter('A');
+        }
+        return hueColor(analysis.neighborCount == 0u
+                            ? 0.0f
+                            : (analysis.bondOrientationalPhase + bx::kPi)
+                                  / (2.0f * bx::kPi));
+    case AnalysisColorMode::BondOrientationalQLMagnitude:
+    case AnalysisColorMode::BondOrientationalQBarLMagnitude:
+        if (viewerState.fileDimensionality != TrajectoryReader::Dimensionality::ThreeDimensional)
+        {
+            return colorFromLetter('A');
+        }
+
+        {
+            const size_t orderIndex =
+                steinhardtArrayIndex(clampedBondOrientationalOrder(viewerState));
+            const float value = viewerState.analysisColorMode
+                                        == AnalysisColorMode::BondOrientationalQLMagnitude
+                                    ? analysis.steinhardtQValues[orderIndex]
+                                    : analysis.steinhardtQBarValues[orderIndex];
+            return analysisGradientColor(analysis.neighborCount == 0u ? 0.0f : value);
+        }
+    }
+
+    return colorFromLetter('A');
+}
+
 void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &particleSystem)
 {
     if (!particleSystem.hasNeighborAnalysis())
@@ -829,12 +995,18 @@ void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &part
         particleSystem.neighborAnalysis();
     const bool isTwoDimensional =
         viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
-    const float symmetryOrder =
-        float(std::clamp<uint8_t>(viewerState.bondOrientationalOrder, 2u, 6u));
+    const uint8_t selectedOrder = clampedBondOrientationalOrder(viewerState);
+    const float symmetryOrder = float(selectedOrder);
 
     particleSystem.resizeAnalysisResults(neighborLists.size(),
-                                         viewerState.bondOrientationalOrder);
+                                         isTwoDimensional ? selectedOrder : 0u);
     std::vector<ParticleAnalysisData> &analysisResults = particleSystem.analysisResults();
+    std::vector<BondOrderVector> qlmByParticle;
+    if (!isTwoDimensional)
+    {
+        qlmByParticle.resize(neighborLists.size());
+    }
+
     for (size_t index = 0; index < neighborLists.size(); ++index)
     {
         const std::vector<NearestNeighborData> &neighbors = neighborLists[index];
@@ -842,26 +1014,116 @@ void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &part
         analysis.neighborCount = static_cast<uint32_t>(neighbors.size());
         analysis.bondOrientationalMagnitude = 0.0f;
         analysis.bondOrientationalPhase = 0.0f;
+        analysis.steinhardtQValues.fill(0.0f);
+        analysis.steinhardtQBarValues.fill(0.0f);
 
-        if (!isTwoDimensional || neighbors.empty())
+        if (neighbors.empty())
         {
             continue;
         }
 
-        float cosSum = 0.0f;
-        float sinSum = 0.0f;
-        for (const NearestNeighborData &neighbor : neighbors)
+        if (isTwoDimensional)
         {
-            const float theta = std::atan2(neighbor.displacement.y,
-                                           neighbor.displacement.x);
-            const float angle = -symmetryOrder * theta;
-            cosSum += std::cos(angle);
-            sinSum += std::sin(angle);
+            float cosSum = 0.0f;
+            float sinSum = 0.0f;
+            for (const NearestNeighborData &neighbor : neighbors)
+            {
+                const float theta = std::atan2(neighbor.displacement.y,
+                                               neighbor.displacement.x);
+                const float angle = -symmetryOrder * theta;
+                cosSum += std::cos(angle);
+                sinSum += std::sin(angle);
+            }
+
+            analysis.bondOrientationalMagnitude =
+                std::sqrt(cosSum * cosSum + sinSum * sinSum) / float(neighbors.size());
+            analysis.bondOrientationalPhase = std::atan2(sinSum, cosSum);
+            continue;
         }
 
-        analysis.bondOrientationalMagnitude =
-            std::sqrt(cosSum * cosSum + sinSum * sinSum) / float(neighbors.size());
-        analysis.bondOrientationalPhase = std::atan2(sinSum, cosSum);
+        BondOrderVector &bondOrderVector = qlmByParticle[index];
+        bondOrderVector.fill(BondOrderComplex(0.0f, 0.0f));
+        for (const NearestNeighborData &neighbor : neighbors)
+        {
+            const float displacementLength = bx::length(neighbor.displacement);
+            if (displacementLength <= kBondOrientationalVectorEpsilon)
+            {
+                continue;
+            }
+
+            const double inverseDisplacementLength = 1.0 / double(displacementLength);
+            const double cosTheta = std::clamp(double(neighbor.displacement.z)
+                                                   * inverseDisplacementLength,
+                                               -1.0, 1.0);
+            const double phi = std::atan2(double(neighbor.displacement.y),
+                                          double(neighbor.displacement.x));
+
+            for (uint8_t order = kMinBondOrientationalOrder;
+                 order <= kMaxBondOrientationalOrder3D; ++order)
+            {
+                const size_t componentOffset = steinhardtComponentOffset(order);
+                for (uint8_t m = 0u; m <= order; ++m)
+                {
+                    bondOrderVector[componentOffset + m] +=
+                        sphericalHarmonicComponent(order, int(m), cosTheta, phi);
+                }
+            }
+        }
+
+        scaleBondOrderVector(bondOrderVector, 1.0f / float(neighbors.size()));
+        for (uint8_t order = kMinBondOrientationalOrder;
+             order <= kMaxBondOrientationalOrder3D; ++order)
+        {
+            analysis.steinhardtQValues[steinhardtArrayIndex(order)] =
+                bondOrderMagnitude(bondOrderVector, order);
+        }
+    }
+
+    if (isTwoDimensional)
+    {
+        return;
+    }
+
+    for (size_t index = 0; index < neighborLists.size(); ++index)
+    {
+        const std::vector<NearestNeighborData> &neighbors = neighborLists[index];
+        ParticleAnalysisData &analysis = analysisResults[index];
+
+        BondOrderVector averagedBondOrderVector{};
+        averagedBondOrderVector.fill(BondOrderComplex(0.0f, 0.0f));
+
+        size_t averageCount = 1u;
+        for (size_t componentIndex = 0u; componentIndex < kStoredSteinhardtComponentCount;
+             ++componentIndex)
+        {
+            averagedBondOrderVector[componentIndex] = qlmByParticle[index][componentIndex];
+        }
+
+        for (const NearestNeighborData &neighbor : neighbors)
+        {
+            if (neighbor.neighborIndex >= qlmByParticle.size())
+            {
+                continue;
+            }
+
+            const BondOrderVector &neighborBondOrderVector =
+                qlmByParticle[neighbor.neighborIndex];
+            for (size_t componentIndex = 0u; componentIndex < kStoredSteinhardtComponentCount;
+                 ++componentIndex)
+            {
+                averagedBondOrderVector[componentIndex] +=
+                    neighborBondOrderVector[componentIndex];
+            }
+            ++averageCount;
+        }
+
+        scaleBondOrderVector(averagedBondOrderVector, 1.0f / float(averageCount));
+        for (uint8_t order = kMinBondOrientationalOrder;
+             order <= kMaxBondOrientationalOrder3D; ++order)
+        {
+            analysis.steinhardtQBarValues[steinhardtArrayIndex(order)] =
+                bondOrderMagnitude(averagedBondOrderVector, order);
+        }
     }
 }
 
@@ -874,60 +1136,16 @@ void applyAnalysisColorMode(ParticleSystem &particleSystem, const ViewerState &v
     }
 
     std::vector<Particle> &particles = particleSystem.particles();
-    if (!particleSystem.hasAnalysisResults(viewerState.bondOrientationalOrder))
+    if (!particleSystem.hasAnalysisResults(clampedBondOrientationalOrder(viewerState)))
     {
         return;
     }
 
     const std::vector<ParticleAnalysisData> &analysisResults = particleSystem.analysisResults();
     const size_t particleCount = bx::min(particles.size(), analysisResults.size());
-
-    switch (viewerState.analysisColorMode)
+    for (size_t index = 0; index < particleCount; ++index)
     {
-    case AnalysisColorMode::Disabled:
-        return;
-    case AnalysisColorMode::NeighborCount:
-        for (size_t index = 0; index < particleCount; ++index)
-        {
-            const uint32_t neighborCount = analysisResults[index].neighborCount;
-            particles[index].color = colorFromLetter(
-                static_cast<char>('A' + (neighborCount % kParticlePaletteColorCount)));
-        }
-        return;
-    case AnalysisColorMode::BondOrientationalOrderMagnitude:
-    case AnalysisColorMode::BondOrientationalOrderPhase:
-        if (viewerState.fileDimensionality != TrajectoryReader::Dimensionality::TwoDimensional)
-        {
-            return;
-        }
-
-        for (size_t index = 0; index < particleCount; ++index)
-        {
-            const ParticleAnalysisData &analysis = analysisResults[index];
-            if (analysis.neighborCount == 0u)
-            {
-                particles[index].color =
-                    viewerState.analysisColorMode
-                            == AnalysisColorMode::BondOrientationalOrderPhase
-                        ? hueColor(0.0f)
-                        : analysisGradientColor(0.0f);
-                continue;
-            }
-
-            if (viewerState.analysisColorMode
-                == AnalysisColorMode::BondOrientationalOrderPhase)
-            {
-                const float normalizedPhase =
-                    (analysis.bondOrientationalPhase + bx::kPi) / (2.0f * bx::kPi);
-                particles[index].color = hueColor(normalizedPhase);
-            }
-            else
-            {
-                particles[index].color =
-                    analysisGradientColor(analysis.bondOrientationalMagnitude);
-            }
-        }
-        return;
+        particles[index].color = resolveAnalysisColor(analysisResults[index], viewerState);
     }
 }
 
@@ -937,7 +1155,8 @@ void applyAnalysisColorMode(ParticleSystem &targetParticleSystem,
 {
     if (!viewerState.neighborAnalysisValid
         || viewerState.analysisColorMode == AnalysisColorMode::Disabled
-        || !analysisSourceParticleSystem.hasAnalysisResults(viewerState.bondOrientationalOrder))
+        || !analysisSourceParticleSystem.hasAnalysisResults(
+            clampedBondOrientationalOrder(viewerState)))
     {
         return;
     }
@@ -963,27 +1182,8 @@ void applyAnalysisColorMode(ParticleSystem &targetParticleSystem,
             continue;
         }
 
-        const ParticleAnalysisData &analysis = analysisResults[sourceIndexIt->second];
-        switch (viewerState.analysisColorMode)
-        {
-        case AnalysisColorMode::Disabled:
-            return;
-        case AnalysisColorMode::NeighborCount:
-            particle.color = colorFromLetter(
-                static_cast<char>('A' + (analysis.neighborCount % kParticlePaletteColorCount)));
-            break;
-        case AnalysisColorMode::BondOrientationalOrderMagnitude:
-            particle.color = analysis.neighborCount == 0u
-                                 ? analysisGradientColor(0.0f)
-                                 : analysisGradientColor(analysis.bondOrientationalMagnitude);
-            break;
-        case AnalysisColorMode::BondOrientationalOrderPhase:
-            particle.color = analysis.neighborCount == 0u
-                                 ? hueColor(0.0f)
-                                 : hueColor((analysis.bondOrientationalPhase + bx::kPi)
-                                            / (2.0f * bx::kPi));
-            break;
-        }
+        particle.color = resolveAnalysisColor(analysisResults[sourceIndexIt->second],
+                                              viewerState);
     }
 }
 

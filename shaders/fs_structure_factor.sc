@@ -101,7 +101,8 @@ void main()
     float sumImag = 0.0;
     for (int particleIndex = 0; particleIndex < particleCount; ++particleIndex)
     {
-        vec4 particleData = texture2D(s_particleData, particleTexCoord(particleIndex));
+        // Use explicit LOD so HLSL/D3D can compile this variable-length loop.
+        vec4 particleData = texture2DLod(s_particleData, particleTexCoord(particleIndex), 0.0);
         float phase = dot(boxWaveVector, particleData.xyz);
         sumReal += particleData.w * cos(phase);
         sumImag += particleData.w * sin(phase);

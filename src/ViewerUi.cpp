@@ -36,23 +36,27 @@ int analysisColorModeComboIndex(AnalysisColorMode analysisColorMode)
         return 2;
     case AnalysisColorMode::BondOrientationalOrderPhase:
         return 3;
+    case AnalysisColorMode::BondOrientationalQLMagnitude:
+        return 2;
+    case AnalysisColorMode::BondOrientationalQBarLMagnitude:
+        return 3;
     }
 
     return 0;
 }
 
-AnalysisColorMode analysisColorModeFromComboIndex(int comboIndex, bool supportsPsi6)
+AnalysisColorMode analysisColorModeFromComboIndex(int comboIndex, bool isTwoDimensional)
 {
     switch (comboIndex)
     {
     case 1:
         return AnalysisColorMode::NeighborCount;
     case 2:
-        return supportsPsi6 ? AnalysisColorMode::BondOrientationalOrderMagnitude
-                            : AnalysisColorMode::NeighborCount;
+        return isTwoDimensional ? AnalysisColorMode::BondOrientationalOrderMagnitude
+                                : AnalysisColorMode::BondOrientationalQLMagnitude;
     case 3:
-        return supportsPsi6 ? AnalysisColorMode::BondOrientationalOrderPhase
-                            : AnalysisColorMode::NeighborCount;
+        return isTwoDimensional ? AnalysisColorMode::BondOrientationalOrderPhase
+                                : AnalysisColorMode::BondOrientationalQBarLMagnitude;
     default:
         return AnalysisColorMode::Disabled;
     }
@@ -513,13 +517,20 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
         if (ImGui::CollapsingHeader("Neighbor analysis"))
         {
-            const bool supportsPsi6 =
+            const bool isTwoDimensional =
                 viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
-            if (!supportsPsi6
-                && (viewerState.analysisColorMode
-                        == AnalysisColorMode::BondOrientationalOrderMagnitude
-                    || viewerState.analysisColorMode
-                        == AnalysisColorMode::BondOrientationalOrderPhase))
+            const bool uses2DBondOrientationalColor =
+                viewerState.analysisColorMode
+                    == AnalysisColorMode::BondOrientationalOrderMagnitude
+                || viewerState.analysisColorMode
+                    == AnalysisColorMode::BondOrientationalOrderPhase;
+            const bool uses3DBondOrientationalColor =
+                viewerState.analysisColorMode
+                    == AnalysisColorMode::BondOrientationalQLMagnitude
+                || viewerState.analysisColorMode
+                    == AnalysisColorMode::BondOrientationalQBarLMagnitude;
+            if ((isTwoDimensional && uses3DBondOrientationalColor)
+                || (!isTwoDimensional && uses2DBondOrientationalColor))
             {
                 viewerState.analysisColorMode = AnalysisColorMode::Disabled;
                 markColorDependentHelperSystemsDirty(viewerState);
@@ -571,7 +582,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             ImGui::BeginDisabled(!viewerState.neighborAnalysisValid);
             int analysisColorModeIndex =
                 analysisColorModeComboIndex(viewerState.analysisColorMode);
-            if (supportsPsi6)
+            if (isTwoDimensional)
             {
                 static const char *kAnalysisColorModeLabels2D[] = {
                     "None",
@@ -580,8 +591,8 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     "Bond-orientational order: phase",
                 };
                 if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
-                                kAnalysisColorModeLabels2D,
-                                IM_ARRAYSIZE(kAnalysisColorModeLabels2D)))
+                                 kAnalysisColorModeLabels2D,
+                                 IM_ARRAYSIZE(kAnalysisColorModeLabels2D)))
                 {
                     viewerState.analysisColorMode =
                         analysisColorModeFromComboIndex(analysisColorModeIndex, true);
@@ -593,11 +604,12 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 static const char *kAnalysisColorModeLabels3D[] = {
                     "None",
                     "Neighbor count",
+                    "Bond-orientational order |q_l|",
+                    "Averaged bond-orientational order |qbar_l|",
                 };
-                analysisColorModeIndex = bx::min(analysisColorModeIndex, 1);
                 if (ImGui::Combo("Analysis color", &analysisColorModeIndex,
-                                kAnalysisColorModeLabels3D,
-                                IM_ARRAYSIZE(kAnalysisColorModeLabels3D)))
+                                 kAnalysisColorModeLabels3D,
+                                 IM_ARRAYSIZE(kAnalysisColorModeLabels3D)))
                 {
                     viewerState.analysisColorMode =
                         analysisColorModeFromComboIndex(analysisColorModeIndex, false);
@@ -607,23 +619,43 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             ImGui::EndDisabled();
 
             const bool usesBondOrientationalColor =
-                viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderMagnitude
-                || viewerState.analysisColorMode == AnalysisColorMode::BondOrientationalOrderPhase;
-            ImGui::BeginDisabled(!supportsPsi6 || !usesBondOrientationalColor);
-            int symmetryOrderIndex = int(viewerState.bondOrientationalOrder) - 2;
-            static const char *kBondOrientationalOrderLabels[] = {
+                isTwoDimensional ? uses2DBondOrientationalColor
+                                 : uses3DBondOrientationalColor;
+            const uint8_t minimumBondOrientationalOrder = 2u;
+            const uint8_t maximumBondOrientationalOrder = isTwoDimensional ? 6u : 8u;
+            ImGui::BeginDisabled(!viewerState.neighborAnalysisValid
+                                 || !usesBondOrientationalColor);
+            int symmetryOrderIndex =
+                int(std::clamp<uint8_t>(viewerState.bondOrientationalOrder,
+                                        minimumBondOrientationalOrder,
+                                        maximumBondOrientationalOrder)
+                    - minimumBondOrientationalOrder);
+            static const char *kBondOrientationalOrderLabels2D[] = {
                 "2",
                 "3",
                 "4",
                 "5",
                 "6",
             };
-            if (ImGui::Combo("Bond-order symmetry", &symmetryOrderIndex,
-                            kBondOrientationalOrderLabels,
-                            IM_ARRAYSIZE(kBondOrientationalOrderLabels)))
+            static const char *kBondOrientationalOrderLabels3D[] = {
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+            };
+            if (ImGui::Combo(isTwoDimensional ? "Bond-order symmetry"
+                                           : "Spherical-harmonic degree l",
+                             &symmetryOrderIndex,
+                             isTwoDimensional ? kBondOrientationalOrderLabels2D
+                                              : kBondOrientationalOrderLabels3D,
+                             isTwoDimensional ? IM_ARRAYSIZE(kBondOrientationalOrderLabels2D)
+                                              : IM_ARRAYSIZE(kBondOrientationalOrderLabels3D)))
             {
                 viewerState.bondOrientationalOrder =
-                    static_cast<uint8_t>(symmetryOrderIndex + 2);
+                    static_cast<uint8_t>(symmetryOrderIndex + minimumBondOrientationalOrder);
                 viewerState.pendingRefreshAnalysisResults = viewerState.neighborAnalysisValid;
             }
             ImGui::EndDisabled();

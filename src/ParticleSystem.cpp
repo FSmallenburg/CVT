@@ -150,16 +150,23 @@ void ParticleSystem::clearAnalysisResults()
 
 void ParticleSystem::resizeAnalysisResults(size_t count, uint8_t bondOrientationalOrder)
 {
+    constexpr uint8_t kAllBondOrientationalOrdersCached = 0xffu;
+
     m_analysisResults.clear();
     m_analysisResults.resize(count);
-    m_cachedBondOrientationalOrder = bondOrientationalOrder;
+    m_cachedBondOrientationalOrder =
+        bondOrientationalOrder == 0u ? kAllBondOrientationalOrdersCached
+                                     : bondOrientationalOrder;
 }
 
 bool ParticleSystem::hasAnalysisResults(uint8_t bondOrientationalOrder) const
 {
+    constexpr uint8_t kAllBondOrientationalOrdersCached = 0xffu;
+
     return !m_analysisResults.empty()
            && m_analysisResults.size() == m_particles.size()
-           && m_cachedBondOrientationalOrder == bondOrientationalOrder;
+           && (m_cachedBondOrientationalOrder == bondOrientationalOrder
+               || m_cachedBondOrientationalOrder == kAllBondOrientationalOrdersCached);
 }
 
 std::vector<ParticleAnalysisData> &ParticleSystem::analysisResults()

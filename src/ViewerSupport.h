@@ -31,6 +31,8 @@ enum class AnalysisColorMode : uint8_t
     NeighborCount,
     BondOrientationalOrderMagnitude,
     BondOrientationalOrderPhase,
+    BondOrientationalQLMagnitude,
+    BondOrientationalQBarLMagnitude,
 };
 
 struct ViewerState
