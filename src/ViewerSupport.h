@@ -115,6 +115,7 @@ struct ViewerState
     float currentFps = 0.0f;
     uint8_t lightingLevelIndex = 14u;
     float particleSizeScale = 1.0f;
+    uint16_t particleResolution = 10u;
     bool wrapParticlesToBox = true;
     TrajectoryReader::Dimensionality fileDimensionality =
         TrajectoryReader::Dimensionality::ThreeDimensional;

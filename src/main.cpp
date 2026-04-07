@@ -3201,6 +3201,12 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                 }
             }
             break;
+        case GLFW_KEY_EQUAL:
+            if (action == GLFW_PRESS && (mods & GLFW_MOD_SHIFT) != 0)
+            {
+                state->pendingIncreaseSphereResolution = true;
+            }
+            break;
         case GLFW_KEY_KP_ADD:
             if (action == GLFW_PRESS)
             {
@@ -3780,6 +3786,20 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
 
     const bool supportsResolutionAdjustment = particleFileType != TrajectoryReader::FileType::Polygon;
     bool changedSphereResolution = false;
+    if (supportsResolutionAdjustment)
+    {
+        const uint16_t requestedResolution =
+            static_cast<uint16_t>(std::max<int>(int(viewerState.particleResolution),
+                                                int(kMinSphereStacks)));
+        viewerState.particleResolution = requestedResolution;
+        if (sphereStacks != requestedResolution || sphereSlices != requestedResolution)
+        {
+            sphereStacks = requestedResolution;
+            sphereSlices = requestedResolution;
+            changedSphereResolution = true;
+        }
+    }
+
     if (viewerState.pendingIncreaseSphereResolution)
     {
         if (supportsResolutionAdjustment)
@@ -3809,6 +3829,8 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         }
         viewerState.pendingDecreaseSphereResolution = false;
     }
+
+    viewerState.particleResolution = sphereStacks;
 
     if (changedSphereResolution)
     {

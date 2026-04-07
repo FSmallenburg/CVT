@@ -651,6 +651,17 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             markPickDirty = true;
         }
 
+        const bool supportsResolutionAdjustment =
+            particleFileType != TrajectoryReader::FileType::Polygon;
+        ImGui::BeginDisabled(!supportsResolutionAdjustment);
+        int particleResolution = int(viewerState.particleResolution);
+        if (ImGui::SliderInt("Particle resolution (+/-)", &particleResolution, 4, 64))
+        {
+            viewerState.particleResolution =
+                static_cast<uint16_t>(std::clamp(particleResolution, 4, 64));
+        }
+        ImGui::EndDisabled();
+
         int lightingLevelIndex = viewerState.lightingLevelIndex;
         if (ImGui::SliderInt("Lighting level (s)", &lightingLevelIndex, 0,
                              int(kLightingLevelCount - 1u)))
