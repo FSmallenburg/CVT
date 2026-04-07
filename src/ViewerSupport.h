@@ -180,6 +180,7 @@ struct ViewerState
     bool structureFactorPendingCompute = false;
     bool structureFactorAutoUpdate = true;
     bool structureFactorUseGpu = true;
+    bool structureFactorSpecifyModeCount = false;
     bool structureFactorInteractionLowResActive = false;
     bool structureFactorLogScale = true;
     bool structureFactorSuppressCentralPeak = true;
@@ -187,6 +188,7 @@ struct ViewerState
     uint8_t structureFactorBlurRadius = 1u;
     float structureFactorColorRangeMin = 0.08f;
     float structureFactorColorRangeMax = 0.5f;
+    float structureFactorMaxKTimesSigma = 25.0f;
     uint16_t structureFactorImageSize = 256u;
     int structureFactorMaxModeX = 100;
     int structureFactorMaxModeY = 100;

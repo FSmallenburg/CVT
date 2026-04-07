@@ -1447,6 +1447,18 @@ void logStructureFactorRenderUpdate(StructureFactorResources &structureFactorRes
               << " (GPU path unavailable: " << gpuError << ")." << std::endl;
 }
 
+int structureFactorModeLimitForKTimesSigma(float maxKTimesSigma, float boxLength)
+{
+    if (!(boxLength > 1.0e-6f))
+    {
+        return 1;
+    }
+
+    constexpr double kTwoPi = 6.28318530717958647692;
+    const double maxWaveNumber = std::max(0.0, static_cast<double>(maxKTimesSigma));
+    return std::max(1, static_cast<int>(std::ceil((maxWaveNumber * double(boxLength)) / kTwoPi)));
+}
+
 void updateStructureFactorPreview(ViewerState &viewerState,
                                   const SimulationBox &simulationBox,
                                   const ParticleSystem &particleSystem,
@@ -1459,8 +1471,19 @@ void updateStructureFactorPreview(ViewerState &viewerState,
                                ? std::min<uint16_t>(viewerState.structureFactorImageSize,
                                                     kInteractiveStructureFactorLowResSize)
                                : viewerState.structureFactorImageSize;
-    settings.maxModeX = viewerState.structureFactorMaxModeX;
-    settings.maxModeY = viewerState.structureFactorMaxModeY;
+    if (viewerState.structureFactorSpecifyModeCount)
+    {
+        settings.maxModeX = viewerState.structureFactorMaxModeX;
+        settings.maxModeY = viewerState.structureFactorMaxModeY;
+    }
+    else
+    {
+        const bx::Vec3 boxSize = simulationBox.size();
+        settings.maxModeX = structureFactorModeLimitForKTimesSigma(
+            viewerState.structureFactorMaxKTimesSigma, boxSize.x);
+        settings.maxModeY = structureFactorModeLimitForKTimesSigma(
+            viewerState.structureFactorMaxKTimesSigma, boxSize.y);
+    }
     settings.blurRadius = viewerState.structureFactorBlurRadius;
     settings.colorRangeMin = viewerState.structureFactorColorRangeMin;
     settings.colorRangeMax = viewerState.structureFactorColorRangeMax;

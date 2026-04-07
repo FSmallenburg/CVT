@@ -977,13 +977,36 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 }
             }
 
-            int maxMode = viewerState.structureFactorMaxModeX;
-            if (ImGui::SliderInt("Max |k-mode|", &maxMode, 4, 128))
+            bool specifyModeCount = viewerState.structureFactorSpecifyModeCount;
+            if (ImGui::Checkbox("Specify number of modes", &specifyModeCount))
             {
                 viewerState.structureFactorInteractionLowResActive = false;
-                viewerState.structureFactorMaxModeX = maxMode;
-                viewerState.structureFactorMaxModeY = maxMode;
+                viewerState.structureFactorSpecifyModeCount = specifyModeCount;
                 markStructureFactorDirty(viewerState);
+            }
+
+            if (viewerState.structureFactorSpecifyModeCount)
+            {
+                int maxMode = viewerState.structureFactorMaxModeX;
+                if (ImGui::SliderInt("Max |k-mode|", &maxMode, 4, 128))
+                {
+                    viewerState.structureFactorInteractionLowResActive = false;
+                    viewerState.structureFactorMaxModeX = maxMode;
+                    viewerState.structureFactorMaxModeY = maxMode;
+                    markStructureFactorDirty(viewerState);
+                }
+            }
+            else
+            {
+                float maxKTimesSigma = viewerState.structureFactorMaxKTimesSigma;
+                if (ImGui::SliderFloat("Max k * sigma", &maxKTimesSigma, 1.0f, 64.0f, "%.1f"))
+                {
+                    viewerState.structureFactorInteractionLowResActive = false;
+                    viewerState.structureFactorMaxKTimesSigma = std::clamp(maxKTimesSigma,
+                                                                           1.0f, 64.0f);
+                    markStructureFactorDirty(viewerState);
+                }
+                ImGui::TextDisabled("Uses the input file's native length unit (sigma = 1).");
             }
 
             int sofqPixels = int(viewerState.structureFactorImageSize);
