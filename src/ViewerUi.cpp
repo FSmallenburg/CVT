@@ -1,5 +1,6 @@
 #include "ViewerUi.h"
 
+#include "BondOrderScatter.h"
 #include "ImGuiBgfx.h"
 
 #include "imgui.h"
@@ -77,299 +78,257 @@ struct SizeDistributionData
     float binWidth = 0.0f;
 };
 
-struct BondOrderScatterData
-{
-    std::vector<float> xValues;
-    std::vector<float> yValues;
-    std::vector<ImU32> pointColors;
-    std::vector<uint32_t> particleIds;
+constexpr std::array<const char *, 5> kBondOrientationalOrderLabels2D = {
+    "2", "3", "4", "5", "6",
+};
+constexpr std::array<const char *, 7> kBondOrientationalOrderLabels3D = {
+    "2", "3", "4", "5", "6", "7", "8",
 };
 
-bool bondOrderScatterModeUsesPca(BondOrderScatterMode scatterMode)
+void drawBondOrderScatterPanel(ViewerState &viewerState,
+                               ParticleSystem &particleSystem,
+                               bool isTwoDimensional,
+                               uint8_t minimumBondOrientationalOrder,
+                               uint8_t maximumBondOrientationalOrder,
+                               bool &markPickDirty)
 {
-    return scatterMode == BondOrderScatterMode::PrincipalComponentsQ
-           || scatterMode == BondOrderScatterMode::PrincipalComponentsQBar;
-}
-
-bool bondOrderScatterModeUsesAveragedValues(BondOrderScatterMode scatterMode)
-{
-    return scatterMode == BondOrderScatterMode::RawAxesQBar
-           || scatterMode == BondOrderScatterMode::PrincipalComponentsQBar;
-}
-
-std::string bondOrderAxisLabel(bool isTwoDimensional,
-                               uint8_t order,
-                               bool useAveragedValues)
-{
-    if (isTwoDimensional)
+    if (!viewerState.neighborAnalysisValid
+        || !ImGui::CollapsingHeader("Bond-order scatter plot"))
     {
-        return "|psi_" + std::to_string(unsigned(order)) + "|";
+        viewerState.bondOrderScatterInteraction.dragActive = false;
+        return;
     }
 
-    return (useAveragedValues ? "|qbar_" : "|q_")
-           + std::to_string(unsigned(order)) + "|";
-}
+    viewerState.bondOrderScatterXAxisOrder =
+        std::clamp<uint8_t>(viewerState.bondOrderScatterXAxisOrder,
+                            minimumBondOrientationalOrder,
+                            maximumBondOrientationalOrder);
+    viewerState.bondOrderScatterYAxisOrder =
+        std::clamp<uint8_t>(viewerState.bondOrderScatterYAxisOrder,
+                            minimumBondOrientationalOrder,
+                            maximumBondOrientationalOrder);
 
-std::string bondOrderPcaSourceLabel(bool isTwoDimensional,
-                                    bool useAveragedValues)
-{
-    if (isTwoDimensional)
+    static const char *kBondOrderScatterModeLabels[] = {
+        "Raw axes (q_l)",
+        "Raw axes (qbar_l)",
+        "PCA (q_l)",
+        "PCA (qbar_l)",
+    };
+    int scatterModeIndex = static_cast<int>(viewerState.bondOrderScatterMode);
+    if (ImGui::Combo("Scatter mode##BondOrderScatterMode",
+                     &scatterModeIndex,
+                     kBondOrderScatterModeLabels,
+                     IM_ARRAYSIZE(kBondOrderScatterModeLabels)))
     {
-        return useAveragedValues
-                   ? "PCA is computed from the 2D bond-order magnitudes (psi_l) for l = 2..6."
-                   : "PCA is computed from the |psi_l| values for l = 2..6.";
+        viewerState.bondOrderScatterMode =
+            static_cast<BondOrderScatterMode>(scatterModeIndex);
     }
 
-    return useAveragedValues
-               ? "PCA is computed from the |qbar_l| values for l = 2..8."
-               : "PCA is computed from the |q_l| values for l = 2..8.";
-}
-
-double dotProduct(const std::vector<double> &first, const std::vector<double> &second)
-{
-    double sum = 0.0;
-    for (size_t index = 0u; index < first.size() && index < second.size(); ++index)
+    if (!particleSystem.hasAnalysisResults(viewerState.bondOrderScatterXAxisOrder)
+        || !particleSystem.hasAnalysisResults(viewerState.bondOrderScatterYAxisOrder))
     {
-        sum += first[index] * second[index];
-    }
-    return sum;
-}
-
-double vectorLength(const std::vector<double> &values)
-{
-    return std::sqrt(dotProduct(values, values));
-}
-
-std::vector<double> multiplyMatrixVector(const std::vector<double> &matrix,
-                                         size_t dimension,
-                                         const std::vector<double> &vector)
-{
-    std::vector<double> result(dimension, 0.0);
-    for (size_t row = 0u; row < dimension; ++row)
-    {
-        for (size_t col = 0u; col < dimension; ++col)
-        {
-            result[row] += matrix[row * dimension + col] * vector[col];
-        }
-    }
-    return result;
-}
-
-std::vector<double> dominantEigenvector(const std::vector<double> &matrix,
-                                        size_t dimension,
-                                        std::vector<double> initialVector = {})
-{
-    if (dimension == 0u)
-    {
-        return {};
-    }
-
-    if (initialVector.size() != dimension)
-    {
-        initialVector.resize(dimension, 1.0);
-        for (size_t index = 0u; index < dimension; ++index)
-        {
-            initialVector[index] = double(index + 1u);
-        }
-    }
-
-    double length = vectorLength(initialVector);
-    if (length <= 1.0e-12)
-    {
-        initialVector.assign(dimension, 0.0);
-        initialVector[0] = 1.0;
+        ImGui::TextDisabled("Bond-order values are not available yet.");
     }
     else
     {
-        for (double &value : initialVector)
+        const bool usePcaMode = bondOrderScatterModeUsesPca(viewerState.bondOrderScatterMode);
+        const bool useAveragedValues =
+            bondOrderScatterModeUsesAveragedValues(viewerState.bondOrderScatterMode);
+        BondOrderScatterData &scatterData =
+            getBondOrderScatterData(particleSystem, viewerState);
+        const std::string xAxisLabel =
+            usePcaMode ? "PC1"
+                       : bondOrderAxisLabel(isTwoDimensional,
+                                            viewerState.bondOrderScatterXAxisOrder,
+                                            useAveragedValues);
+        const std::string yAxisLabel =
+            usePcaMode ? "PC2"
+                       : bondOrderAxisLabel(isTwoDimensional,
+                                            viewerState.bondOrderScatterYAxisOrder,
+                                            useAveragedValues);
+        ImGui::Text("Particles plotted: %zu", scatterData.xValues.size());
+        if (usePcaMode)
         {
-            value /= length;
+            const std::string pcaSourceLabel =
+                bondOrderPcaSourceLabel(isTwoDimensional, useAveragedValues);
+            ImGui::TextDisabled("%s", pcaSourceLabel.c_str());
         }
-    }
-
-    for (int iteration = 0; iteration < 32; ++iteration)
-    {
-        std::vector<double> nextVector =
-            multiplyMatrixVector(matrix, dimension, initialVector);
-        length = vectorLength(nextVector);
-        if (length <= 1.0e-12)
+        else
         {
-            break;
+            ImGui::TextDisabled("Raw-axis mode uses each particle's base color.");
         }
+        ImGui::TextDisabled(
+            "Left-drag to select points; hold Shift to add, right-drag to pan.");
 
-        for (double &value : nextVector)
+        const float plotWidth = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+        BondOrderScatterInteractionState &interaction =
+            viewerState.bondOrderScatterInteraction;
+        if (ImPlot::GetCurrentContext() != nullptr
+            && ImPlot::BeginPlot("##BondOrderScatterPlot",
+                                 ImVec2(plotWidth, 220.0f),
+                                 ImPlotFlags_NoLegend | ImPlotFlags_NoBoxSelect))
         {
-            value /= length;
-        }
-        initialVector = nextVector;
-    }
+            ImPlot::SetupAxes(xAxisLabel.c_str(), yAxisLabel.c_str(),
+                              ImPlotAxisFlags_AutoFit,
+                              ImPlotAxisFlags_AutoFit);
+            ImPlotSpec scatterSpec;
+            scatterSpec.Marker = ImPlotMarker_Circle;
+            scatterSpec.MarkerSize = 1.0f;
+            scatterSpec.LineWeight = 0.0f;
+            scatterSpec.MarkerLineColors = scatterData.pointColors.data();
+            scatterSpec.MarkerFillColors = scatterData.pointColors.data();
+            ImPlot::PlotScatter("Particles",
+                                scatterData.xValues.data(),
+                                scatterData.yValues.data(),
+                                static_cast<int>(scatterData.xValues.size()),
+                                scatterSpec);
 
-    return initialVector;
-}
+            const ImVec2 plotPos = ImPlot::GetPlotPos();
+            const ImVec2 plotSize = ImPlot::GetPlotSize();
+            const ImVec2 plotMin = plotPos;
+            const ImVec2 plotMax = ImVec2(plotPos.x + plotSize.x,
+                                          plotPos.y + plotSize.y);
+            const auto clampToPlotRect = [&](const ImVec2 &point) {
+                return ImVec2(std::clamp(point.x, plotMin.x, plotMax.x),
+                              std::clamp(point.y, plotMin.y, plotMax.y));
+            };
 
-BondOrderScatterData buildBondOrderScatterData(
-    const ParticleSystem &particleSystem,
-    const std::array<bool, kParticlePaletteColorCount> &enabledSpecies,
-    bool isTwoDimensional,
-    BondOrderScatterMode scatterMode,
-    uint8_t xOrder,
-    uint8_t yOrder)
-{
-    constexpr uint8_t kMinBondOrder = 2u;
-
-    BondOrderScatterData data;
-    const std::vector<Particle> &particles = particleSystem.particles();
-    const std::vector<ParticleAnalysisData> &analysisResults =
-        particleSystem.analysisResults();
-    const size_t particleCapacity = std::min(particles.size(), analysisResults.size());
-    std::vector<size_t> includedParticleIndices;
-    includedParticleIndices.reserve(particleCapacity);
-    for (size_t particleIndex = 0u; particleIndex < particleCapacity; ++particleIndex)
-    {
-        const uint8_t typeIndex = particleTypeIndex(particles[particleIndex].typeLabel);
-        if (typeIndex < enabledSpecies.size() && enabledSpecies[typeIndex])
-        {
-            includedParticleIndices.push_back(particleIndex);
-        }
-    }
-    const size_t particleCount = includedParticleIndices.size();
-
-    data.xValues.reserve(particleCount);
-    data.yValues.reserve(particleCount);
-    data.pointColors.reserve(particleCount);
-    data.particleIds.reserve(particleCount);
-
-    const bool usePcaMode = bondOrderScatterModeUsesPca(scatterMode);
-    const bool useAveragedValues = bondOrderScatterModeUsesAveragedValues(scatterMode);
-
-    if (!usePcaMode)
-    {
-        const size_t xOrderIndex = size_t(xOrder - kMinBondOrder);
-        const size_t yOrderIndex = size_t(yOrder - kMinBondOrder);
-        for (size_t particleIndex : includedParticleIndices)
-        {
-            const Particle &particle = particles[particleIndex];
-            const ParticleAnalysisData &analysis = analysisResults[particleIndex];
-            data.xValues.push_back(isTwoDimensional
-                                       ? analysis.bondOrientationalMagnitudes[xOrderIndex]
-                                       : (useAveragedValues
-                                              ? analysis.steinhardtQBarValues[xOrderIndex]
-                                              : analysis.steinhardtQValues[xOrderIndex]));
-            data.yValues.push_back(isTwoDimensional
-                                       ? analysis.bondOrientationalMagnitudes[yOrderIndex]
-                                       : (useAveragedValues
-                                              ? analysis.steinhardtQBarValues[yOrderIndex]
-                                              : analysis.steinhardtQValues[yOrderIndex]));
-            data.pointColors.push_back(
-                ImGui::ColorConvertFloat4ToU32(ImVec4(particle.baseColor[0],
-                                                      particle.baseColor[1],
-                                                      particle.baseColor[2],
-                                                      particle.baseColor[3])));
-            data.particleIds.push_back(particle.id);
-        }
-        return data;
-    }
-
-    const uint8_t maximumBondOrder = isTwoDimensional ? 6u : 8u;
-    const size_t featureCount = size_t(maximumBondOrder - kMinBondOrder + 1u);
-    std::vector<double> means(featureCount, 0.0);
-    std::vector<double> centeredFeatures(particleCount * featureCount, 0.0);
-
-    for (size_t includedIndex = 0u; includedIndex < particleCount; ++includedIndex)
-    {
-        const size_t particleIndex = includedParticleIndices[includedIndex];
-        const ParticleAnalysisData &analysis = analysisResults[particleIndex];
-        for (size_t featureIndex = 0u; featureIndex < featureCount; ++featureIndex)
-        {
-            const double value = isTwoDimensional
-                                     ? double(analysis.bondOrientationalMagnitudes[featureIndex])
-                                     : (useAveragedValues
-                                            ? double(analysis.steinhardtQBarValues[featureIndex])
-                                            : double(analysis.steinhardtQValues[featureIndex]));
-            centeredFeatures[includedIndex * featureCount + featureIndex] = value;
-            means[featureIndex] += value;
-        }
-    }
-
-    if (particleCount > 0u)
-    {
-        const double inverseParticleCount = 1.0 / double(particleCount);
-        for (double &mean : means)
-        {
-            mean *= inverseParticleCount;
-        }
-    }
-
-    for (size_t includedIndex = 0u; includedIndex < particleCount; ++includedIndex)
-    {
-        for (size_t featureIndex = 0u; featureIndex < featureCount; ++featureIndex)
-        {
-            centeredFeatures[includedIndex * featureCount + featureIndex] -= means[featureIndex];
-        }
-    }
-
-    std::vector<double> covariance(featureCount * featureCount, 0.0);
-    const double normalization = particleCount > 1u ? 1.0 / double(particleCount - 1u) : 1.0;
-    for (size_t includedIndex = 0u; includedIndex < particleCount; ++includedIndex)
-    {
-        for (size_t row = 0u; row < featureCount; ++row)
-        {
-            const double rowValue = centeredFeatures[includedIndex * featureCount + row];
-            for (size_t col = 0u; col < featureCount; ++col)
+            if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             {
-                covariance[row * featureCount + col] +=
-                    rowValue * centeredFeatures[includedIndex * featureCount + col]
-                    * normalization;
+                const ImVec2 clampedMousePos = clampToPlotRect(ImGui::GetIO().MousePos);
+                interaction.dragActive = true;
+                interaction.dragStartX = clampedMousePos.x;
+                interaction.dragStartY = clampedMousePos.y;
+            }
+
+            if (interaction.dragActive)
+            {
+                const ImVec2 dragStart = {interaction.dragStartX, interaction.dragStartY};
+                const ImVec2 dragCurrent = clampToPlotRect(ImGui::GetIO().MousePos);
+                const float dragDeltaX = dragCurrent.x - dragStart.x;
+                const float dragDeltaY = dragCurrent.y - dragStart.y;
+                const float dragDistanceSquared =
+                    dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY;
+
+                if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                {
+                    if (dragDistanceSquared > 16.0f)
+                    {
+                        ImDrawList *drawList = ImGui::GetWindowDrawList();
+                        const ImVec2 rectMin = ImVec2(std::min(dragStart.x, dragCurrent.x),
+                                                      std::min(dragStart.y, dragCurrent.y));
+                        const ImVec2 rectMax = ImVec2(std::max(dragStart.x, dragCurrent.x),
+                                                      std::max(dragStart.y, dragCurrent.y));
+                        drawList->AddRectFilled(rectMin, rectMax,
+                                                IM_COL32(80, 160, 255, 40));
+                        drawList->AddRect(rectMin, rectMax,
+                                          IM_COL32(80, 160, 255, 220));
+                    }
+                }
+                else
+                {
+                    if (dragDistanceSquared > 16.0f)
+                    {
+                        const ImPlotPoint startPlot = ImPlot::PixelsToPlot(dragStart);
+                        const ImPlotPoint endPlot = ImPlot::PixelsToPlot(dragCurrent);
+                        const double minX = std::min(startPlot.x, endPlot.x);
+                        const double maxX = std::max(startPlot.x, endPlot.x);
+                        const double minY = std::min(startPlot.y, endPlot.y);
+                        const double maxY = std::max(startPlot.y, endPlot.y);
+                        const bool addToSelection = ImGui::GetIO().KeyShift;
+
+                        if (!addToSelection)
+                        {
+                            viewerState.selectedIds.clear();
+                        }
+
+                        for (size_t pointIndex = 0u;
+                             pointIndex < scatterData.particleIds.size();
+                             ++pointIndex)
+                        {
+                            const double xValue = scatterData.xValues[pointIndex];
+                            const double yValue = scatterData.yValues[pointIndex];
+                            if (xValue >= minX && xValue <= maxX
+                                && yValue >= minY && yValue <= maxY)
+                            {
+                                viewerState.selectedIds.insert(scatterData.particleIds[pointIndex]);
+                            }
+                        }
+
+                        markPickDirty = true;
+                    }
+
+                    interaction.dragActive = false;
+                }
+            }
+            ImPlot::EndPlot();
+        }
+        else
+        {
+            interaction.dragActive = false;
+            ImGui::TextDisabled("Scatter plotting is currently unavailable.");
+        }
+
+        if (!usePcaMode)
+        {
+            int scatterXAxisIndex =
+                int(viewerState.bondOrderScatterXAxisOrder - minimumBondOrientationalOrder);
+            int scatterYAxisIndex =
+                int(viewerState.bondOrderScatterYAxisOrder - minimumBondOrientationalOrder);
+            if (ImGui::Combo("X-axis l##BondOrderScatter",
+                             &scatterXAxisIndex,
+                             isTwoDimensional ? kBondOrientationalOrderLabels2D.data()
+                                              : kBondOrientationalOrderLabels3D.data(),
+                             isTwoDimensional
+                                 ? static_cast<int>(kBondOrientationalOrderLabels2D.size())
+                                 : static_cast<int>(kBondOrientationalOrderLabels3D.size())))
+            {
+                viewerState.bondOrderScatterXAxisOrder =
+                    static_cast<uint8_t>(scatterXAxisIndex + minimumBondOrientationalOrder);
+            }
+            if (ImGui::Combo("Y-axis l##BondOrderScatter",
+                             &scatterYAxisIndex,
+                             isTwoDimensional ? kBondOrientationalOrderLabels2D.data()
+                                              : kBondOrientationalOrderLabels3D.data(),
+                             isTwoDimensional
+                                 ? static_cast<int>(kBondOrientationalOrderLabels2D.size())
+                                 : static_cast<int>(kBondOrientationalOrderLabels3D.size())))
+            {
+                viewerState.bondOrderScatterYAxisOrder =
+                    static_cast<uint8_t>(scatterYAxisIndex + minimumBondOrientationalOrder);
             }
         }
     }
 
-    std::vector<double> firstEigenvector = dominantEigenvector(covariance, featureCount);
-    const std::vector<double> firstProjection =
-        multiplyMatrixVector(covariance, featureCount, firstEigenvector);
-    const double firstEigenvalue = dotProduct(firstEigenvector, firstProjection);
-
-    std::vector<double> deflatedCovariance = covariance;
-    for (size_t row = 0u; row < featureCount; ++row)
+    ImGui::Separator();
+    ImGui::TextUnformatted("Species included in scatter/PCA");
+    for (uint8_t typeIndex = 0u;
+         typeIndex <= viewerState.maxSeenParticleTypeIndex;
+         ++typeIndex)
     {
-        for (size_t col = 0u; col < featureCount; ++col)
+        bool includeSpecies = viewerState.bondOrderScatterTypeEnabled[typeIndex];
+        const char typeLabel[] = {
+            static_cast<char>('a' + bx::min<uint8_t>(typeIndex, 25u)),
+            '\0',
+        };
+        const std::string checkboxLabel = std::string(typeLabel)
+                                          + "##BondOrderScatterSpecies"
+                                          + std::to_string(typeIndex);
+        if (ImGui::Checkbox(checkboxLabel.c_str(), &includeSpecies))
         {
-            deflatedCovariance[row * featureCount + col] -=
-                firstEigenvalue * firstEigenvector[row] * firstEigenvector[col];
-        }
-    }
-
-    std::vector<double> secondInitialVector(featureCount, 0.0);
-    secondInitialVector[featureCount > 1u ? 1u : 0u] = 1.0;
-    std::vector<double> secondEigenvector = dominantEigenvector(deflatedCovariance,
-                                                                featureCount,
-                                                                secondInitialVector);
-
-    for (size_t includedIndex = 0u; includedIndex < particleCount; ++includedIndex)
-    {
-        double projectedX = 0.0;
-        double projectedY = 0.0;
-        for (size_t featureIndex = 0u; featureIndex < featureCount; ++featureIndex)
-        {
-            const double centeredValue =
-                centeredFeatures[includedIndex * featureCount + featureIndex];
-            projectedX += centeredValue * firstEigenvector[featureIndex];
-            projectedY += centeredValue * secondEigenvector[featureIndex];
+            viewerState.bondOrderScatterTypeEnabled[typeIndex] = includeSpecies;
+            viewerState.bondOrderScatterCache.valid = false;
         }
 
-        const size_t particleIndex = includedParticleIndices[includedIndex];
-        const Particle &particle = particles[particleIndex];
-        data.xValues.push_back(float(projectedX));
-        data.yValues.push_back(float(projectedY));
-        data.pointColors.push_back(
-            ImGui::ColorConvertFloat4ToU32(ImVec4(particle.baseColor[0],
-                                                  particle.baseColor[1],
-                                                  particle.baseColor[2],
-                                                  particle.baseColor[3])));
-        data.particleIds.push_back(particle.id);
+        const bool continueSameLine = typeIndex < viewerState.maxSeenParticleTypeIndex
+                                      && ((typeIndex + 1u) % 6u) != 0u;
+        if (continueSameLine)
+        {
+            ImGui::SameLine();
+        }
     }
-
-    return data;
+    ImGui::TextDisabled(
+        "These checkboxes affect both the scatter plot and the PCA input set.");
 }
 
 float sizeDistributionValue(const Particle &particle,
@@ -925,29 +884,14 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                         minimumBondOrientationalOrder,
                                         maximumBondOrientationalOrder)
                     - minimumBondOrientationalOrder);
-            static const char *kBondOrientationalOrderLabels2D[] = {
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-            };
-            static const char *kBondOrientationalOrderLabels3D[] = {
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-            };
             if (ImGui::Combo(isTwoDimensional ? "Bond-order symmetry"
                                            : "Spherical-harmonic degree l",
                              &symmetryOrderIndex,
-                             isTwoDimensional ? kBondOrientationalOrderLabels2D
-                                              : kBondOrientationalOrderLabels3D,
-                             isTwoDimensional ? IM_ARRAYSIZE(kBondOrientationalOrderLabels2D)
-                                              : IM_ARRAYSIZE(kBondOrientationalOrderLabels3D)))
+                             isTwoDimensional ? kBondOrientationalOrderLabels2D.data()
+                                              : kBondOrientationalOrderLabels3D.data(),
+                             isTwoDimensional
+                                 ? static_cast<int>(kBondOrientationalOrderLabels2D.size())
+                                 : static_cast<int>(kBondOrientationalOrderLabels3D.size())))
             {
                 viewerState.bondOrientationalOrder =
                     static_cast<uint8_t>(symmetryOrderIndex + minimumBondOrientationalOrder);
@@ -963,250 +907,11 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
             ImGui::EndDisabled();
 
-            if (viewerState.neighborAnalysisValid
-                && ImGui::CollapsingHeader("Bond-order scatter plot"))
-            {
-                viewerState.bondOrderScatterXAxisOrder =
-                    std::clamp<uint8_t>(viewerState.bondOrderScatterXAxisOrder,
-                                        minimumBondOrientationalOrder,
-                                        maximumBondOrientationalOrder);
-                viewerState.bondOrderScatterYAxisOrder =
-                    std::clamp<uint8_t>(viewerState.bondOrderScatterYAxisOrder,
-                                        minimumBondOrientationalOrder,
-                                        maximumBondOrientationalOrder);
-
-                static const char *kBondOrderScatterModeLabels[] = {
-                    "Raw axes (q_l)",
-                    "Raw axes (qbar_l)",
-                    "PCA (q_l)",
-                    "PCA (qbar_l)",
-                };
-                int scatterModeIndex = static_cast<int>(viewerState.bondOrderScatterMode);
-                if (ImGui::Combo("Scatter mode##BondOrderScatterMode",
-                                 &scatterModeIndex,
-                                 kBondOrderScatterModeLabels,
-                                 IM_ARRAYSIZE(kBondOrderScatterModeLabels)))
-                {
-                    viewerState.bondOrderScatterMode =
-                        static_cast<BondOrderScatterMode>(scatterModeIndex);
-                }
-
-                if (!particleSystem.hasAnalysisResults(viewerState.bondOrderScatterXAxisOrder)
-                    || !particleSystem.hasAnalysisResults(viewerState.bondOrderScatterYAxisOrder))
-                {
-                    ImGui::TextDisabled("Bond-order values are not available yet.");
-                }
-                else
-                {
-                    const bool usePcaMode =
-                        bondOrderScatterModeUsesPca(viewerState.bondOrderScatterMode);
-                    const bool useAveragedValues =
-                        bondOrderScatterModeUsesAveragedValues(viewerState.bondOrderScatterMode);
-                    BondOrderScatterData scatterData =
-                        buildBondOrderScatterData(particleSystem,
-                                                  viewerState.bondOrderScatterTypeEnabled,
-                                                  isTwoDimensional,
-                                                  viewerState.bondOrderScatterMode,
-                                                  viewerState.bondOrderScatterXAxisOrder,
-                                                  viewerState.bondOrderScatterYAxisOrder);
-                    const std::string xAxisLabel =
-                        usePcaMode ? "PC1"
-                                   : bondOrderAxisLabel(isTwoDimensional,
-                                                        viewerState.bondOrderScatterXAxisOrder,
-                                                        useAveragedValues);
-                    const std::string yAxisLabel =
-                        usePcaMode ? "PC2"
-                                   : bondOrderAxisLabel(isTwoDimensional,
-                                                        viewerState.bondOrderScatterYAxisOrder,
-                                                        useAveragedValues);
-                    ImGui::Text("Particles plotted: %zu", scatterData.xValues.size());
-                    if (usePcaMode)
-                    {
-                        const std::string pcaSourceLabel =
-                            bondOrderPcaSourceLabel(isTwoDimensional, useAveragedValues);
-                        ImGui::TextDisabled("%s", pcaSourceLabel.c_str());
-                    }
-                    else
-                    {
-                        ImGui::TextDisabled("Raw-axis mode uses each particle's base color.");
-                    }
-                    ImGui::TextDisabled("Left-drag to select points; hold Shift to add, right-drag to pan.");
-
-                    const float plotWidth =
-                        bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
-                    static bool s_scatterDragActive = false;
-                    static ImVec2 s_scatterDragStart = ImVec2(0.0f, 0.0f);
-                    if (ImPlot::GetCurrentContext() != nullptr
-                        && ImPlot::BeginPlot("##BondOrderScatterPlot",
-                                             ImVec2(plotWidth, 220.0f),
-                                             ImPlotFlags_NoLegend | ImPlotFlags_NoBoxSelect))
-                    {
-                        ImPlot::SetupAxes(xAxisLabel.c_str(), yAxisLabel.c_str(),
-                                          ImPlotAxisFlags_AutoFit,
-                                          ImPlotAxisFlags_AutoFit);
-                        ImPlotSpec scatterSpec;
-                        scatterSpec.Marker = ImPlotMarker_Circle;
-                        scatterSpec.MarkerSize = 1.0f;
-                        scatterSpec.LineWeight = 0.0f;
-                        scatterSpec.MarkerLineColors = scatterData.pointColors.data();
-                        scatterSpec.MarkerFillColors = scatterData.pointColors.data();
-                        ImPlot::PlotScatter("Particles",
-                                            scatterData.xValues.data(),
-                                            scatterData.yValues.data(),
-                                            static_cast<int>(scatterData.xValues.size()),
-                                            scatterSpec);
-
-                        const ImVec2 plotPos = ImPlot::GetPlotPos();
-                        const ImVec2 plotSize = ImPlot::GetPlotSize();
-                        const ImVec2 plotMin = plotPos;
-                        const ImVec2 plotMax = ImVec2(plotPos.x + plotSize.x,
-                                                      plotPos.y + plotSize.y);
-                        const auto clampToPlotRect = [&](const ImVec2 &point) {
-                            return ImVec2(std::clamp(point.x, plotMin.x, plotMax.x),
-                                          std::clamp(point.y, plotMin.y, plotMax.y));
-                        };
-
-                        if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                        {
-                            s_scatterDragActive = true;
-                            s_scatterDragStart = clampToPlotRect(ImGui::GetIO().MousePos);
-                        }
-
-                        if (s_scatterDragActive)
-                        {
-                            const ImVec2 dragCurrent = clampToPlotRect(ImGui::GetIO().MousePos);
-                            const float dragDeltaX = dragCurrent.x - s_scatterDragStart.x;
-                            const float dragDeltaY = dragCurrent.y - s_scatterDragStart.y;
-                            const float dragDistanceSquared =
-                                dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY;
-
-                            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
-                            {
-                                if (dragDistanceSquared > 16.0f)
-                                {
-                                    ImDrawList *drawList = ImGui::GetWindowDrawList();
-                                    const ImVec2 rectMin = ImVec2(std::min(s_scatterDragStart.x,
-                                                                           dragCurrent.x),
-                                                                  std::min(s_scatterDragStart.y,
-                                                                           dragCurrent.y));
-                                    const ImVec2 rectMax = ImVec2(std::max(s_scatterDragStart.x,
-                                                                           dragCurrent.x),
-                                                                  std::max(s_scatterDragStart.y,
-                                                                           dragCurrent.y));
-                                    drawList->AddRectFilled(rectMin, rectMax,
-                                                            IM_COL32(80, 160, 255, 40));
-                                    drawList->AddRect(rectMin, rectMax,
-                                                      IM_COL32(80, 160, 255, 220));
-                                }
-                            }
-                            else
-                            {
-                                if (dragDistanceSquared > 16.0f)
-                                {
-                                    const ImPlotPoint startPlot =
-                                        ImPlot::PixelsToPlot(s_scatterDragStart);
-                                    const ImPlotPoint endPlot =
-                                        ImPlot::PixelsToPlot(dragCurrent);
-                                    const double minX = std::min(startPlot.x, endPlot.x);
-                                    const double maxX = std::max(startPlot.x, endPlot.x);
-                                    const double minY = std::min(startPlot.y, endPlot.y);
-                                    const double maxY = std::max(startPlot.y, endPlot.y);
-                                    const bool addToSelection = ImGui::GetIO().KeyShift;
-
-                                    if (!addToSelection)
-                                    {
-                                        viewerState.selectedIds.clear();
-                                    }
-
-                                    for (size_t pointIndex = 0u;
-                                         pointIndex < scatterData.particleIds.size();
-                                         ++pointIndex)
-                                    {
-                                        const double xValue = scatterData.xValues[pointIndex];
-                                        const double yValue = scatterData.yValues[pointIndex];
-                                        if (xValue >= minX && xValue <= maxX
-                                            && yValue >= minY && yValue <= maxY)
-                                        {
-                                            viewerState.selectedIds.insert(
-                                                scatterData.particleIds[pointIndex]);
-                                        }
-                                    }
-
-                                    markPickDirty = true;
-                                }
-
-                                s_scatterDragActive = false;
-                            }
-                        }
-                        ImPlot::EndPlot();
-                    }
-                    else
-                    {
-                        ImGui::TextDisabled("Scatter plotting is currently unavailable.");
-                    }
-
-                    if (!usePcaMode)
-                    {
-                        int scatterXAxisIndex =
-                            int(viewerState.bondOrderScatterXAxisOrder
-                                - minimumBondOrientationalOrder);
-                        int scatterYAxisIndex =
-                            int(viewerState.bondOrderScatterYAxisOrder
-                                - minimumBondOrientationalOrder);
-                        if (ImGui::Combo("X-axis l##BondOrderScatter",
-                                         &scatterXAxisIndex,
-                                         isTwoDimensional ? kBondOrientationalOrderLabels2D
-                                                          : kBondOrientationalOrderLabels3D,
-                                         isTwoDimensional ? IM_ARRAYSIZE(kBondOrientationalOrderLabels2D)
-                                                          : IM_ARRAYSIZE(kBondOrientationalOrderLabels3D)))
-                        {
-                            viewerState.bondOrderScatterXAxisOrder =
-                                static_cast<uint8_t>(scatterXAxisIndex
-                                                     + minimumBondOrientationalOrder);
-                        }
-                        if (ImGui::Combo("Y-axis l##BondOrderScatter",
-                                         &scatterYAxisIndex,
-                                         isTwoDimensional ? kBondOrientationalOrderLabels2D
-                                                          : kBondOrientationalOrderLabels3D,
-                                         isTwoDimensional ? IM_ARRAYSIZE(kBondOrientationalOrderLabels2D)
-                                                          : IM_ARRAYSIZE(kBondOrientationalOrderLabels3D)))
-                        {
-                            viewerState.bondOrderScatterYAxisOrder =
-                                static_cast<uint8_t>(scatterYAxisIndex
-                                                     + minimumBondOrientationalOrder);
-                        }
-                    }
-
-                    ImGui::Separator();
-                    ImGui::TextUnformatted("Species included in scatter/PCA");
-                    for (uint8_t typeIndex = 0u;
-                         typeIndex <= viewerState.maxSeenParticleTypeIndex;
-                         ++typeIndex)
-                    {
-                        bool includeSpecies = viewerState.bondOrderScatterTypeEnabled[typeIndex];
-                        const char typeLabel[] = {
-                            static_cast<char>('a' + bx::min<uint8_t>(typeIndex, 25u)),
-                            '\0',
-                        };
-                        const std::string checkboxLabel =
-                            std::string(typeLabel)
-                            + "##BondOrderScatterSpecies"
-                            + std::to_string(typeIndex);
-                        if (ImGui::Checkbox(checkboxLabel.c_str(), &includeSpecies))
-                        {
-                            viewerState.bondOrderScatterTypeEnabled[typeIndex] = includeSpecies;
-                        }
-
-                        const bool continueSameLine = typeIndex < viewerState.maxSeenParticleTypeIndex
-                                                      && ((typeIndex + 1u) % 6u) != 0u;
-                        if (continueSameLine)
-                        {
-                            ImGui::SameLine();
-                        }
-                    }
-                    ImGui::TextDisabled("These checkboxes affect both the scatter plot and the PCA input set.");
-                }
-            }
+            drawBondOrderScatterPanel(viewerState, particleSystem,
+                                      isTwoDimensional,
+                                      minimumBondOrientationalOrder,
+                                      maximumBondOrientationalOrder,
+                                      markPickDirty);
 
             if (viewerState.neighborAnalysisValid
                 && ImGui::CollapsingHeader("Bond diagram"))
@@ -1349,12 +1054,6 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             ImGui::Text("Status: %s",
                         viewerState.structureFactorDirty ? "stale - recompute needed"
                                                          : "up to date");
-
-            if (viewerState.structureFactorDirty && structureFactorResources != nullptr
-                && structureFactorResources->enabled)
-            {
-                ImGui::TextWrapped("The current structure factor is stale and no longer matches the scene orientation.");
-            }
 
             if (structureFactorResources != nullptr && !structureFactorResources->statusText.empty())
             {

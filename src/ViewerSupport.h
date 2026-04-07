@@ -43,6 +43,34 @@ enum class BondOrderScatterMode : uint8_t
     PrincipalComponentsQBar,
 };
 
+struct BondOrderScatterData
+{
+    std::vector<float> xValues;
+    std::vector<float> yValues;
+    std::vector<uint32_t> pointColors;
+    std::vector<uint32_t> particleIds;
+};
+
+struct BondOrderScatterCache
+{
+    bool valid = false;
+    BondOrderScatterMode mode = BondOrderScatterMode::PrincipalComponentsQBar;
+    TrajectoryReader::Dimensionality dimensionality =
+        TrajectoryReader::Dimensionality::ThreeDimensional;
+    uint8_t xOrder = 4u;
+    uint8_t yOrder = 6u;
+    uint32_t dataRevision = 0u;
+    std::array<bool, kParticlePaletteColorCount> enabledSpecies{};
+    BondOrderScatterData data;
+};
+
+struct BondOrderScatterInteractionState
+{
+    bool dragActive = false;
+    float dragStartX = 0.0f;
+    float dragStartY = 0.0f;
+};
+
 struct ViewerState
 {
     ViewerState()
@@ -50,6 +78,7 @@ struct ViewerState
         bx::mtxIdentity(sceneRotation);
         particleTypeVisible.fill(true);
         bondOrderScatterTypeEnabled.fill(true);
+        bondOrderScatterCache.enabledSpecies.fill(true);
     }
 
     bool showUi = true;
@@ -138,6 +167,9 @@ struct ViewerState
     uint8_t bondOrientationalOrder = 6u;
     uint8_t bondOrderScatterXAxisOrder = 4u;
     uint8_t bondOrderScatterYAxisOrder = 6u;
+    uint32_t bondOrderScatterDataRevision = 1u;
+    BondOrderScatterInteractionState bondOrderScatterInteraction{};
+    BondOrderScatterCache bondOrderScatterCache{};
     bool mobilityModeEnabled = false;
     bool bondModeEnabled = false;
     bool bondDiagramGeometryDirty = true;
@@ -236,6 +268,7 @@ void markMobilitySystemDirty(ViewerState &state);
 void markNearestNeighborRenderSystemsDirty(ViewerState &state);
 void markBondDiagramGeometryDirty(ViewerState &state);
 void markBondDiagramViewDirty(ViewerState &state);
+void markBondOrderScatterDataDirty(ViewerState &state);
 void markStructureFactorDirty(ViewerState &state);
 void markPickBufferDirty(ViewerState &state);
 bool hasValidPickBuffer(const ViewerState &state);

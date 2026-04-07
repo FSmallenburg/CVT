@@ -138,6 +138,16 @@ void markBondDiagramViewDirty(ViewerState &state)
     state.bondDiagramViewDirty = true;
 }
 
+void markBondOrderScatterDataDirty(ViewerState &state)
+{
+    state.bondOrderScatterCache.valid = false;
+    ++state.bondOrderScatterDataRevision;
+    if (state.bondOrderScatterDataRevision == 0u)
+    {
+        state.bondOrderScatterDataRevision = 1u;
+    }
+}
+
 void markStructureFactorDirty(ViewerState &state)
 {
     state.structureFactorDirty = true;

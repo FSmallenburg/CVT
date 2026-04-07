@@ -78,6 +78,7 @@ add_executable(cvt
     src/ImGuiCompat.cpp
     src/main.cpp
     src/ArrowType.cpp
+    src/BondOrderScatter.cpp
     src/Mesh.cpp
     src/OctahedronType.cpp
     src/PatchCapType.cpp

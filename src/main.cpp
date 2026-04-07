@@ -982,11 +982,12 @@ std::array<float, 4> resolveAnalysisColor(const ParticleAnalysisData &analysis,
     return colorFromLetter('A');
 }
 
-void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &particleSystem)
+void computeAnalysisResults(ViewerState &viewerState, ParticleSystem &particleSystem)
 {
     if (!particleSystem.hasNeighborAnalysis())
     {
         particleSystem.clearAnalysisResults();
+        markBondOrderScatterDataDirty(viewerState);
         return;
     }
 
@@ -1100,6 +1101,7 @@ void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &part
 
     if (isTwoDimensional)
     {
+        markBondOrderScatterDataDirty(viewerState);
         return;
     }
 
@@ -1144,6 +1146,8 @@ void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &part
                 bondOrderMagnitude(averagedBondOrderVector, order);
         }
     }
+
+    markBondOrderScatterDataDirty(viewerState);
 }
 
 void applyAnalysisColorMode(ParticleSystem &particleSystem, const ViewerState &viewerState)
@@ -1400,6 +1404,7 @@ void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &partic
 {
     viewerState.neighborAnalysisValid = false;
     particleSystem.clearNeighborAnalysis();
+    markBondOrderScatterDataDirty(viewerState);
     markNearestNeighborRenderSystemsDirty(viewerState);
     markBondDiagramGeometryDirty(viewerState);
     if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
@@ -3437,6 +3442,9 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.orderParameterCount = 0u;
     viewerState.particleTypeVisible.fill(true);
     viewerState.bondOrderScatterTypeEnabled.fill(true);
+    viewerState.bondOrderScatterInteraction = {};
+    viewerState.bondOrderScatterCache = {};
+    viewerState.bondOrderScatterCache.enabledSpecies.fill(true);
     viewerState.selectedIds.clear();
     viewerState.hiddenIds.clear();
     viewerState.lastPickedId = 0u;
