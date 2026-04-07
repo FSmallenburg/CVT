@@ -65,6 +65,8 @@ shaderc=$(find_shaderc) || {
 }
 
 shader_profile=${BGFX_SHADER_PROFILE:-120}
+# bgfx shaderc defaults to no optimization; enable an optimized build by default.
+shader_optimization_level=${BGFX_SHADER_OPTIMIZATION_LEVEL:-3}
 # bgfx shaderc supports desktop GLSL profiles up to 150; keep this overridable.
 structure_factor_shader_profile=${BGFX_STRUCTURE_FACTOR_SHADER_PROFILE:-150}
 d3d_shader_profile=${BGFX_D3D_SHADER_PROFILE:-s_5_0}
@@ -142,6 +144,7 @@ compile_shader() {
 		--type "${shader_type}"
 		--platform "${shader_backend_platform}"
 		-p "${shader_profile_value}"
+		-O "${shader_optimization_level}"
 		"${include_args[@]}"
 	)
 

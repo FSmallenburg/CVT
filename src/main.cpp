@@ -226,8 +226,8 @@ bool initializeBgfxRenderer(bgfx::Init &init)
 {
 #if BX_PLATFORM_WINDOWS
     constexpr std::array<bgfx::RendererType::Enum, 2> kRendererPreference = {
-        bgfx::RendererType::Direct3D11,
         bgfx::RendererType::OpenGL,
+        bgfx::RendererType::Direct3D11,
     };
 #else
     constexpr std::array<bgfx::RendererType::Enum, 1> kRendererPreference = {
@@ -347,10 +347,9 @@ constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
 float s_uiScrollX = 0.0f;
 float s_uiScrollY = 0.0f;
 // Particle meshes are authored so triangles wind counter-clockwise when viewed from
-// outside the particle. BGFX_STATE_FRONT_CCW therefore classifies those outward-facing
-// triangles as front faces, and BGFX_STATE_CULL_CCW maps to back-face culling on the
-// OpenGL backend used here. In effect, closed particle surfaces render only their
-// outward-facing triangles while discarding inward-facing triangles.
+// outside the particle. In this bgfx setup, keeping BGFX_STATE_FRONT_CCW together with
+// BGFX_STATE_CULL_CCW continues to cull the inward-facing triangles correctly on both
+// OpenGL and Direct3D11.
 constexpr uint64_t kParticleRenderState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
                                           | BGFX_STATE_WRITE_Z
                                           | BGFX_STATE_DEPTH_TEST_LESS
@@ -998,8 +997,7 @@ void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &part
     const uint8_t selectedOrder = clampedBondOrientationalOrder(viewerState);
     const float symmetryOrder = float(selectedOrder);
 
-    particleSystem.resizeAnalysisResults(neighborLists.size(),
-                                         isTwoDimensional ? selectedOrder : 0u);
+    particleSystem.resizeAnalysisResults(neighborLists.size(), 0u);
     std::vector<ParticleAnalysisData> &analysisResults = particleSystem.analysisResults();
     std::vector<BondOrderVector> qlmByParticle;
     if (!isTwoDimensional)
@@ -1014,6 +1012,8 @@ void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &part
         analysis.neighborCount = static_cast<uint32_t>(neighbors.size());
         analysis.bondOrientationalMagnitude = 0.0f;
         analysis.bondOrientationalPhase = 0.0f;
+        analysis.bondOrientationalMagnitudes.fill(0.0f);
+        analysis.bondOrientationalPhases.fill(0.0f);
         analysis.steinhardtQValues.fill(0.0f);
         analysis.steinhardtQBarValues.fill(0.0f);
 
@@ -1024,20 +1024,39 @@ void computeAnalysisResults(const ViewerState &viewerState, ParticleSystem &part
 
         if (isTwoDimensional)
         {
-            float cosSum = 0.0f;
-            float sinSum = 0.0f;
+            std::array<float, 7u> cosSums{};
+            std::array<float, 7u> sinSums{};
             for (const NearestNeighborData &neighbor : neighbors)
             {
                 const float theta = std::atan2(neighbor.displacement.y,
                                                neighbor.displacement.x);
-                const float angle = -symmetryOrder * theta;
-                cosSum += std::cos(angle);
-                sinSum += std::sin(angle);
+                for (uint8_t order = kMinBondOrientationalOrder;
+                     order <= kMaxBondOrientationalOrder2D; ++order)
+                {
+                    const size_t orderIndex = steinhardtArrayIndex(order);
+                    const float angle = -float(order) * theta;
+                    cosSums[orderIndex] += std::cos(angle);
+                    sinSums[orderIndex] += std::sin(angle);
+                }
             }
 
+            for (uint8_t order = kMinBondOrientationalOrder;
+                 order <= kMaxBondOrientationalOrder2D; ++order)
+            {
+                const size_t orderIndex = steinhardtArrayIndex(order);
+                analysis.bondOrientationalMagnitudes[orderIndex] =
+                    std::sqrt(cosSums[orderIndex] * cosSums[orderIndex]
+                              + sinSums[orderIndex] * sinSums[orderIndex])
+                    / float(neighbors.size());
+                analysis.bondOrientationalPhases[orderIndex] =
+                    std::atan2(sinSums[orderIndex], cosSums[orderIndex]);
+            }
+
+            const size_t selectedOrderIndex = steinhardtArrayIndex(selectedOrder);
             analysis.bondOrientationalMagnitude =
-                std::sqrt(cosSum * cosSum + sinSum * sinSum) / float(neighbors.size());
-            analysis.bondOrientationalPhase = std::atan2(sinSum, cosSum);
+                analysis.bondOrientationalMagnitudes[selectedOrderIndex];
+            analysis.bondOrientationalPhase =
+                analysis.bondOrientationalPhases[selectedOrderIndex];
             continue;
         }
 
@@ -1303,6 +1322,78 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
               << "): " << centerDistance << '\n'
               << "Radius sum(" << sortedIds[0] << ", " << sortedIds[1]
               << "): " << radiusSum << std::endl;
+}
+
+void printSelectedBondOrderParameters(const ViewerState &viewerState,
+                                      const ParticleSystem &particleSystem)
+{
+    if (viewerState.selectedIds.empty())
+    {
+        std::cout << "No particles are currently selected for bond-order output."
+                  << std::endl;
+        return;
+    }
+
+    const uint8_t selectedOrder = clampedBondOrientationalOrder(viewerState);
+    if (!particleSystem.hasAnalysisResults(selectedOrder))
+    {
+        std::cout << "Bond-order analysis is not available yet. Compute neighbors first."
+                  << std::endl;
+        return;
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<ParticleAnalysisData> &analysisResults = particleSystem.analysisResults();
+    const bool isTwoDimensional =
+        viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
+    bool foundSelectedParticle = false;
+
+    std::cout << std::fixed << std::setprecision(6)
+              << "Bond-order values for selected particles";
+    if (isTwoDimensional)
+    {
+        std::cout << " (symmetry = " << unsigned(selectedOrder) << ')';
+    }
+    else
+    {
+        std::cout << " (l = " << unsigned(selectedOrder) << ')';
+    }
+    std::cout << ':' << std::endl;
+
+    for (size_t particleIndex = 0u; particleIndex < particles.size(); ++particleIndex)
+    {
+        const Particle &particle = particles[particleIndex];
+        if (!viewerState.selectedIds.contains(particle.id) || particleIndex >= analysisResults.size())
+        {
+            continue;
+        }
+
+        foundSelectedParticle = true;
+        const ParticleAnalysisData &analysis = analysisResults[particleIndex];
+        std::cout << "  Particle " << particle.id
+                  << ": nearest neighbors=" << analysis.neighborCount;
+        if (isTwoDimensional)
+        {
+            std::cout << ", |psi_" << unsigned(selectedOrder) << "|="
+                      << analysis.bondOrientationalMagnitude
+                      << ", phase=" << analysis.bondOrientationalPhase;
+        }
+        else
+        {
+            const size_t orderIndex = steinhardtArrayIndex(selectedOrder);
+            std::cout << ", |q_" << unsigned(selectedOrder) << "|="
+                      << analysis.steinhardtQValues[orderIndex]
+                      << ", |qbar_" << unsigned(selectedOrder) << "|="
+                      << analysis.steinhardtQBarValues[orderIndex];
+        }
+        std::cout << std::endl;
+    }
+
+    if (!foundSelectedParticle)
+    {
+        std::cout << "No selected particle IDs were found in the current frame."
+                  << std::endl;
+    }
 }
 
 void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &particleSystem)
@@ -3345,6 +3436,7 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.maxSeenParticleTypeIndex = 0u;
     viewerState.orderParameterCount = 0u;
     viewerState.particleTypeVisible.fill(true);
+    viewerState.bondOrderScatterTypeEnabled.fill(true);
     viewerState.selectedIds.clear();
     viewerState.hiddenIds.clear();
     viewerState.lastPickedId = 0u;
@@ -3600,6 +3692,12 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         printSelectedParticles(particleSystem, viewerState.selectedIds, simulationBox);
         viewerState.pendingDescribeSelection = false;
+    }
+
+    if (viewerState.pendingDescribeSelectedBondOrder)
+    {
+        printSelectedBondOrderParameters(viewerState, particleSystem);
+        viewerState.pendingDescribeSelectedBondOrder = false;
     }
 
     if (viewerState.pendingAlignViewToSelection)

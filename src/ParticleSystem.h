@@ -35,6 +35,8 @@ struct PatchyParticleData
     uint32_t neighborCount = 0;
     float bondOrientationalMagnitude = 0.0f;
     float bondOrientationalPhase = 0.0f;
+    std::array<float, 7u> bondOrientationalMagnitudes{};
+    std::array<float, 7u> bondOrientationalPhases{};
     std::array<float, 7u> steinhardtQValues{};
     std::array<float, 7u> steinhardtQBarValues{};
   };

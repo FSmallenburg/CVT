@@ -621,7 +621,7 @@ bool TrajectoryReader::scanFrames()
         size_t particleCount = 0;
         if (!parseFrameHeader(line, particleCount))
         {
-            m_error = "Invalid frame header in trajectory file: " + m_path;
+            m_error = "Invalid frame header in trajectory file: " + m_path + " : " + line;
             m_frameOffsets.clear();
             return false;
         }

@@ -392,6 +392,7 @@ struct Context
         ImGui::SetAllocatorFunctions(imguiAlloc, imguiFree, allocator);
         ImGui::CreateContext();
         ImPlot::CreateContext();
+        ImPlot::MapInputReverse();
 
         ImGuiIO &io = ImGui::GetIO();
         io.IniFilename = nullptr;
@@ -531,31 +532,28 @@ struct Context
             io.AddMouseWheelEvent(scrollX, scrollY);
         }
 
-        if (io.WantTextInput)
+        const bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
+                           || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+        const bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS
+                          || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+        const bool alt = glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS
+                         || glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+        const bool super = glfwGetKey(window, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS
+                           || glfwGetKey(window, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
+        io.AddKeyEvent(ImGuiMod_Shift, shift);
+        io.AddKeyEvent(ImGuiMod_Ctrl, ctrl);
+        io.AddKeyEvent(ImGuiMod_Alt, alt);
+        io.AddKeyEvent(ImGuiMod_Super, super);
+
+        for (int key : kTrackedKeys)
         {
-            const bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
-                               || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-            const bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS
-                              || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-            const bool alt = glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS
-                             || glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
-            const bool super = glfwGetKey(window, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS
-                               || glfwGetKey(window, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
-            io.AddKeyEvent(ImGuiMod_Shift, shift);
-            io.AddKeyEvent(ImGuiMod_Ctrl, ctrl);
-            io.AddKeyEvent(ImGuiMod_Alt, alt);
-            io.AddKeyEvent(ImGuiMod_Super, super);
-
-            for (int key : kTrackedKeys)
+            const ImGuiKey imguiKey = mapGlfwKey(key);
+            if (imguiKey == ImGuiKey_None)
             {
-                const ImGuiKey imguiKey = mapGlfwKey(key);
-                if (imguiKey == ImGuiKey_None)
-                {
-                    continue;
-                }
-
-                io.AddKeyEvent(imguiKey, glfwGetKey(window, key) == GLFW_PRESS);
+                continue;
             }
+
+            io.AddKeyEvent(imguiKey, glfwGetKey(window, key) == GLFW_PRESS);
         }
 
         ImGui::NewFrame();

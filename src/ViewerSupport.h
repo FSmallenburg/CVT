@@ -35,12 +35,21 @@ enum class AnalysisColorMode : uint8_t
     BondOrientationalQBarLMagnitude,
 };
 
+enum class BondOrderScatterMode : uint8_t
+{
+    RawAxesQ = 0,
+    RawAxesQBar,
+    PrincipalComponentsQ,
+    PrincipalComponentsQBar,
+};
+
 struct ViewerState
 {
     ViewerState()
     {
         bx::mtxIdentity(sceneRotation);
         particleTypeVisible.fill(true);
+        bondOrderScatterTypeEnabled.fill(true);
     }
 
     bool showUi = true;
@@ -87,6 +96,7 @@ struct ViewerState
     bool pendingRefreshAnalysisResults = false;
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
+    std::array<bool, kParticlePaletteColorCount> bondOrderScatterTypeEnabled{};
     uint8_t maxSeenParticleTypeIndex = 0u;
     uint16_t orderParameterCount = 0u;
     bool sizeDistributionUseVisibleOnly = true;
@@ -99,6 +109,7 @@ struct ViewerState
     bool pendingInvertSelected = false;
     bool pendingSelectBonded = false;
     bool pendingDescribeSelection = false;
+    bool pendingDescribeSelectedBondOrder = false;
     bool pendingAlignViewToSelection = false;
     bool pendingApplyParticleTypeVisibility = false;
     bool pendingDescribeVisibleCount = false;
@@ -123,7 +134,10 @@ struct ViewerState
     bool pendingScreenshotRequest = false;
     ColorMode colorMode = ColorMode::FileDefault;
     AnalysisColorMode analysisColorMode = AnalysisColorMode::Disabled;
+    BondOrderScatterMode bondOrderScatterMode = BondOrderScatterMode::PrincipalComponentsQBar;
     uint8_t bondOrientationalOrder = 6u;
+    uint8_t bondOrderScatterXAxisOrder = 4u;
+    uint8_t bondOrderScatterYAxisOrder = 6u;
     bool mobilityModeEnabled = false;
     bool bondModeEnabled = false;
     bool bondDiagramGeometryDirty = true;
