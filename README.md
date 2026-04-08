@@ -12,8 +12,7 @@ cd CVT
 ```
 
 1. **Build bgfx/bx/bimg** under `third_party/bgfx` so the required libraries exist.
-2. **Set `BGFX_BUILD_DIR`** if auto-detection does not find the correct bgfx output.
-3. **Compile the runtime shaders**:
+2. **Compile the runtime shaders**:
 
 ```bash
 ./compileshaders.sh
@@ -24,6 +23,8 @@ Then build CVT using the preset for your platform:
 - **Linux:** `cmake --preset debug` then `cmake --build --preset debug`
 - **Windows (MSYS2 MinGW64):** `cmake --preset mingw-debug` then `cmake --build --preset build-mingw-debug`
 - **macOS:** `cmake --preset macos-debug` then `cmake --build --preset build-macos-debug`
+
+
 
 ## Build overview
 
