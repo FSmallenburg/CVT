@@ -87,6 +87,38 @@
             }
         },
         {
+            "name": "macos-debug",
+            "displayName": "macOS Debug",
+            "description": "Configure a local macOS debug build in build-mac-debug.",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-mac-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_PREFIX_PATH": "/opt/homebrew;/usr/local"
+            }
+        },
+        {
+            "name": "macos-release",
+            "displayName": "macOS Release",
+            "description": "Configure a local macOS release build in build-mac-release.",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-mac-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_PREFIX_PATH": "/opt/homebrew;/usr/local"
+            }
+        },
+        {
             "name": "Configure preset using toolchain file",
             "displayName": "Configure preset using toolchain file",
             "description": "Sets Ninja generator, build and install directory",
@@ -139,6 +171,26 @@
                 "rhs": "Windows"
             },
             "configurePreset": "mingw-release"
+        },
+        {
+            "name": "build-macos-debug",
+            "displayName": "Build macOS Debug",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "configurePreset": "macos-debug"
+        },
+        {
+            "name": "build-macos-release",
+            "displayName": "Build macOS Release",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "configurePreset": "macos-release"
         }
     ]
 }
