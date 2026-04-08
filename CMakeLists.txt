@@ -71,7 +71,9 @@ set(BX_LIB "${BGFX_BUILD_DIR}/bin/${_bx_lib_name}")
 set(BIMG_LIB "${BGFX_BUILD_DIR}/bin/${_bimg_lib_name}")
 
 add_executable(cvt
+    src/AppBootstrap.cpp
     src/ColorPalette.cpp
+    src/SceneRenderSupport.cpp
     src/CubeType.cpp
     src/CylinderType.cpp
     src/ImGuiBgfx.cpp
