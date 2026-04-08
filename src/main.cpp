@@ -153,6 +153,9 @@ std::vector<fs::path> buildResourceSearchRoots(const char *argv0)
         const fs::path executableDir = executablePath.parent_path();
         addSearchRoot(roots, executableDir);
         addSearchRoot(roots, executableDir.parent_path());
+#if BX_PLATFORM_OSX
+        addSearchRoot(roots, executableDir.parent_path() / "Resources");
+#endif
     }
 
     return roots;
@@ -185,6 +188,8 @@ const char *shaderOutputDirectoryForRenderer(bgfx::RendererType::Enum rendererTy
     {
     case bgfx::RendererType::Direct3D11:
         return "dxbc";
+    case bgfx::RendererType::Metal:
+        return "metal";
     case bgfx::RendererType::OpenGL:
         return "glsl";
     default:
@@ -223,6 +228,11 @@ bool initializeBgfxRenderer(bgfx::Init &init)
     constexpr std::array<bgfx::RendererType::Enum, 2> kRendererPreference = {
         bgfx::RendererType::OpenGL,
         bgfx::RendererType::Direct3D11,
+    };
+#elif BX_PLATFORM_OSX
+    constexpr std::array<bgfx::RendererType::Enum, 2> kRendererPreference = {
+        bgfx::RendererType::Metal,
+        bgfx::RendererType::OpenGL,
     };
 #else
     constexpr std::array<bgfx::RendererType::Enum, 1> kRendererPreference = {

@@ -194,6 +194,23 @@ target_link_libraries(cvt PRIVATE
     ${BX_LIB}
 )
 
+if(APPLE)
+    find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
+    find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
+    find_library(OPENGL_FRAMEWORK OpenGL REQUIRED)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+
+    target_link_libraries(cvt PRIVATE
+        ${COCOA_FRAMEWORK}
+        ${IOKIT_FRAMEWORK}
+        ${OPENGL_FRAMEWORK}
+        ${QUARTZCORE_FRAMEWORK}
+    )
+
+    set_property(TARGET cvt APPEND_STRING PROPERTY LINK_FLAGS
+        " -Wl,-weak_framework,Metal -Wl,-weak_framework,MetalKit")
+endif()
+
 if(GLFW_TARGET)
     target_link_libraries(cvt PRIVATE ${GLFW_TARGET})
 endif()

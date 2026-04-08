@@ -82,12 +82,13 @@ if [[ -n "${BGFX_SHADER_BACKENDS:-}" ]]; then
 else
 	case "${shader_platform}" in
 		windows) shader_backends=(glsl dxbc) ;;
+		osx) shader_backends=(glsl metal) ;;
 		*) shader_backends=(glsl) ;;
 	esac
 fi
 
 if [[ ${#shader_backends[@]} -eq 0 ]]; then
-	echo "No shader backends selected. Set BGFX_SHADER_BACKENDS to one or more of: glsl dxbc" >&2
+	echo "No shader backends selected. Set BGFX_SHADER_BACKENDS to one or more of: glsl dxbc metal" >&2
 	exit 1
 fi
 
@@ -96,6 +97,12 @@ backend_platform() {
 	case "${backend}" in
 		glsl) echo "${shader_platform}" ;;
 		dxbc) echo "windows" ;;
+		metal)
+			case "${shader_platform}" in
+				osx|ios) echo "${shader_platform}" ;;
+				*) echo "osx" ;;
+			esac
+			;;
 		*)
 			echo "Unsupported shader backend: ${backend}" >&2
 			return 1
@@ -116,6 +123,9 @@ backend_profile() {
 			;;
 		dxbc)
 			echo "${d3d_shader_profile}"
+			;;
+		metal)
+			echo "metal"
 			;;
 		*)
 			echo "Unsupported shader backend: ${backend}" >&2
