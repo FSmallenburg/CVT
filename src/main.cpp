@@ -488,12 +488,6 @@ std::array<float, 4> orderParameterGradientColor(float value)
     };
 }
 
-struct ParticleSizeColorStats
-{
-    float mean = 0.0f;
-    float standardDeviation = 0.0f;
-};
-
 ParticleSizeColorStats computeParticleSizeColorStats(const std::vector<Particle> &particles)
 {
     ParticleSizeColorStats stats;
@@ -626,18 +620,28 @@ bx::Vec3 inverseRotateVector(const float *rotationTransform, const bx::Vec3 &vec
 }
 
 void applyColorMode(ParticleSystem &particleSystem, ColorMode colorMode,
-                    bool supportsOrientationMode, bool uniformUsesOrientation)
+                    bool supportsOrientationMode, bool uniformUsesOrientation,
+                    ViewerState &viewerState)
 {
     std::vector<Particle> &particles = particleSystem.particles();
-    const ParticleSizeColorStats particleSizeColorStats =
-        computeParticleSizeColorStats(particles);
+    
+    // Use cached stats if particle count and color mode haven't changed
+    if (particles.size() != viewerState.cachedParticleCount 
+        || colorMode != viewerState.cachedColorMode)
+    {
+        // Recompute and cache stats
+        viewerState.cachedSizeColorStats = computeParticleSizeColorStats(particles);
+        viewerState.cachedParticleCount = particles.size();
+        viewerState.cachedColorMode = colorMode;
+    }
+    
     const std::vector<PatchyParticleData> *patchMetadata =
         particleSystem.hasPatchyMetadata() ? &particleSystem.patchyMetadata() : nullptr;
     for (size_t index = 0; index < particles.size(); ++index)
     {
         Particle &particle = particles[index];
         particle.color = resolveParticleColor(particle, index, colorMode,
-                                              particleSizeColorStats,
+                                              viewerState.cachedSizeColorStats,
                                               patchMetadata,
                                               supportsOrientationMode,
                                               uniformUsesOrientation);
@@ -2535,6 +2539,9 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.bondOrderScatterInteraction = {};
     viewerState.bondOrderScatterCache = {};
     viewerState.bondOrderScatterCache.enabledSpecies.fill(true);
+    // Invalidate particle color stats cache when loading new file
+    viewerState.cachedParticleCount = 0u;
+    viewerState.cachedColorMode = ColorMode::FileDefault;
     viewerState.selectedIds.clear();
     viewerState.hiddenIds.clear();
     viewerState.lastPickedId = 0u;
@@ -2645,7 +2652,11 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                   float cutPlaneStep, float cutPlaneMinSceneZ,
                                   float cutPlaneMaxSceneZ, int &exitCode)
 {
-    if (viewerState.autoFindNeighbors && !viewerState.neighborAnalysisValid)
+    // Disable automatic neighbor finding for large datasets to prevent O(N²) hang
+    constexpr size_t kMaxParticlesForAutoNeighborFind = 10000u;
+    
+    if (viewerState.autoFindNeighbors && !viewerState.neighborAnalysisValid
+        && particleSystem.particles().size() <= kMaxParticlesForAutoNeighborFind)
     {
         viewerState.pendingFindNeighbors = true;
     }
@@ -3417,7 +3428,7 @@ int main(int argc, char **argv)
             bx::mtxMul(sceneTransform, sceneTranslateMtx, viewerState.sceneRotation);
 
             applyColorMode(particleSystem, viewerState.colorMode,
-                           particleFileType == TrajectoryReader::FileType::Rod, false);
+                           particleFileType == TrajectoryReader::FileType::Rod, false, viewerState);
             applyAnalysisColorMode(particleSystem, viewerState);
             if (viewerState.mobilitySystemDirty)
             {
@@ -3425,7 +3436,7 @@ int main(int argc, char **argv)
                                       simulationBox);
                 viewerState.mobilitySystemDirty = false;
             }
-            applyColorMode(mobilitySystem, viewerState.colorMode, true, true);
+            applyColorMode(mobilitySystem, viewerState.colorMode, true, true, viewerState);
             applyAnalysisColorMode(mobilitySystem, particleSystem, viewerState);
             updateAuxiliaryRenderSystemsIfNeeded(viewerState, layout, sphereStacks,
                                                  sphereSlices, particleFileType,

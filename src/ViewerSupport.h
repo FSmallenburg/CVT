@@ -43,6 +43,12 @@ enum class BondOrderScatterMode : uint8_t
     PrincipalComponentsQBar,
 };
 
+struct ParticleSizeColorStats
+{
+    float mean = 0.0f;
+    float standardDeviation = 0.0f;
+};
+
 struct BondOrderScatterData
 {
     std::vector<float> xValues;
@@ -120,7 +126,7 @@ struct ViewerState
     TrajectoryReader::Dimensionality fileDimensionality =
         TrajectoryReader::Dimensionality::ThreeDimensional;
     float neighborCutoffFactor = 1.3f;
-    bool autoFindNeighbors = false;
+    bool autoFindNeighbors = false;  // DISABLED: causes O(N²) hang on large datasets
     bool neighborAnalysisValid = false;
     bool pendingFindNeighbors = false;
     bool pendingRefreshAnalysisResults = false;
@@ -165,6 +171,10 @@ struct ViewerState
     ColorMode colorMode = ColorMode::FileDefault;
     AnalysisColorMode analysisColorMode = AnalysisColorMode::Disabled;
     BondOrderScatterMode bondOrderScatterMode = BondOrderScatterMode::PrincipalComponentsQBar;
+    // Cache for particle size/color statistics to avoid per-frame recomputation
+    ParticleSizeColorStats cachedSizeColorStats{};
+    size_t cachedParticleCount = 0u;
+    ColorMode cachedColorMode = ColorMode::FileDefault;
     uint8_t bondOrientationalOrder = 6u;
     uint8_t bondOrderScatterXAxisOrder = 4u;
     uint8_t bondOrderScatterYAxisOrder = 6u;
