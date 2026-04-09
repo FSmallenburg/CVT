@@ -171,8 +171,11 @@ void drawBondOrderScatterPanel(ViewerState &viewerState,
             ImPlot::SetupAxes(xAxisLabel.c_str(), yAxisLabel.c_str(),
                               ImPlotAxisFlags_AutoFit,
                               ImPlotAxisFlags_AutoFit);
+            const size_t scatterPointCount = scatterData.xValues.size();
+            const bool useLightweightMarkers = scatterPointCount > 10000u;
             ImPlotSpec scatterSpec;
-            scatterSpec.Marker = ImPlotMarker_Circle;
+            scatterSpec.Marker = useLightweightMarkers ? ImPlotMarker_Square
+                                                       : ImPlotMarker_Circle;
             scatterSpec.MarkerSize = 1.0f;
             scatterSpec.LineWeight = 0.0f;
             scatterSpec.MarkerLineColors = scatterData.pointColors.data();
@@ -180,7 +183,7 @@ void drawBondOrderScatterPanel(ViewerState &viewerState,
             ImPlot::PlotScatter("Particles",
                                 scatterData.xValues.data(),
                                 scatterData.yValues.data(),
-                                static_cast<int>(scatterData.xValues.size()),
+                                static_cast<int>(scatterPointCount),
                                 scatterSpec);
 
             const ImVec2 plotPos = ImPlot::GetPlotPos();

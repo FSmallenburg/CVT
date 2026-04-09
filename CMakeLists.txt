@@ -18,6 +18,19 @@ set(BGFX_INSTALL        OFF CACHE BOOL "" FORCE)
 set(BGFX_CUSTOM_TARGETS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/bgfx.cmake)
 
+# implot needs a flat imgui include ("imgui.h" without a subdirectory prefix) which
+# conflicts with how ImGuiBgfx.cpp finds the bgfx example imgui.h.  Build implot as a
+# separate static library so its include paths stay isolated.
+add_library(implot STATIC
+    third_party/implot/implot.cpp
+    third_party/implot/implot_items.cpp
+)
+target_include_directories(implot PUBLIC
+    ${CMAKE_SOURCE_DIR}/third_party/implot
+    ${BGFX_DIR}/3rdparty/dear-imgui
+)
+target_link_libraries(implot PUBLIC bx)
+
 add_executable(cvt
     src/AppBootstrap.cpp
     src/ColorPalette.cpp
@@ -46,8 +59,10 @@ add_executable(cvt
     src/TrajectoryReader.cpp
     src/ViewerSupport.cpp
     src/ViewerUi.cpp
-    third_party/implot/implot.cpp
-    third_party/implot/implot_items.cpp
+    ${BGFX_DIR}/3rdparty/dear-imgui/imgui.cpp
+    ${BGFX_DIR}/3rdparty/dear-imgui/imgui_draw.cpp
+    ${BGFX_DIR}/3rdparty/dear-imgui/imgui_tables.cpp
+    ${BGFX_DIR}/3rdparty/dear-imgui/imgui_widgets.cpp
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -59,7 +74,6 @@ endif()
 target_include_directories(cvt PRIVATE
     ${BGFX_DIR}/3rdparty
     ${BGFX_DIR}/examples/common/imgui
-    ${CMAKE_SOURCE_DIR}/third_party/implot
 )
 
 find_package(glfw3 CONFIG QUIET)
@@ -89,7 +103,9 @@ endif()
 
 target_link_libraries(cvt PRIVATE
     bgfx
-    dear-imgui
+    bx
+    bimg
+    implot
 )
 
 if(GLFW_TARGET)

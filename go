@@ -1,3 +1,4 @@
 rm build-release/cvt
-cmake --build build-release
-./build-release/cvt TestInputFiles/polydisperse.osph
+inpfile=${1:-"TestInputFiles/polydisperse.osph"}
+cmake --build --preset release
+./build-release/cvt $inpfile

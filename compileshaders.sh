@@ -7,6 +7,8 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 bgfx_dir=${BGFX_DIR:-"${script_dir}/third_party/bgfx.cmake/bgfx"}
 bgfx_build_dir=${BGFX_BUILD_DIR:-}
 bgfx_include_dir=${BGFX_SHADER_INCLUDE_DIR:-"${bgfx_dir}/src"}
+bgfx_shaderc_autobuild=${BGFX_SHADERC_AUTOBUILD:-1}
+bgfx_shaderc_build_dir=${BGFX_SHADERC_BUILD_DIR:-"${script_dir}/build-shaderc"}
 
 if [[ -n "${BGFX_SHADER_PLATFORM:-}" ]]; then
 	shader_platform=${BGFX_SHADER_PLATFORM}
@@ -31,10 +33,17 @@ find_shaderc() {
 			"${bgfx_build_dir}/bin/shadercRelease"
 			"${bgfx_build_dir}/bin/shadercDebug"
 			"${bgfx_build_dir}/bin/shaderc"
+			"${bgfx_build_dir}/shaderc"
 		)
 	fi
 
 	candidates+=("${bgfx_dir}/tools/bin/${shader_platform}/shaderc")
+	candidates+=(
+		"${script_dir}/build-debug/shaderc"
+		"${script_dir}/build-release/shaderc"
+		"${script_dir}/build-debug/bin/shaderc"
+		"${script_dir}/build-release/bin/shaderc"
+	)
 
 	for bgfx_candidate_bin_dir in "${bgfx_dir}"/.build/*/bin; do
 		[[ -d "${bgfx_candidate_bin_dir}" ]] || continue
@@ -56,13 +65,68 @@ find_shaderc() {
 		fi
 	done
 
+	if command -v shaderc >/dev/null 2>&1; then
+		command -v shaderc
+		return 0
+	fi
+
 	return 1
 }
 
-shaderc=$(find_shaderc) || {
-	echo "shaderc not found. Set SHADERC or BGFX_BUILD_DIR explicitly." >&2
-	exit 1
+build_shaderc() {
+	local shaderc_source_root=${BGFX_SHADERC_SOURCE_ROOT:-"${script_dir}/third_party/bgfx.cmake"}
+	local configure_cmd=(
+		cmake
+		-S "${shaderc_source_root}"
+		-B "${bgfx_shaderc_build_dir}"
+		-DBGFX_BUILD_EXAMPLES=OFF
+		-DBGFX_BUILD_TOOLS=ON
+		-DBGFX_BUILD_TOOLS_SHADER=ON
+		-DBGFX_BUILD_TOOLS_TEXTURE=OFF
+		-DBGFX_BUILD_TOOLS_GEOMETRY=OFF
+		-DBGFX_BUILD_TOOLS_BIN2C=OFF
+		-DBGFX_BUILD_TESTS=OFF
+		-DBGFX_INSTALL=OFF
+		-DBGFX_CUSTOM_TARGETS=OFF
+	)
+
+	echo "shaderc not found; attempting to build shaderc in ${bgfx_shaderc_build_dir}" >&2
+	"${configure_cmd[@]}" >&2
+	cmake --build "${bgfx_shaderc_build_dir}" --target shaderc >&2
+
+	local candidate
+	for candidate in \
+		"${bgfx_shaderc_build_dir}/shaderc" \
+		"${bgfx_shaderc_build_dir}/bin/shaderc" \
+		"${bgfx_shaderc_build_dir}/bin/shadercRelease" \
+		"${bgfx_shaderc_build_dir}/bin/shadercDebug"; do
+		if [[ -x "${candidate}" ]]; then
+			echo "${candidate}"
+			return 0
+		fi
+	done
+
+	candidate=$(find "${bgfx_shaderc_build_dir}" -type f \( -name shaderc -o -name shadercRelease -o -name shadercDebug \) 2>/dev/null | head -1 || true)
+	if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+		echo "${candidate}"
+		return 0
+	fi
+
+	return 1
 }
+
+if ! shaderc=$(find_shaderc); then
+	if [[ "${bgfx_shaderc_autobuild}" == "1" ]]; then
+		shaderc=$(build_shaderc) || {
+			echo "Failed to build or locate shaderc." >&2
+			echo "Set SHADERC to an existing shaderc binary, or set BGFX_SHADERC_AUTOBUILD=0 to disable auto-build." >&2
+			exit 1
+		}
+	else
+		echo "shaderc not found. Set SHADERC, BGFX_BUILD_DIR, or enable auto-build via BGFX_SHADERC_AUTOBUILD=1." >&2
+		exit 1
+	fi
+fi
 
 shader_profile=${BGFX_SHADER_PROFILE:-120}
 # bgfx shaderc defaults to no optimization; enable an optimized build by default.
