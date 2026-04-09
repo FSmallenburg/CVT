@@ -4,7 +4,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-bgfx_dir=${BGFX_DIR:-"${script_dir}/third_party/bgfx"}
+bgfx_dir=${BGFX_DIR:-"${script_dir}/third_party/bgfx.cmake/bgfx"}
 bgfx_build_dir=${BGFX_BUILD_DIR:-}
 bgfx_include_dir=${BGFX_SHADER_INCLUDE_DIR:-"${bgfx_dir}/src"}
 

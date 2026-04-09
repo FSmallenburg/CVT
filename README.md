@@ -11,8 +11,7 @@ git clone --recurse-submodules <repo-url>
 cd CVT
 ```
 
-1. **Build bgfx/bx/bimg** under `third_party/bgfx` so the required libraries exist.
-2. **Compile the runtime shaders**:
+1. **Compile the runtime shaders**:
 
 ```bash
 ./compileshaders.sh
@@ -28,9 +27,10 @@ Then build CVT using the preset for your platform:
 
 ## Build overview
 
-This repository expects **bgfx**, **bx**, and **bimg** to be available under `third_party/` and to be compiled.
+**bgfx**, **bx**, and **bimg** are bundled as nested submodules inside `third_party/bgfx.cmake`
+and are compiled automatically by `cmake --build`. No separate pre-build step is needed.
 
-These dependencies live in git submodules. For a fresh checkout, prefer:
+For a fresh checkout, prefer:
 
 ```bash
 git clone --recurse-submodules <repo-url>
@@ -43,27 +43,16 @@ git pull --recurse-submodules
 git submodule update --init --recursive
 ```
 
-If auto-detection does not find the correct bgfx build output, set `BGFX_BUILD_DIR` manually. To do this, make sure `BGFX_BUILD_DIR` points to the bgfx build output directory that contains:
-
-- `bin/libbgfxRelease.a`
-- `bin/libbxRelease.a`
-- `bin/libbimgRelease.a`
-
-Typical examples:
-
-```bash
-export BGFX_BUILD_DIR=/path/to/bgfx/.build/your-config
-```
-
-```powershell
-$env:BGFX_BUILD_DIR = 'C:\path\to\bgfx\.build\your-config'
-```
-
-You will usually also want to compile the runtime shaders before the first run:
+Compile the runtime shaders before the first run:
 
 ```bash
 ./compileshaders.sh
 ```
+
+> **Note:** `compileshaders.sh` requires a `shaderc` binary. It searches
+> `third_party/bgfx.cmake/bgfx/tools/bin/<platform>/shaderc` and
+> `third_party/bgfx.cmake/bgfx/.build/*/bin/shaderc*` automatically. You can also
+> set the `SHADERC` environment variable to an explicit path.
 
 ---
 
@@ -219,10 +208,6 @@ cmake -S . -B build-mac -G Ninja \
 ---
 
 ## Common issues
-
-### `libbgfxRelease.a not found`
-
-Set `BGFX_BUILD_DIR` to the bgfx build output directory before configuring.
 
 ### Shaders fail to load at runtime
 
