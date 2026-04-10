@@ -194,6 +194,7 @@ struct ViewerState
     float bondDiagramPointScale = 0.05f;
     bool structureFactorDirty = true;
     bool structureFactorPendingCompute = false;
+    bool structureFactorPanelOpen = false;
     bool structureFactorAutoUpdate = true;
     bool structureFactorUseGpu = true;
     bool structureFactorSpecifyModeCount = false;

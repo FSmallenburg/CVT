@@ -337,6 +337,7 @@ constexpr uint8_t kLightingLevelCount = 30u;
 constexpr uint32_t kMaxNeighborsPerParticle = 50u;
 constexpr uint16_t kBondDiagramPreviewSize = 192u;
 constexpr uint16_t kInteractiveStructureFactorLowResSize = 128u;
+constexpr size_t kLargeStructureFactorParticleThreshold = 25000u;
 constexpr uint16_t kBondDiagramSphereStacks = 10u;
 constexpr uint16_t kBondDiagramSphereSlices = 10u;
 float s_uiScrollX = 0.0f;
@@ -2366,7 +2367,9 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
             if (hadLowResInteractionRender)
             {
                 state->structureFactorInteractionLowResActive = false;
-                if (state->structureFactorAutoUpdate && state->structureFactorDirty)
+                if (state->structureFactorPanelOpen
+                    && state->structureFactorAutoUpdate
+                    && state->structureFactorDirty)
                 {
                     state->structureFactorPendingCompute = true;
                 }
@@ -2392,7 +2395,9 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
             if (hadLowResInteractionRender)
             {
                 state->structureFactorInteractionLowResActive = false;
-                if (state->structureFactorAutoUpdate && state->structureFactorDirty)
+                if (state->structureFactorPanelOpen
+                    && state->structureFactorAutoUpdate
+                    && state->structureFactorDirty)
                 {
                     state->structureFactorPendingCompute = true;
                 }
@@ -2552,6 +2557,8 @@ static bool openTrajectoryFile(const std::string &path,
     markPickBufferDirty(viewerState);
     destroyStructureFactorResources(structureFactorResources);
     markStructureFactorDirty(viewerState);
+    viewerState.structureFactorAutoUpdate =
+        particleSystem.particles().size() <= kLargeStructureFactorParticleThreshold;
     viewerState.structureFactorPendingCompute = false;
     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
     viewerState.fileOpenStatusMessage.clear();
@@ -2786,7 +2793,12 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         markPickBufferDirty(viewerState);
     }
 
-    if (viewerState.structureFactorPendingCompute)
+    if (!viewerState.structureFactorPanelOpen)
+    {
+        viewerState.structureFactorPendingCompute = false;
+        viewerState.structureFactorInteractionLowResActive = false;
+    }
+    else if (viewerState.structureFactorPendingCompute)
     {
         updateStructureFactorPreview(viewerState, simulationBox,
                                      particleSystem, structureFactorResources);

@@ -24,6 +24,7 @@ constexpr float kUiPanelWidthFraction = 1.0f / 3.0f;
 constexpr uint16_t kMinUiPanelWidth = 360u;
 constexpr uint16_t kMinRenderViewportWidth = 640u;
 constexpr float kMinParticleSizeScale = 0.01f;
+constexpr size_t kLargeStructureFactorParticleThreshold = 25000u;
 
 int analysisColorModeComboIndex(AnalysisColorMode analysisColorMode)
 {
@@ -560,6 +561,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                         float cutPlaneMinSceneZ, float cutPlaneMaxSceneZ)
 {
     viewerState.bondDiagramRenderRequested = false;
+    viewerState.structureFactorPanelOpen = false;
 
     if (!viewerState.showUi || !ImGuiBgfx::isAvailable())
     {
@@ -957,8 +959,13 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         }           
 
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("Structure factor"))
+        viewerState.structureFactorPanelOpen = ImGui::CollapsingHeader("Structure factor");
+        if (viewerState.structureFactorPanelOpen)
         {
+            const size_t structureFactorParticleCount = particleSystem.particles().size();
+            const bool isLargeStructureFactorSystem =
+                structureFactorParticleCount > kLargeStructureFactorParticleThreshold;
+
             if (ImGui::Button("Compute structure factor"))
             {
                 viewerState.structureFactorInteractionLowResActive = false;
@@ -977,6 +984,13 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 {
                     viewerState.structureFactorPendingCompute = true;
                 }
+            }
+            if (isLargeStructureFactorSystem)
+            {
+                ImGui::TextWrapped(
+                    "For systems larger than %zu particles, structure-factor "
+                    "calculations may be slow or buggy.",
+                    kLargeStructureFactorParticleThreshold);
             }
 
             bool useGpu = viewerState.structureFactorUseGpu;

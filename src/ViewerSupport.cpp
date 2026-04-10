@@ -92,10 +92,6 @@ void markAllHelperSystemsDirty(ViewerState &state)
         state.structureFactorDataRevision = 1u;
     }
     state.structureFactorDirty = true;
-    if (state.structureFactorAutoUpdate)
-    {
-        state.structureFactorPendingCompute = true;
-    }
 }
 
 void markVisibilityDependentHelperSystemsDirty(ViewerState &state)
@@ -151,10 +147,6 @@ void markBondOrderScatterDataDirty(ViewerState &state)
 void markStructureFactorDirty(ViewerState &state)
 {
     state.structureFactorDirty = true;
-    if (state.structureFactorAutoUpdate)
-    {
-        state.structureFactorPendingCompute = true;
-    }
 }
 
 float computeCutPlaneStep(const SimulationBox &simulationBox)
