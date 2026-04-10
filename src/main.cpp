@@ -2632,7 +2632,9 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         applyParticleVisibilityFilters(particleSystem, viewerState);
         markAllHelperSystemsDirty(viewerState);
         markPickBufferDirty(viewerState);
-        viewerState.structureFactorPendingCompute = false;
+        viewerState.structureFactorInteractionLowResActive = false;
+        viewerState.structureFactorPendingCompute =
+            viewerState.structureFactorPanelOpen && viewerState.structureFactorAutoUpdate;
         return;
     }
 

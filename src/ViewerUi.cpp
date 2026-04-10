@@ -560,6 +560,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                         uint16_t windowWidth, uint16_t windowHeight,
                         float cutPlaneMinSceneZ, float cutPlaneMaxSceneZ)
 {
+    const bool wasStructureFactorPanelOpen = viewerState.structureFactorPanelOpen;
     viewerState.bondDiagramRenderRequested = false;
     viewerState.structureFactorPanelOpen = false;
 
@@ -962,6 +963,13 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         viewerState.structureFactorPanelOpen = ImGui::CollapsingHeader("Structure factor");
         if (viewerState.structureFactorPanelOpen)
         {
+            const bool structureFactorPanelJustOpened = !wasStructureFactorPanelOpen;
+            if (structureFactorPanelJustOpened && viewerState.structureFactorDirty)
+            {
+                viewerState.structureFactorInteractionLowResActive = false;
+                viewerState.structureFactorPendingCompute = true;
+            }
+
             const size_t structureFactorParticleCount = particleSystem.particles().size();
             const bool isLargeStructureFactorSystem =
                 structureFactorParticleCount > kLargeStructureFactorParticleThreshold;
