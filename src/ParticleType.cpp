@@ -2,10 +2,7 @@
 
 #include <bx/math.h>
 
-namespace
-{
-
-void buildParticleTransform(const Particle &particle, float *outTransform)
+void ParticleType::buildParticleTransform(const Particle &particle, float *outTransform) const
 {
     if (particle.hasOrientationMatrix)
     {
@@ -32,20 +29,18 @@ void buildParticleTransform(const Particle &particle, float *outTransform)
                particle.rotation.z, particle.position.x, particle.position.y, particle.position.z);
 }
 
-} // namespace
-
 float ParticleType::resolveScale(const Particle &particle, uint8_t channel)
 {
     return channel < particle.sizeParams.size() ? particle.sizeParams[channel] : 1.0f;
 }
 
-void ParticleType::buildPartTransform(const Particle &particle, const float *parentTransform,
-                                      size_t partIndex, float *outTransform) const
+void ParticleType::buildPartTransformFromParticleTransform(const Particle &particle,
+                                                           const float *particleTransform,
+                                                           const float *parentTransform,
+                                                           size_t partIndex,
+                                                           float *outTransform) const
 {
     const RenderPart &part = renderParts()[partIndex];
-
-    float particleTransform[16];
-    buildParticleTransform(particle, particleTransform);
 
     float partTransform[16];
     bx::mtxSRT(partTransform, part.baseScale.x * resolveScale(particle, part.scaleChannels[0]),
@@ -65,4 +60,13 @@ void ParticleType::buildPartTransform(const Particle &particle, const float *par
     {
         bx::memCopy(outTransform, modelTransform, sizeof(modelTransform));
     }
+}
+
+void ParticleType::buildPartTransform(const Particle &particle, const float *parentTransform,
+                                      size_t partIndex, float *outTransform) const
+{
+    float particleTransform[16];
+    buildParticleTransform(particle, particleTransform);
+    buildPartTransformFromParticleTransform(particle, particleTransform, parentTransform, partIndex,
+                                            outTransform);
 }

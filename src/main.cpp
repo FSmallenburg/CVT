@@ -621,27 +621,25 @@ bx::Vec3 inverseRotateVector(const float *rotationTransform, const bx::Vec3 &vec
 
 void applyColorMode(ParticleSystem &particleSystem, ColorMode colorMode,
                     bool supportsOrientationMode, bool uniformUsesOrientation,
-                    ViewerState &viewerState)
+                    ParticleColorStatsCache &statsCache)
 {
     std::vector<Particle> &particles = particleSystem.particles();
-    
-    // Use cached stats if particle count and color mode haven't changed
-    if (particles.size() != viewerState.cachedParticleCount 
-        || colorMode != viewerState.cachedColorMode)
+
+    if (particles.size() != statsCache.particleCount
+        || colorMode != statsCache.colorMode)
     {
-        // Recompute and cache stats
-        viewerState.cachedSizeColorStats = computeParticleSizeColorStats(particles);
-        viewerState.cachedParticleCount = particles.size();
-        viewerState.cachedColorMode = colorMode;
+        statsCache.stats = computeParticleSizeColorStats(particles);
+        statsCache.particleCount = particles.size();
+        statsCache.colorMode = colorMode;
     }
-    
+
     const std::vector<PatchyParticleData> *patchMetadata =
         particleSystem.hasPatchyMetadata() ? &particleSystem.patchyMetadata() : nullptr;
     for (size_t index = 0; index < particles.size(); ++index)
     {
         Particle &particle = particles[index];
         particle.color = resolveParticleColor(particle, index, colorMode,
-                                              viewerState.cachedSizeColorStats,
+                                              statsCache.stats,
                                               patchMetadata,
                                               supportsOrientationMode,
                                               uniformUsesOrientation);
@@ -2539,9 +2537,8 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.bondOrderScatterInteraction = {};
     viewerState.bondOrderScatterCache = {};
     viewerState.bondOrderScatterCache.enabledSpecies.fill(true);
-    // Invalidate particle color stats cache when loading new file
-    viewerState.cachedParticleCount = 0u;
-    viewerState.cachedColorMode = ColorMode::FileDefault;
+    viewerState.particleColorStatsCache = {};
+    viewerState.mobilityColorStatsCache = {};
     viewerState.selectedIds.clear();
     viewerState.hiddenIds.clear();
     viewerState.lastPickedId = 0u;
@@ -2555,7 +2552,7 @@ static bool openTrajectoryFile(const std::string &path,
     markPickBufferDirty(viewerState);
     destroyStructureFactorResources(structureFactorResources);
     markStructureFactorDirty(viewerState);
-    viewerState.structureFactorPendingCompute = viewerState.structureFactorAutoUpdate;
+    viewerState.structureFactorPendingCompute = false;
     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
     viewerState.fileOpenStatusMessage.clear();
     std::cout << "Opened trajectory file: " << loadedPath << std::endl;
@@ -2620,12 +2617,15 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         currentFrame = requestedFrame;
         viewerState.previousRawPositions = std::move(previousRawPositions);
         viewerState.hasPreviousFramePositions = true;
+        viewerState.particleColorStatsCache = {};
+        viewerState.mobilityColorStatsCache = {};
         noteEncounteredParticleTypes(viewerState, particleSystem);
         invalidateNeighborAnalysis(viewerState, particleSystem);
         viewerState.pendingFindNeighbors = viewerState.autoFindNeighbors;
         applyParticleVisibilityFilters(particleSystem, viewerState);
         markAllHelperSystemsDirty(viewerState);
         markPickBufferDirty(viewerState);
+        viewerState.structureFactorPendingCompute = false;
         return;
     }
 
@@ -2652,11 +2652,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                   float cutPlaneStep, float cutPlaneMinSceneZ,
                                   float cutPlaneMaxSceneZ, int &exitCode)
 {
-    // Disable automatic neighbor finding for large datasets to prevent O(N²) hang
-    constexpr size_t kMaxParticlesForAutoNeighborFind = 10000u;
-    
-    if (viewerState.autoFindNeighbors && !viewerState.neighborAnalysisValid
-        && particleSystem.particles().size() <= kMaxParticlesForAutoNeighborFind)
+    if (viewerState.autoFindNeighbors && !viewerState.neighborAnalysisValid)
     {
         viewerState.pendingFindNeighbors = true;
     }
@@ -3428,7 +3424,8 @@ int main(int argc, char **argv)
             bx::mtxMul(sceneTransform, sceneTranslateMtx, viewerState.sceneRotation);
 
             applyColorMode(particleSystem, viewerState.colorMode,
-                           particleFileType == TrajectoryReader::FileType::Rod, false, viewerState);
+                           particleFileType == TrajectoryReader::FileType::Rod, false,
+                           viewerState.particleColorStatsCache);
             applyAnalysisColorMode(particleSystem, viewerState);
             if (viewerState.mobilitySystemDirty)
             {
@@ -3436,7 +3433,8 @@ int main(int argc, char **argv)
                                       simulationBox);
                 viewerState.mobilitySystemDirty = false;
             }
-            applyColorMode(mobilitySystem, viewerState.colorMode, true, true, viewerState);
+            applyColorMode(mobilitySystem, viewerState.colorMode, true, true,
+                           viewerState.mobilityColorStatsCache);
             applyAnalysisColorMode(mobilitySystem, particleSystem, viewerState);
             updateAuxiliaryRenderSystemsIfNeeded(viewerState, layout, sphereStacks,
                                                  sphereSlices, particleFileType,

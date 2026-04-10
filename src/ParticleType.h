@@ -14,6 +14,14 @@ class ParticleType
 
     virtual const std::vector<RenderPart> &renderParts() const = 0;
 
+    virtual void buildParticleTransform(const Particle &particle, float *outTransform) const;
+
+    virtual void buildPartTransformFromParticleTransform(const Particle &particle,
+                                                         const float *particleTransform,
+                                                         const float *parentTransform,
+                                                         size_t partIndex,
+                                                         float *outTransform) const;
+
     virtual void buildPartTransform(const Particle &particle, const float *parentTransform,
                                     size_t partIndex, float *outTransform) const;
 

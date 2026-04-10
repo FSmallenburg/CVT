@@ -13,6 +13,24 @@ constexpr uint32_t kInstanceFloatCount = kTransformFloatCount + kColorFloatCount
 constexpr uint16_t kInstanceStrideBytes =
     static_cast<uint16_t>(kInstanceFloatCount * sizeof(float));
 
+struct PreparedRenderParticle
+{
+    bx::Vec3 position{0.0f, 0.0f, 0.0f};
+    bx::Vec3 rotation{0.0f, 0.0f, 0.0f};
+    bx::Vec3 direction{0.0f, 0.0f, 1.0f};
+    std::array<float, 9> orientationMatrix{1.0f, 0.0f, 0.0f,
+                                           0.0f, 1.0f, 0.0f,
+                                           0.0f, 0.0f, 1.0f};
+    std::array<float, 4> color{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> sizeParams{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 16> particleTransform{1.0f, 0.0f, 0.0f, 0.0f,
+                                            0.0f, 1.0f, 0.0f, 0.0f,
+                                            0.0f, 0.0f, 1.0f, 0.0f,
+                                            0.0f, 0.0f, 0.0f, 1.0f};
+    uint32_t id = 0u;
+    bool hasOrientationMatrix = false;
+};
+
 std::array<float, 4> encodeParticleIdColor(uint32_t particleId)
 {
     return {float((particleId >> 24) & 0xffu) / 255.0f,
@@ -200,6 +218,64 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
         m_instanceDataPerPart.resize(parts.size());
     }
 
+    const bool reuseParticleTransform = parts.size() > 1u;
+    std::vector<PreparedRenderParticle> preparedParticles;
+    preparedParticles.reserve(m_particles.size());
+
+    Particle transformParticle;
+    for (const Particle &particle : m_particles)
+    {
+        if (!particle.visible)
+        {
+            continue;
+        }
+
+        PreparedRenderParticle prepared;
+        prepared.position = particle.position;
+        prepared.position.x += positionOffset.x;
+        prepared.position.y += positionOffset.y;
+        prepared.position.z += positionOffset.z;
+        prepared.rotation = particle.rotation;
+        prepared.direction = particle.direction;
+        prepared.orientationMatrix = particle.orientationMatrix;
+        prepared.hasOrientationMatrix = particle.hasOrientationMatrix;
+        prepared.color = particle.color;
+        prepared.sizeParams = particle.sizeParams;
+        for (float &sizeParam : prepared.sizeParams)
+        {
+            sizeParam *= particleSizeScale;
+        }
+        prepared.id = particle.id;
+
+        if (wrapToPeriodicBox && simulationBox != nullptr)
+        {
+            simulationBox->wrapPosition(prepared.position);
+        }
+
+        if (cutPlaneEnabled)
+        {
+            const bx::Vec3 transformedPosition = transformPoint(parentTransform, prepared.position);
+            if (transformedPosition.z > cutPlaneSceneZ)
+            {
+                continue;
+            }
+        }
+
+        transformParticle.position = prepared.position;
+        transformParticle.rotation = prepared.rotation;
+        transformParticle.direction = prepared.direction;
+        transformParticle.orientationMatrix = prepared.orientationMatrix;
+        transformParticle.hasOrientationMatrix = prepared.hasOrientationMatrix;
+        m_particleType->buildParticleTransform(transformParticle, prepared.particleTransform.data());
+
+        preparedParticles.push_back(prepared);
+    }
+
+    if (preparedParticles.empty())
+    {
+        return;
+    }
+
     for (size_t partIndex = 0; partIndex < parts.size(); ++partIndex)
     {
         const RenderPart &part = parts[partIndex];
@@ -209,50 +285,38 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
         }
 
         std::vector<float> &instanceData = m_instanceDataPerPart[partIndex];
-        instanceData.resize(m_particles.size() * kInstanceFloatCount);
+        instanceData.resize(preparedParticles.size() * kInstanceFloatCount);
 
         uint32_t visibleCount = 0;
-        for (const Particle &particle : m_particles)
+        for (const PreparedRenderParticle &prepared : preparedParticles)
         {
-            if (!particle.visible)
-            {
-                continue;
-            }
-
-            Particle renderParticle = particle;
-            renderParticle.position.x += positionOffset.x;
-            renderParticle.position.y += positionOffset.y;
-            renderParticle.position.z += positionOffset.z;
-            for (float &sizeParam : renderParticle.sizeParams)
-            {
-                sizeParam *= particleSizeScale;
-            }
-            if (wrapToPeriodicBox && simulationBox != nullptr)
-            {
-                simulationBox->wrapPosition(renderParticle.position);
-            }
-
-            if (cutPlaneEnabled)
-            {
-                const bx::Vec3 transformedPosition =
-                    transformPoint(parentTransform, renderParticle.position);
-                if (transformedPosition.z > cutPlaneSceneZ)
-                {
-                    continue;
-                }
-            }
+            transformParticle.position = prepared.position;
+            transformParticle.rotation = prepared.rotation;
+            transformParticle.direction = prepared.direction;
+            transformParticle.orientationMatrix = prepared.orientationMatrix;
+            transformParticle.hasOrientationMatrix = prepared.hasOrientationMatrix;
+            transformParticle.sizeParams = prepared.sizeParams;
 
             float *instanceBase = instanceData.data() + visibleCount * kInstanceFloatCount;
             float *outTransform = instanceBase;
-            m_particleType->buildPartTransform(renderParticle, parentTransform, partIndex,
-                                               outTransform);
+            if (reuseParticleTransform)
+            {
+                m_particleType->buildPartTransformFromParticleTransform(
+                    transformParticle, prepared.particleTransform.data(), parentTransform,
+                    partIndex, outTransform);
+            }
+            else
+            {
+                m_particleType->buildPartTransform(transformParticle, parentTransform, partIndex,
+                                                   outTransform);
+            }
 
             std::array<float, 4> visibleColor =
-                usePickColors ? encodeParticleIdColor(renderParticle.id) : renderParticle.color;
+                usePickColors ? encodeParticleIdColor(prepared.id) : prepared.color;
             const bool isSelected = selectedParticleIds != nullptr
-                                    && selectedParticleIds->contains(renderParticle.id);
+                                    && selectedParticleIds->contains(prepared.id);
             const bool isHighlighted = highlightedParticleIds != nullptr
-                                       && highlightedParticleIds->contains(renderParticle.id);
+                                       && highlightedParticleIds->contains(prepared.id);
             if (!usePickColors && (isSelected || isHighlighted))
             {
                 visibleColor = highlightColor(visibleColor);
