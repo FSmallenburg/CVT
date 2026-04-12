@@ -3,11 +3,18 @@
 #include "ParticleSystem.h"
 #include "SimulationBox.h"
 
+#include <bgfx/bgfx.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+struct ViewerState;
+struct StructureFactorResources;
+
+using StructureFactorShaderLoader = bgfx::ShaderHandle (*)(const char *path);
 
 struct StructureFactorSettings
 {
@@ -95,3 +102,9 @@ bool advanceStructureFactorBatch(const StructureFactorSettings &settings,
                                  bool &finished,
                                  float &stepMilliseconds,
                                  std::string &error);
+
+void updateStructureFactorPreview(ViewerState &viewerState,
+                                  const SimulationBox &simulationBox,
+                                  const ParticleSystem &particleSystem,
+                                  StructureFactorResources &structureFactorResources,
+                                  StructureFactorShaderLoader shaderLoader);

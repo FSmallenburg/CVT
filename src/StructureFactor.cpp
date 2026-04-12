@@ -1,10 +1,12 @@
 #include "StructureFactor.h"
+#include "ViewerSupport.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <unordered_map>
 
@@ -717,4 +719,674 @@ bool buildStructureFactorGpuParticleData(const ParticleSystem &particleSystem,
     }
 
     return true;
+}
+
+namespace
+{
+
+constexpr bgfx::ViewId kStructureFactorView = 5;
+constexpr bgfx::ViewId kStructureFactorColorView = 6;
+constexpr uint16_t kInteractiveStructureFactorLowResSize = 128u;
+constexpr size_t kLargeStructureFactorParticleThreshold = 25000u;
+
+struct ScreenSpaceVertex
+{
+    float x;
+    float y;
+    float z;
+
+    static void init(bgfx::VertexLayout &layout)
+    {
+        layout.begin().add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float).end();
+    }
+};
+
+void logStructureFactorRenderUpdate(StructureFactorResources &structureFactorResources,
+                                    bool usedGpu,
+                                    bool lowResDuringInteraction,
+                                    uint16_t renderSize,
+                                    const std::string &gpuError)
+{
+    const bool unexpectedCpuFallback = !usedGpu
+                                       && !gpuError.empty()
+                                       && gpuError != "disabled by the Use GPU toggle";
+    const bool shouldLog = unexpectedCpuFallback
+                           && (!lowResDuringInteraction
+                               || !structureFactorResources.hasLoggedRenderMode
+                               || structureFactorResources.lastRenderUsedGpu != usedGpu
+                               || structureFactorResources.lastRenderWasLowRes
+                                      != lowResDuringInteraction
+                               || structureFactorResources.lastRenderSize != renderSize);
+
+    structureFactorResources.hasLoggedRenderMode = true;
+    structureFactorResources.lastRenderUsedGpu = usedGpu;
+    structureFactorResources.lastRenderWasLowRes = lowResDuringInteraction;
+    structureFactorResources.lastRenderSize = renderSize;
+
+    if (!shouldLog)
+    {
+        return;
+    }
+
+    std::cout << "Structure factor: CPU fallback"
+              << (lowResDuringInteraction ? " lower-resolution during interaction" : " render")
+              << " at " << renderSize << "x" << renderSize
+              << " using " << structureFactorResources.particleCount << " particles"
+              << " (GPU path unavailable: " << gpuError << ")." << std::endl;
+}
+
+int structureFactorModeLimitForKTimesSigma(float maxKTimesSigma, float boxLength)
+{
+    if (!(boxLength > 1.0e-6f))
+    {
+        return 1;
+    }
+
+    constexpr double kTwoPi = 6.28318530717958647692;
+    const double maxWaveNumber = std::max(0.0, static_cast<double>(maxKTimesSigma));
+    return std::max(1, static_cast<int>(std::ceil((maxWaveNumber * double(boxLength)) / kTwoPi)));
+}
+
+bool ensureStructureFactorGpuResources(StructureFactorResources &structureFactorResources,
+                                       StructureFactorShaderLoader shaderLoader)
+{
+    if (structureFactorResources.gpuPathInitialized)
+    {
+        return structureFactorResources.gpuPathAvailable;
+    }
+
+    structureFactorResources.gpuPathInitialized = true;
+    structureFactorResources.particleDataSampler =
+        bgfx::createUniform("s_particleData", bgfx::UniformType::Sampler);
+    structureFactorResources.intensitySampler =
+        bgfx::createUniform("s_sfIntensity", bgfx::UniformType::Sampler);
+    structureFactorResources.params0Uniform =
+        bgfx::createUniform("u_sfParams0", bgfx::UniformType::Vec4);
+    structureFactorResources.params1Uniform =
+        bgfx::createUniform("u_sfParams1", bgfx::UniformType::Vec4);
+    structureFactorResources.params2Uniform =
+        bgfx::createUniform("u_sfParams2", bgfx::UniformType::Vec4);
+    structureFactorResources.rotationUniform =
+        bgfx::createUniform("u_sfRotation", bgfx::UniformType::Vec4, 3);
+    structureFactorResources.batchParamsUniform =
+        bgfx::createUniform("u_sfBatchParams", bgfx::UniformType::Vec4);
+    structureFactorResources.colorParamsUniform =
+        bgfx::createUniform("u_sfColorParams", bgfx::UniformType::Vec4);
+    structureFactorResources.colorRangeUniform =
+        bgfx::createUniform("u_sfColorRange", bgfx::UniformType::Vec4);
+
+    bgfx::ShaderHandle computeVs = shaderLoader("shaders/vs_structure_factor.bin");
+    bgfx::ShaderHandle computeFs = shaderLoader("shaders/fs_structure_factor.bin");
+    bgfx::ShaderHandle colorVs = shaderLoader("shaders/vs_structure_factor.bin");
+    bgfx::ShaderHandle colorFs = shaderLoader("shaders/fs_structure_factor_color.bin");
+    if (!bgfx::isValid(computeVs) || !bgfx::isValid(computeFs)
+        || !bgfx::isValid(colorVs) || !bgfx::isValid(colorFs))
+    {
+        structureFactorResources.disableReason =
+            "GPU structure-factor shaders are unavailable; run compileshaders.sh to build them.";
+        structureFactorResources.gpuPathAvailable = false;
+        return false;
+    }
+
+    structureFactorResources.gpuProgram = bgfx::createProgram(computeVs, computeFs, true);
+    structureFactorResources.colorizeProgram = bgfx::createProgram(colorVs, colorFs, true);
+    if (!bgfx::isValid(structureFactorResources.gpuProgram)
+        || !bgfx::isValid(structureFactorResources.colorizeProgram))
+    {
+        structureFactorResources.disableReason =
+            "failed to create the GPU structure-factor shader programs";
+        structureFactorResources.gpuPathAvailable = false;
+        return false;
+    }
+
+    structureFactorResources.gpuPathAvailable = true;
+    return true;
+}
+
+bool updateStructureFactorParticleDataTexture(StructureFactorResources &structureFactorResources,
+                                              const StructureFactorGpuParticleData &gpuParticleData,
+                                              std::string &error)
+{
+    error.clear();
+
+    if (gpuParticleData.width == 0 || gpuParticleData.height == 0
+        || gpuParticleData.particleCount == 0)
+    {
+        error = "No particle data is available for the GPU structure-factor render.";
+        return false;
+    }
+
+    const size_t expectedFloatCount =
+        size_t(gpuParticleData.width) * size_t(gpuParticleData.height) * 4u;
+    if (gpuParticleData.rgba32fPixels.size() != expectedFloatCount)
+    {
+        error = "GPU particle data texture has an unexpected size.";
+        return false;
+    }
+
+    constexpr uint64_t kTextureFlags = BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT
+                                       | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+
+    const bgfx::TextureFormat::Enum format = bgfx::TextureFormat::RGBA32F;
+    if (!bgfx::isTextureValid(0, false, 1, format, kTextureFlags))
+    {
+        error = "RGBA32F particle textures are not supported on this renderer.";
+        return false;
+    }
+
+    const uint32_t byteSize = static_cast<uint32_t>(expectedFloatCount * sizeof(float));
+    const bool needsNewTexture = !bgfx::isValid(structureFactorResources.particleDataTexture)
+                                 || structureFactorResources.particleTextureWidth
+                                        != gpuParticleData.width
+                                 || structureFactorResources.particleTextureHeight
+                                        != gpuParticleData.height
+                                 || structureFactorResources.particleTextureFormat != format;
+    if (needsNewTexture)
+    {
+        if (bgfx::isValid(structureFactorResources.particleDataTexture))
+        {
+            bgfx::destroy(structureFactorResources.particleDataTexture);
+        }
+
+        structureFactorResources.particleDataTexture = bgfx::createTexture2D(
+            gpuParticleData.width, gpuParticleData.height, false, 1, format, kTextureFlags);
+        if (!bgfx::isValid(structureFactorResources.particleDataTexture))
+        {
+            error = "failed to create the GPU particle data texture";
+            return false;
+        }
+
+        structureFactorResources.particleTextureWidth = gpuParticleData.width;
+        structureFactorResources.particleTextureHeight = gpuParticleData.height;
+        structureFactorResources.particleTextureFormat = format;
+    }
+
+    const bgfx::Memory *memory = bgfx::copy(gpuParticleData.rgba32fPixels.data(), byteSize);
+    bgfx::updateTexture2D(structureFactorResources.particleDataTexture, 0, 0,
+                          0, 0, gpuParticleData.width, gpuParticleData.height, memory);
+    return true;
+}
+
+void submitStructureFactorFullscreenTriangle(bgfx::ViewId viewId, bgfx::ProgramHandle program)
+{
+    static bgfx::VertexLayout vertexLayout;
+    static bool vertexLayoutInitialized = false;
+    if (!vertexLayoutInitialized)
+    {
+        ScreenSpaceVertex::init(vertexLayout);
+        vertexLayoutInitialized = true;
+    }
+
+    if (bgfx::getAvailTransientVertexBuffer(3, vertexLayout) < 3)
+    {
+        return;
+    }
+
+    bgfx::TransientVertexBuffer transientVertexBuffer;
+    bgfx::allocTransientVertexBuffer(&transientVertexBuffer, 3, vertexLayout);
+    auto *vertices = reinterpret_cast<ScreenSpaceVertex *>(transientVertexBuffer.data);
+    vertices[0] = {-1.0f, -1.0f, 0.0f};
+    vertices[1] = { 3.0f, -1.0f, 0.0f};
+    vertices[2] = {-1.0f,  3.0f, 0.0f};
+
+    bgfx::setVertexBuffer(0, &transientVertexBuffer);
+    bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+    bgfx::submit(viewId, program);
+}
+
+bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
+                                     const SimulationBox &simulationBox,
+                                     const ParticleSystem &particleSystem,
+                                     StructureFactorResources &structureFactorResources,
+                                     uint32_t particleDataRevision,
+                                     uint32_t batchRevision,
+                                     uint16_t batchRowsPerStep,
+                                     bool &finished,
+                                     std::string &error,
+                                     StructureFactorShaderLoader shaderLoader)
+{
+    error.clear();
+    finished = false;
+
+    if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
+    {
+        error = "GPU structure-factor rendering currently requires a rectangular simulation box.";
+        return false;
+    }
+
+    const bx::Vec3 boxSize = simulationBox.size();
+    const double lx = static_cast<double>(boxSize.x);
+    const double ly = static_cast<double>(boxSize.y);
+    const double lz = static_cast<double>(boxSize.z);
+    if (!(lx > 1.0e-9) || !(ly > 1.0e-9))
+    {
+        error = "Simulation box extents Lx and Ly must both be positive.";
+        return false;
+    }
+    if (settings.allowOutOfPlaneModes && !(lz > 1.0e-9))
+    {
+        error = "Simulation box extent Lz must be positive for GPU view-aligned sampling.";
+        return false;
+    }
+
+    if (!ensureStructureFactorGpuResources(structureFactorResources, shaderLoader))
+    {
+        error = structureFactorResources.disableReason.empty()
+                    ? "GPU structure-factor program could not be initialized."
+                    : structureFactorResources.disableReason;
+        return false;
+    }
+
+    uint16_t particleTextureWidth = structureFactorResources.particleTextureWidth;
+    uint16_t particleTextureHeight = structureFactorResources.particleTextureHeight;
+    size_t particleCount = structureFactorResources.particleCount;
+
+    const bool needsParticleDataUpload =
+        !bgfx::isValid(structureFactorResources.particleDataTexture)
+        || structureFactorResources.particleDataRevision != particleDataRevision;
+    if (needsParticleDataUpload)
+    {
+        StructureFactorGpuParticleData gpuParticleData;
+        if (!buildStructureFactorGpuParticleData(particleSystem, settings, gpuParticleData, error))
+        {
+            return false;
+        }
+        if (!updateStructureFactorParticleDataTexture(structureFactorResources,
+                                                      gpuParticleData, error))
+        {
+            return false;
+        }
+
+        structureFactorResources.particleDataRevision = particleDataRevision;
+        particleTextureWidth = gpuParticleData.width;
+        particleTextureHeight = gpuParticleData.height;
+        particleCount = gpuParticleData.particleCount;
+    }
+    else if (particleTextureWidth == 0u || particleTextureHeight == 0u || particleCount == 0u)
+    {
+        error = "No cached particle data is available for the GPU structure-factor render.";
+        return false;
+    }
+
+    if ((!bgfx::isValid(structureFactorResources.frameBuffer)
+         || structureFactorResources.width != settings.previewSize
+         || structureFactorResources.height != settings.previewSize)
+        && !createStructureFactorRenderTarget(structureFactorResources,
+                                              settings.previewSize,
+                                              settings.previewSize))
+    {
+        error = structureFactorResources.disableReason.empty()
+                    ? "failed to create the GPU structure-factor render target"
+                    : structureFactorResources.disableReason;
+        return false;
+    }
+
+    const bool shouldBatch = particleCount > kLargeStructureFactorParticleThreshold;
+    if (!shouldBatch)
+    {
+        structureFactorResources.gpuBatchActive = false;
+        structureFactorResources.gpuBatchRevision = 0u;
+        structureFactorResources.gpuBatchNextRow = 0u;
+        structureFactorResources.gpuBatchAccumulatedMilliseconds = 0.0f;
+    }
+    else if (!structureFactorResources.gpuBatchActive
+             || structureFactorResources.gpuBatchRevision != batchRevision)
+    {
+        structureFactorResources.gpuBatchActive = true;
+        structureFactorResources.gpuBatchRevision = batchRevision;
+        structureFactorResources.gpuBatchNextRow = 0u;
+        structureFactorResources.gpuBatchAccumulatedMilliseconds = 0.0f;
+    }
+
+    const float params0[4] = {
+        float(particleTextureWidth),
+        float(particleTextureHeight),
+        float(particleCount),
+        particleCount > 0u ? 1.0f / float(particleCount) : 0.0f,
+    };
+    const float params1[4] = {
+        float(settings.maxModeX),
+        float(settings.maxModeY),
+        float((2.0 * 3.14159265358979323846) / lx),
+        float((2.0 * 3.14159265358979323846) / ly),
+    };
+    const float params2[4] = {
+        settings.allowOutOfPlaneModes
+            ? float((2.0 * 3.14159265358979323846) / lz)
+            : 0.0f,
+        settings.logScale ? 1.0f : 0.0f,
+        settings.suppressCentralPeak ? 1.0f : 0.0f,
+        settings.allowOutOfPlaneModes ? 1.0f : 0.0f,
+    };
+    const float rotation[12] = {
+        settings.sceneRotation[0], settings.sceneRotation[1], settings.sceneRotation[2], 0.0f,
+        settings.sceneRotation[4], settings.sceneRotation[5], settings.sceneRotation[6], 0.0f,
+        settings.sceneRotation[8], settings.sceneRotation[9], settings.sceneRotation[10], 0.0f,
+    };
+    const float colorParams[4] = {
+        structureFactorResources.width > 0u ? 1.0f / float(structureFactorResources.width) : 0.0f,
+        structureFactorResources.height > 0u ? 1.0f / float(structureFactorResources.height) : 0.0f,
+        float(settings.blurRadius),
+        0.0f,
+    };
+    const float colorRangeMin = std::clamp(settings.colorRangeMin, 0.0f, 0.99f);
+    const float colorRangeMax = std::clamp(settings.colorRangeMax,
+                                           colorRangeMin + 0.01f, 1.0f);
+    const float colorRange[4] = {
+        colorRangeMin,
+        colorRangeMax,
+        1.0f / (colorRangeMax - colorRangeMin),
+        0.0f,
+    };
+
+    const uint16_t batchStartRow = shouldBatch
+                                       ? structureFactorResources.gpuBatchNextRow
+                                       : 0u;
+    const uint16_t clampedRowsPerStep =
+        static_cast<uint16_t>(std::max<uint16_t>(batchRowsPerStep, 1u));
+    const uint16_t batchRowCount = shouldBatch
+                                       ? std::min<uint16_t>(
+                                             clampedRowsPerStep,
+                                             static_cast<uint16_t>(settings.previewSize
+                                                                   - batchStartRow))
+                                       : settings.previewSize;
+    const bool firstBatchStep = !shouldBatch || batchStartRow == 0u;
+    const float batchOffsetX = 0.0f;
+    const float batchOffsetY = shouldBatch
+                                   ? float(batchStartRow) / float(settings.previewSize)
+                                   : 0.0f;
+    const float batchScaleX = 1.0f;
+    const float batchScaleY = shouldBatch
+                                  ? float(batchRowCount) / float(settings.previewSize)
+                                  : 1.0f;
+    const float batchParams[4] = {
+        batchOffsetX,
+        batchOffsetY,
+        batchScaleX,
+        batchScaleY,
+    };
+
+    bgfx::setViewName(kStructureFactorView, "StructureFactorCompute");
+    bgfx::setViewRect(kStructureFactorView, 0,
+                      batchStartRow,
+                      structureFactorResources.width,
+                      batchRowCount);
+    bgfx::setViewFrameBuffer(kStructureFactorView, structureFactorResources.intensityFrameBuffer);
+    bgfx::setViewTransform(kStructureFactorView, nullptr, nullptr);
+    bgfx::setViewClear(kStructureFactorView,
+                       firstBatchStep ? BGFX_CLEAR_COLOR : BGFX_CLEAR_NONE,
+                       0x000000ff);
+
+    bgfx::setUniform(structureFactorResources.params0Uniform, params0);
+    bgfx::setUniform(structureFactorResources.params1Uniform, params1);
+    bgfx::setUniform(structureFactorResources.params2Uniform, params2);
+    bgfx::setUniform(structureFactorResources.rotationUniform, rotation, 3);
+    bgfx::setUniform(structureFactorResources.batchParamsUniform, batchParams);
+    bgfx::setTexture(0, structureFactorResources.particleDataSampler,
+                     structureFactorResources.particleDataTexture);
+    submitStructureFactorFullscreenTriangle(kStructureFactorView,
+                                            structureFactorResources.gpuProgram);
+
+    bgfx::setViewName(kStructureFactorColorView, "StructureFactorColor");
+    bgfx::setViewRect(kStructureFactorColorView, 0, 0,
+                      structureFactorResources.width, structureFactorResources.height);
+    bgfx::setViewFrameBuffer(kStructureFactorColorView, structureFactorResources.frameBuffer);
+    bgfx::setViewTransform(kStructureFactorColorView, nullptr, nullptr);
+    bgfx::setViewClear(kStructureFactorColorView, BGFX_CLEAR_COLOR, 0x040406ff);
+    bgfx::setUniform(structureFactorResources.colorParamsUniform, colorParams);
+    bgfx::setUniform(structureFactorResources.colorRangeUniform, colorRange);
+    bgfx::setTexture(0, structureFactorResources.intensitySampler,
+                     structureFactorResources.intensityTexture);
+    submitStructureFactorFullscreenTriangle(kStructureFactorColorView,
+                                            structureFactorResources.colorizeProgram);
+
+    structureFactorResources.particleCount = particleCount;
+    structureFactorResources.enabled = true;
+    if (shouldBatch)
+    {
+        structureFactorResources.gpuBatchNextRow =
+            static_cast<uint16_t>(batchStartRow + batchRowCount);
+        if (structureFactorResources.gpuBatchNextRow >= settings.previewSize)
+        {
+            structureFactorResources.gpuBatchActive = false;
+            structureFactorResources.gpuBatchRevision = 0u;
+            structureFactorResources.gpuBatchNextRow = 0u;
+            finished = true;
+        }
+        else
+        {
+            finished = false;
+        }
+    }
+    else
+    {
+        finished = true;
+    }
+    return true;
+}
+
+} // namespace
+
+void updateStructureFactorPreview(ViewerState &viewerState,
+                                  const SimulationBox &simulationBox,
+                                  const ParticleSystem &particleSystem,
+                                  StructureFactorResources &structureFactorResources,
+                                  StructureFactorShaderLoader shaderLoader)
+{
+    const bool lowResDuringInteraction = viewerState.structureFactorInteractionLowResActive;
+
+    StructureFactorSettings settings;
+    settings.previewSize = lowResDuringInteraction
+                               ? std::min<uint16_t>(viewerState.structureFactorImageSize,
+                                                    kInteractiveStructureFactorLowResSize)
+                               : viewerState.structureFactorImageSize;
+    if (viewerState.structureFactorSpecifyModeCount)
+    {
+        settings.maxModeX = viewerState.structureFactorMaxModeX;
+        settings.maxModeY = viewerState.structureFactorMaxModeY;
+    }
+    else
+    {
+        const bx::Vec3 boxSize = simulationBox.size();
+        settings.maxModeX = structureFactorModeLimitForKTimesSigma(
+            viewerState.structureFactorMaxKTimesSigma, boxSize.x);
+        settings.maxModeY = structureFactorModeLimitForKTimesSigma(
+            viewerState.structureFactorMaxKTimesSigma, boxSize.y);
+    }
+    settings.blurRadius = viewerState.structureFactorBlurRadius;
+    settings.colorRangeMin = viewerState.structureFactorColorRangeMin;
+    settings.colorRangeMax = viewerState.structureFactorColorRangeMax;
+    settings.logScale = viewerState.structureFactorLogScale;
+    settings.suppressCentralPeak = viewerState.structureFactorSuppressCentralPeak;
+    settings.useVisibleParticlesOnly = viewerState.structureFactorUseVisibleParticlesOnly;
+    settings.allowOutOfPlaneModes =
+        viewerState.fileDimensionality == TrajectoryReader::Dimensionality::ThreeDimensional;
+    std::copy(std::begin(viewerState.sceneRotation), std::end(viewerState.sceneRotation),
+              settings.sceneRotation.begin());
+
+    const auto gpuStartTime = std::chrono::steady_clock::now();
+    std::string gpuError;
+    const bool batchGpuComputation = viewerState.structureFactorUseGpu
+                                     && particleSystem.particles().size()
+                                            > kLargeStructureFactorParticleThreshold;
+    if (viewerState.structureFactorUseGpu)
+    {
+        bool gpuFinished = false;
+        if (renderStructureFactorPreviewGpu(settings, simulationBox, particleSystem,
+                                            structureFactorResources,
+                                            viewerState.structureFactorDataRevision,
+                                            viewerState.structureFactorComputeRevision,
+                                            viewerState.structureFactorGpuBatchRowsPerStep,
+                                            gpuFinished,
+                                            gpuError,
+                                            shaderLoader))
+        {
+            const auto gpuEndTime = std::chrono::steady_clock::now();
+            const float stepMilliseconds =
+                std::chrono::duration<float, std::milli>(gpuEndTime - gpuStartTime).count();
+            if (batchGpuComputation)
+            {
+                structureFactorResources.gpuBatchAccumulatedMilliseconds += stepMilliseconds;
+                structureFactorResources.computeMilliseconds =
+                    structureFactorResources.gpuBatchAccumulatedMilliseconds;
+                if (!gpuFinished)
+                {
+                    const uint16_t completedRows = structureFactorResources.gpuBatchNextRow;
+                    structureFactorResources.statusText =
+                        "Structure factor GPU batching: "
+                        + std::to_string(completedRows)
+                        + "/" + std::to_string(settings.previewSize)
+                        + " rows (latest step "
+                        + std::to_string(stepMilliseconds) + " ms).";
+                    viewerState.structureFactorDirty = true;
+                    viewerState.structureFactorPendingCompute = true;
+                    return;
+                }
+            }
+            else
+            {
+                structureFactorResources.computeMilliseconds = stepMilliseconds;
+            }
+
+            structureFactorResources.statusText.clear();
+            logStructureFactorRenderUpdate(structureFactorResources, true,
+                                           lowResDuringInteraction, settings.previewSize, gpuError);
+            viewerState.structureFactorDirty = false;
+            viewerState.structureFactorPendingCompute = false;
+            return;
+        }
+    }
+    else
+    {
+        gpuError = "disabled by the Use GPU toggle";
+    }
+
+    const bool batchCpuComputation = !viewerState.structureFactorUseGpu
+                                     && particleSystem.particles().size()
+                                            > kLargeStructureFactorParticleThreshold;
+    if (batchCpuComputation)
+    {
+        if (!viewerState.structureFactorBatchState.active
+            || viewerState.structureFactorBatchState.computeRevision
+                   != viewerState.structureFactorComputeRevision)
+        {
+            std::string batchBeginError;
+            if (!beginStructureFactorBatch(particleSystem, simulationBox, settings,
+                                           viewerState.structureFactorComputeRevision,
+                                           viewerState.structureFactorBatchState,
+                                           batchBeginError))
+            {
+                destroyStructureFactorResources(structureFactorResources);
+                structureFactorResources.statusText = batchBeginError;
+                viewerState.structureFactorDirty = true;
+                viewerState.structureFactorPendingCompute = false;
+                return;
+            }
+        }
+
+        StructureFactorImage image;
+        bool finished = false;
+        float stepMilliseconds = 0.0f;
+        std::string batchStepError;
+        if (!advanceStructureFactorBatch(settings,
+                                         viewerState.structureFactorBatchModesPerStep,
+                                         viewerState.structureFactorBatchState,
+                                         image,
+                                         finished,
+                                         stepMilliseconds,
+                                         batchStepError))
+        {
+            viewerState.structureFactorBatchState = {};
+            destroyStructureFactorResources(structureFactorResources);
+            structureFactorResources.statusText = batchStepError;
+            viewerState.structureFactorDirty = true;
+            viewerState.structureFactorPendingCompute = false;
+            return;
+        }
+
+        const uint32_t totalModes =
+            static_cast<uint32_t>(viewerState.structureFactorBatchState.uniqueModes.size());
+        const uint32_t completedModes =
+            viewerState.structureFactorBatchState.nextModeIndex;
+        structureFactorResources.computeMilliseconds =
+            viewerState.structureFactorBatchState.accumulatedComputeMilliseconds;
+        structureFactorResources.particleCount = viewerState.structureFactorBatchState.particleCount;
+
+        if (!finished)
+        {
+            structureFactorResources.statusText =
+                "Structure factor batching: " + std::to_string(completedModes)
+                + "/" + std::to_string(totalModes)
+                + " mode samples (latest step "
+                + std::to_string(stepMilliseconds) + " ms).";
+            viewerState.structureFactorDirty = true;
+            viewerState.structureFactorPendingCompute = true;
+            return;
+        }
+
+        if (!updateStructureFactorTexture(structureFactorResources,
+                                          image.width, image.height, image.rgba8Pixels))
+        {
+            structureFactorResources.statusText =
+                structureFactorResources.disableReason.empty()
+                    ? "Failed to upload the structure factor image texture."
+                    : structureFactorResources.disableReason;
+            viewerState.structureFactorDirty = true;
+            viewerState.structureFactorPendingCompute = false;
+            return;
+        }
+
+        structureFactorResources.computeMilliseconds = image.computeMilliseconds;
+        structureFactorResources.particleCount = image.particleCount;
+        structureFactorResources.statusText.clear();
+        logStructureFactorRenderUpdate(structureFactorResources, false,
+                                       lowResDuringInteraction, settings.previewSize, gpuError);
+        viewerState.structureFactorDirty = false;
+        viewerState.structureFactorPendingCompute = false;
+        return;
+    }
+
+    viewerState.structureFactorBatchState = {};
+
+    StructureFactorImage image;
+    std::string error;
+    if (!computeStructureFactorImage(particleSystem, simulationBox, settings, image, error))
+    {
+        destroyStructureFactorResources(structureFactorResources);
+        structureFactorResources.statusText = error;
+        viewerState.structureFactorDirty = true;
+        viewerState.structureFactorPendingCompute = false;
+        return;
+    }
+
+    if (!updateStructureFactorTexture(structureFactorResources,
+                                      image.width, image.height, image.rgba8Pixels))
+    {
+        structureFactorResources.statusText =
+            structureFactorResources.disableReason.empty()
+                ? "Failed to upload the structure factor image texture."
+                : structureFactorResources.disableReason;
+        viewerState.structureFactorDirty = true;
+        viewerState.structureFactorPendingCompute = false;
+        return;
+    }
+
+    structureFactorResources.computeMilliseconds = image.computeMilliseconds;
+    structureFactorResources.particleCount = image.particleCount;
+    if (viewerState.structureFactorUseGpu
+        && !gpuError.empty()
+        && gpuError != "disabled by the Use GPU toggle")
+    {
+        structureFactorResources.statusText =
+            "Warning: rendered the structure factor on the CPU because the GPU path was unavailable: "
+            + gpuError;
+    }
+    else
+    {
+        structureFactorResources.statusText.clear();
+    }
+    logStructureFactorRenderUpdate(structureFactorResources, false,
+                                   lowResDuringInteraction, settings.previewSize, gpuError);
+    viewerState.structureFactorDirty = false;
+    viewerState.structureFactorPendingCompute = false;
 }

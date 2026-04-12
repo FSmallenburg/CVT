@@ -32,6 +32,7 @@ target_include_directories(implot PUBLIC
 target_link_libraries(implot PUBLIC bx)
 
 add_executable(cvt
+    src/AnalysisSupport.cpp
     src/AppBootstrap.cpp
     src/ColorPalette.cpp
     src/SceneRenderSupport.cpp
