@@ -2,7 +2,6 @@
 
 CVT is a bgfx/GLFW-based viewer for colloid and particle trajectory files. This is still somewhat experimental, but feel free to try it out. A set of sample configuration files are given in the TestInputFiles folder.
 
-© 2026 Frank Smallenburg. Released under the [MIT License](LICENSE).
 
 ## Quick start
 
@@ -241,3 +240,5 @@ Install GLFW development files and make sure CMake can find either:
 
 - a `glfw` / `glfw3` CMake target, or
 - `glfw3` through `pkg-config`
+
+© 2026 Frank Smallenburg. Released under the [MIT License](LICENSE).
