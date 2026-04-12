@@ -19,6 +19,7 @@ snapshot_*.png
 out/store/
 *.msix
 *.msixupload
+Assets.local/
 
 *.pfx
 *.cer
