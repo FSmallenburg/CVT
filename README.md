@@ -49,10 +49,13 @@ Compile the runtime shaders before the first run:
 ./compileshaders.sh
 ```
 
-> **Note:** `compileshaders.sh` requires a `shaderc` binary. It searches
-> `third_party/bgfx.cmake/bgfx/tools/bin/<platform>/shaderc` and
-> `third_party/bgfx.cmake/bgfx/.build/*/bin/shaderc*` automatically. You can also
-> set the `SHADERC` environment variable to an explicit path.
+> **Note:** `compileshaders.sh` needs a `shaderc` binary to compile the shaders.
+> It searches several known locations automatically (including the project build
+> directories and `third_party/bgfx.cmake/bgfx/tools/bin/<platform>/shaderc`).
+> If `shaderc` is not found, the script will build it automatically from
+> `third_party/bgfx.cmake` into `build-shaderc/` using CMake — no manual bgfx
+> tool build is required. You can override the binary path with the `SHADERC`
+> environment variable.
 
 ---
 
@@ -140,7 +143,7 @@ cmake --build --preset build-mingw-release
 ### Notes
 
 - The current Windows preference order is **OpenGL**, then **Direct3D11**.
-- Make sure your bgfx libraries were built for the same MinGW toolchain and architecture as CVT.
+- bgfx is compiled automatically as part of the CMake build; no separate bgfx build step is needed.
 
 ---
 
@@ -178,25 +181,26 @@ cmake --build --preset build-macos-release
 You can still configure manually if needed:
 
 ```bash
-cmake -S . -B build-mac -G Ninja \
+cmake -S . -B build-mac-release -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$(brew --prefix)"
-cmake --build build-mac
+cmake --build build-mac-release
 ```
 
 On Apple Silicon, set the architecture explicitly if needed:
 
 ```bash
-cmake -S . -B build-mac -G Ninja \
+cmake -S . -B build-mac-release -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
   -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake --build build-mac-release
 ```
 
 ### Run
 
 ```bash
-./build-mac/cvt TestInputFiles/polydisperse.osph
+./build-mac-release/cvt TestInputFiles/polydisperse.osph
 ```
 
 ### Notes
