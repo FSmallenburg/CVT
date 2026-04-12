@@ -55,7 +55,7 @@
                 "CMAKE_PREFIX_PATH": "C:/msys64/mingw64"
             },
             "environment": {
-                "PATH": "C:/msys64/mingw64/bin;$penv{PATH}",
+                "PATH": "C:/msys64/usr/bin;C:/msys64/mingw64/bin;$penv{PATH}",
                 "PKG_CONFIG_PATH": "C:/msys64/mingw64/lib/pkgconfig;C:/msys64/mingw64/share/pkgconfig",
                 "PKG_CONFIG_SYSTEM_LIBRARY_PATH": "C:/msys64/mingw64/lib",
                 "PKG_CONFIG_SYSTEM_INCLUDE_PATH": "C:/msys64/mingw64/include"
@@ -80,7 +80,7 @@
                 "CMAKE_PREFIX_PATH": "C:/msys64/mingw64"
             },
             "environment": {
-                "PATH": "C:/msys64/mingw64/bin;$penv{PATH}",
+                "PATH": "C:/msys64/usr/bin;C:/msys64/mingw64/bin;$penv{PATH}",
                 "PKG_CONFIG_PATH": "C:/msys64/mingw64/lib/pkgconfig;C:/msys64/mingw64/share/pkgconfig",
                 "PKG_CONFIG_SYSTEM_LIBRARY_PATH": "C:/msys64/mingw64/lib",
                 "PKG_CONFIG_SYSTEM_INCLUDE_PATH": "C:/msys64/mingw64/include"

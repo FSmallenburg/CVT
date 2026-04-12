@@ -113,3 +113,27 @@ target_link_libraries(cvt PRIVATE
 if(GLFW_TARGET)
     target_link_libraries(cvt PRIVATE ${GLFW_TARGET})
 endif()
+
+option(CVT_BUILD_SHADERS "Compile runtime shaders as part of the build" ON)
+
+if(CVT_BUILD_SHADERS)
+    if(WIN32)
+        find_program(CVT_BASH_EXECUTABLE NAMES bash.exe bash HINTS C:/msys64/usr/bin)
+    else()
+        find_program(CVT_BASH_EXECUTABLE NAMES bash sh)
+    endif()
+
+    if(CVT_BASH_EXECUTABLE)
+        add_custom_target(cvt-shaders
+            COMMAND ${CVT_BASH_EXECUTABLE} ${CMAKE_SOURCE_DIR}/compileshaders.sh
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Compiling runtime shaders"
+            VERBATIM
+        )
+        add_dependencies(cvt cvt-shaders)
+    else()
+        message(WARNING
+            "CVT_BUILD_SHADERS is ON but no bash/sh executable was found. "
+            "Build will continue without shader compilation; run compileshaders.sh manually.")
+    endif()
+endif()

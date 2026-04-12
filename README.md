@@ -12,7 +12,7 @@ git clone --recurse-submodules <repo-url>
 cd CVT
 ```
 
-1. **Compile the runtime shaders**:
+1. **Compile the runtime shaders** (optional if you build with CMake; shaders are compiled automatically during `cmake --build`):
 
 ```bash
 ./compileshaders.sh
@@ -50,7 +50,7 @@ git pull --recurse-submodules
 git submodule update --init --recursive
 ```
 
-Compile the runtime shaders before the first run:
+Compile the runtime shaders manually before the first run only if you are not using the CMake build targets:
 
 ```bash
 ./compileshaders.sh

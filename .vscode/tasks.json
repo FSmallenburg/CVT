@@ -4,14 +4,20 @@
     {
       "label": "configure-debug",
       "type": "shell",
-      "command": "cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug",
+      "command": "cmake --preset debug",
+      "windows": {
+        "command": "cmake --preset mingw-debug"
+      },
       "problemMatcher": [],
       "detail": "Configure the Debug build directory"
     },
     {
       "label": "build-debug",
       "type": "shell",
-      "command": "cmake --build build-debug",
+      "command": "cmake --build --preset debug",
+      "windows": {
+        "command": "cmake --build --preset build-mingw-debug"
+      },
       "group": "build",
       "problemMatcher": ["$gcc"],
       "dependsOn": ["configure-debug"],
@@ -20,14 +26,20 @@
     {
       "label": "configure-release",
       "type": "shell",
-      "command": "cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release",
+      "command": "cmake --preset release",
+      "windows": {
+        "command": "cmake --preset mingw-release"
+      },
       "problemMatcher": [],
       "detail": "Configure the Release build directory"
     },
     {
       "label": "build-release",
       "type": "shell",
-      "command": "cmake --build build-release",
+      "command": "cmake --build --preset release",
+      "windows": {
+        "command": "cmake --build --preset build-mingw-release"
+      },
       "problemMatcher": ["$gcc"],
       "dependsOn": ["configure-release"],
       "detail": "Build the Release configuration"

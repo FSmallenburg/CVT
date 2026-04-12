@@ -104,9 +104,13 @@ build_shaderc() {
 			echo "${candidate}"
 			return 0
 		fi
+		if [[ "${candidate}" != *.exe && -x "${candidate}.exe" ]]; then
+			echo "${candidate}.exe"
+			return 0
+		fi
 	done
 
-	candidate=$(find "${bgfx_shaderc_build_dir}" -type f \( -name shaderc -o -name shadercRelease -o -name shadercDebug \) 2>/dev/null | head -1 || true)
+	candidate=$(find "${bgfx_shaderc_build_dir}" -type f \( -name shaderc -o -name shadercRelease -o -name shadercDebug -o -name shaderc.exe -o -name shadercRelease.exe -o -name shadercDebug.exe \) 2>/dev/null | head -1 || true)
 	if [[ -n "${candidate}" && -x "${candidate}" ]]; then
 		echo "${candidate}"
 		return 0
