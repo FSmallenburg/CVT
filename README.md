@@ -1,6 +1,6 @@
 # Colloid Visualization Tool (CVT)
 
-CVT is a bgfx/GLFW-based viewer for colloid and particle trajectory files.
+CVT is a bgfx/GLFW-based viewer for colloid and particle trajectory files. This is still somewhat experimental, but feel free to try it out. A set of sample configuration files are given in the TestInputFiles folder.
 
 © 2026 Frank Smallenburg. Released under the [MIT License](LICENSE).
 
@@ -24,6 +24,12 @@ Then build CVT using the preset for your platform:
 - **Linux:** `cmake --preset debug` then `cmake --build --preset debug`
 - **Windows (MSYS2 MinGW64):** `cmake --preset mingw-debug` then `cmake --build --preset build-mingw-debug`
 - **macOS:** `cmake --preset macos-debug` then `cmake --build --preset build-macos-debug`
+
+## Documentation
+
+- [Command-line usage](docs/command-line-usage.md)
+- [GUI usage and file dropping](docs/gui-usage.md)
+- [Supported file formats and syntax](docs/file-formats.md)
 
 
 
