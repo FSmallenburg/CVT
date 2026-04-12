@@ -1,5 +1,6 @@
 #include "AppBootstrap.h"
 #include "ArrowType.h"
+#include "ViewerConfig.h"
 #include "ColorPalette.h"
 #include "CubeType.h"
 #include "CylinderType.h"
@@ -385,6 +386,9 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
                                      const ParticleSystem &particleSystem,
                                      StructureFactorResources &structureFactorResources,
                                      uint32_t particleDataRevision,
+                                     uint32_t batchRevision,
+                                     uint16_t batchRowsPerStep,
+                                     bool &finished,
                                      std::string &error);
 
 int particleTypeHotkeyIndex(int key)
@@ -1327,20 +1331,52 @@ void updateStructureFactorPreview(ViewerState &viewerState,
 
     const auto gpuStartTime = std::chrono::steady_clock::now();
     std::string gpuError;
+        const bool batchGpuComputation = viewerState.structureFactorUseGpu
+                          && particleSystem.particles().size()
+                              > kLargeStructureFactorParticleThreshold;
     if (viewerState.structureFactorUseGpu)
     {
+        bool gpuFinished = false;
         if (renderStructureFactorPreviewGpu(settings, simulationBox, particleSystem,
                                             structureFactorResources,
                                             viewerState.structureFactorDataRevision,
+                                            viewerState.structureFactorComputeRevision,
+                                            viewerState.structureFactorGpuBatchRowsPerStep,
+                                            gpuFinished,
                                             gpuError))
         {
             const auto gpuEndTime = std::chrono::steady_clock::now();
-            structureFactorResources.computeMilliseconds =
+            const float stepMilliseconds =
                 std::chrono::duration<float, std::milli>(gpuEndTime - gpuStartTime).count();
+            if (batchGpuComputation)
+            {
+                structureFactorResources.gpuBatchAccumulatedMilliseconds += stepMilliseconds;
+                structureFactorResources.computeMilliseconds =
+                    structureFactorResources.gpuBatchAccumulatedMilliseconds;
+                if (!gpuFinished)
+                {
+                    const uint16_t completedRows = structureFactorResources.gpuBatchNextRow;
+                    structureFactorResources.statusText =
+                        "Structure factor GPU batching: "
+                        + std::to_string(completedRows)
+                        + "/" + std::to_string(settings.previewSize)
+                        + " rows (latest step "
+                        + std::to_string(stepMilliseconds) + " ms).";
+                    viewerState.structureFactorDirty = true;
+                    viewerState.structureFactorPendingCompute = true;
+                    return;
+                }
+            }
+            else
+            {
+                structureFactorResources.computeMilliseconds = stepMilliseconds;
+            }
+
             structureFactorResources.statusText.clear();
             logStructureFactorRenderUpdate(structureFactorResources, true,
                                            lowResDuringInteraction, settings.previewSize, gpuError);
             viewerState.structureFactorDirty = false;
+            viewerState.structureFactorPendingCompute = false;
             return;
         }
     }
@@ -1349,6 +1385,92 @@ void updateStructureFactorPreview(ViewerState &viewerState,
         gpuError = "disabled by the Use GPU toggle";
     }
 
+        const bool batchCpuComputation = !viewerState.structureFactorUseGpu
+                          && particleSystem.particles().size()
+                              > kLargeStructureFactorParticleThreshold;
+    if (batchCpuComputation)
+    {
+        if (!viewerState.structureFactorBatchState.active
+            || viewerState.structureFactorBatchState.computeRevision
+                   != viewerState.structureFactorComputeRevision)
+        {
+            std::string batchBeginError;
+            if (!beginStructureFactorBatch(particleSystem, simulationBox, settings,
+                                           viewerState.structureFactorComputeRevision,
+                                           viewerState.structureFactorBatchState,
+                                           batchBeginError))
+            {
+                destroyStructureFactorResources(structureFactorResources);
+                structureFactorResources.statusText = batchBeginError;
+                viewerState.structureFactorDirty = true;
+                viewerState.structureFactorPendingCompute = false;
+                return;
+            }
+        }
+
+        StructureFactorImage image;
+        bool finished = false;
+        float stepMilliseconds = 0.0f;
+        std::string batchStepError;
+        if (!advanceStructureFactorBatch(settings,
+                                         viewerState.structureFactorBatchModesPerStep,
+                                         viewerState.structureFactorBatchState,
+                                         image,
+                                         finished,
+                                         stepMilliseconds,
+                                         batchStepError))
+        {
+            viewerState.structureFactorBatchState = {};
+            destroyStructureFactorResources(structureFactorResources);
+            structureFactorResources.statusText = batchStepError;
+            viewerState.structureFactorDirty = true;
+            viewerState.structureFactorPendingCompute = false;
+            return;
+        }
+
+        const uint32_t totalModes =
+            static_cast<uint32_t>(viewerState.structureFactorBatchState.uniqueModes.size());
+        const uint32_t completedModes = viewerState.structureFactorBatchState.nextModeIndex;
+        structureFactorResources.computeMilliseconds =
+            viewerState.structureFactorBatchState.accumulatedComputeMilliseconds;
+        structureFactorResources.particleCount = viewerState.structureFactorBatchState.particleCount;
+
+        if (!finished)
+        {
+            structureFactorResources.statusText =
+                "Structure factor batching: " + std::to_string(completedModes)
+                + "/" + std::to_string(totalModes)
+                + " mode samples (latest step "
+                + std::to_string(stepMilliseconds) + " ms).";
+            viewerState.structureFactorDirty = true;
+            viewerState.structureFactorPendingCompute = true;
+            return;
+        }
+
+        if (!updateStructureFactorTexture(structureFactorResources,
+                                          image.width, image.height, image.rgba8Pixels))
+        {
+            structureFactorResources.statusText =
+                structureFactorResources.disableReason.empty()
+                    ? "Failed to upload the structure factor image texture."
+                    : structureFactorResources.disableReason;
+            viewerState.structureFactorDirty = true;
+            viewerState.structureFactorPendingCompute = false;
+            return;
+        }
+
+        structureFactorResources.computeMilliseconds = image.computeMilliseconds;
+        structureFactorResources.particleCount = image.particleCount;
+        structureFactorResources.statusText.clear();
+        logStructureFactorRenderUpdate(structureFactorResources, false,
+                                       lowResDuringInteraction, settings.previewSize, gpuError);
+        viewerState.structureFactorDirty = false;
+        viewerState.structureFactorPendingCompute = false;
+        return;
+    }
+
+    viewerState.structureFactorBatchState = {};
+
     StructureFactorImage image;
     std::string error;
     if (!computeStructureFactorImage(particleSystem, simulationBox, settings, image, error))
@@ -1356,6 +1478,7 @@ void updateStructureFactorPreview(ViewerState &viewerState,
         destroyStructureFactorResources(structureFactorResources);
         structureFactorResources.statusText = error;
         viewerState.structureFactorDirty = true;
+        viewerState.structureFactorPendingCompute = false;
         return;
     }
 
@@ -1367,6 +1490,7 @@ void updateStructureFactorPreview(ViewerState &viewerState,
                 ? "Failed to upload the structure factor image texture."
                 : structureFactorResources.disableReason;
         viewerState.structureFactorDirty = true;
+        viewerState.structureFactorPendingCompute = false;
         return;
     }
 
@@ -1387,6 +1511,7 @@ void updateStructureFactorPreview(ViewerState &viewerState,
     logStructureFactorRenderUpdate(structureFactorResources, false,
                                    lowResDuringInteraction, settings.previewSize, gpuError);
     viewerState.structureFactorDirty = false;
+    viewerState.structureFactorPendingCompute = false;
 }
 
 bool usesPeriodicNeighborGrid(const ViewerState &viewerState,
@@ -1677,6 +1802,8 @@ bool ensureStructureFactorGpuResources(StructureFactorResources &structureFactor
         bgfx::createUniform("u_sfParams2", bgfx::UniformType::Vec4);
     structureFactorResources.rotationUniform =
         bgfx::createUniform("u_sfRotation", bgfx::UniformType::Vec4, 3);
+    structureFactorResources.batchParamsUniform =
+        bgfx::createUniform("u_sfBatchParams", bgfx::UniformType::Vec4);
     structureFactorResources.colorParamsUniform =
         bgfx::createUniform("u_sfColorParams", bgfx::UniformType::Vec4);
     structureFactorResources.colorRangeUniform =
@@ -1806,9 +1933,13 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
                                      const ParticleSystem &particleSystem,
                                      StructureFactorResources &structureFactorResources,
                                      uint32_t particleDataRevision,
+                                     uint32_t batchRevision,
+                                     uint16_t batchRowsPerStep,
+                                     bool &finished,
                                      std::string &error)
 {
     error.clear();
+    finished = false;
 
     if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
     {
@@ -1883,6 +2014,23 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
         return false;
     }
 
+    const bool shouldBatch = particleCount > kLargeStructureFactorParticleThreshold;
+    if (!shouldBatch)
+    {
+        structureFactorResources.gpuBatchActive = false;
+        structureFactorResources.gpuBatchRevision = 0u;
+        structureFactorResources.gpuBatchNextRow = 0u;
+        structureFactorResources.gpuBatchAccumulatedMilliseconds = 0.0f;
+    }
+    else if (!structureFactorResources.gpuBatchActive
+             || structureFactorResources.gpuBatchRevision != batchRevision)
+    {
+        structureFactorResources.gpuBatchActive = true;
+        structureFactorResources.gpuBatchRevision = batchRevision;
+        structureFactorResources.gpuBatchNextRow = 0u;
+        structureFactorResources.gpuBatchAccumulatedMilliseconds = 0.0f;
+    }
+
     const float params0[4] = {
         float(particleTextureWidth),
         float(particleTextureHeight),
@@ -1924,17 +2072,49 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
         0.0f,
     };
 
+    const uint16_t batchStartRow = shouldBatch
+                                       ? structureFactorResources.gpuBatchNextRow
+                                       : 0u;
+    const uint16_t clampedRowsPerStep =
+        static_cast<uint16_t>(std::max<uint16_t>(batchRowsPerStep, 1u));
+    const uint16_t batchRowCount = shouldBatch
+                                       ? std::min<uint16_t>(
+                                             clampedRowsPerStep,
+                                             static_cast<uint16_t>(settings.previewSize
+                                                                   - batchStartRow))
+                                       : settings.previewSize;
+    const bool firstBatchStep = !shouldBatch || batchStartRow == 0u;
+    const float batchOffsetX = 0.0f;
+    const float batchOffsetY = shouldBatch
+                                   ? float(batchStartRow) / float(settings.previewSize)
+                                   : 0.0f;
+    const float batchScaleX = 1.0f;
+    const float batchScaleY = shouldBatch
+                                  ? float(batchRowCount) / float(settings.previewSize)
+                                  : 1.0f;
+    const float batchParams[4] = {
+        batchOffsetX,
+        batchOffsetY,
+        batchScaleX,
+        batchScaleY,
+    };
+
     bgfx::setViewName(kStructureFactorView, "StructureFactorCompute");
-    bgfx::setViewRect(kStructureFactorView, 0, 0,
-                      structureFactorResources.width, structureFactorResources.height);
+    bgfx::setViewRect(kStructureFactorView, 0,
+                      batchStartRow,
+                      structureFactorResources.width,
+                      batchRowCount);
     bgfx::setViewFrameBuffer(kStructureFactorView, structureFactorResources.intensityFrameBuffer);
     bgfx::setViewTransform(kStructureFactorView, nullptr, nullptr);
-    bgfx::setViewClear(kStructureFactorView, BGFX_CLEAR_COLOR, 0x000000ff);
+    bgfx::setViewClear(kStructureFactorView,
+                       firstBatchStep ? BGFX_CLEAR_COLOR : BGFX_CLEAR_NONE,
+                       0x000000ff);
 
     bgfx::setUniform(structureFactorResources.params0Uniform, params0);
     bgfx::setUniform(structureFactorResources.params1Uniform, params1);
     bgfx::setUniform(structureFactorResources.params2Uniform, params2);
     bgfx::setUniform(structureFactorResources.rotationUniform, rotation, 3);
+    bgfx::setUniform(structureFactorResources.batchParamsUniform, batchParams);
     bgfx::setTexture(0, structureFactorResources.particleDataSampler,
                      structureFactorResources.particleDataTexture);
     submitStructureFactorFullscreenTriangle(kStructureFactorView,
@@ -1955,6 +2135,26 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
 
     structureFactorResources.particleCount = particleCount;
     structureFactorResources.enabled = true;
+    if (shouldBatch)
+    {
+        structureFactorResources.gpuBatchNextRow =
+            static_cast<uint16_t>(batchStartRow + batchRowCount);
+        if (structureFactorResources.gpuBatchNextRow >= settings.previewSize)
+        {
+            structureFactorResources.gpuBatchActive = false;
+            structureFactorResources.gpuBatchRevision = 0u;
+            structureFactorResources.gpuBatchNextRow = 0u;
+            finished = true;
+        }
+        else
+        {
+            finished = false;
+        }
+    }
+    else
+    {
+        finished = true;
+    }
     return true;
 }
 
@@ -2051,12 +2251,22 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             state->structureFactorInteractionLowResActive = false;
             markBondDiagramViewDirty(*state);
             markStructureFactorDirty(*state);
+            if (state->structureFactorPanelOpen
+                && structureFactorAllowsAutomaticUpdates(state->structureFactorUpdateMode))
+            {
+                state->structureFactorPendingCompute = true;
+            }
             markPickBufferDirty(*state);
             break;
         case GLFW_KEY_LEFT:
             if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, 0.0f, 0.5f * bx::kPi, 0.0f);
+                if (state->structureFactorPanelOpen
+                    && structureFactorAllowsAutomaticUpdates(state->structureFactorUpdateMode))
+                {
+                    state->structureFactorPendingCompute = true;
+                }
                 markPickBufferDirty(*state);
             }
             else if ((mods & GLFW_MOD_SHIFT) != 0)
@@ -2072,6 +2282,11 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, 0.0f, -0.5f * bx::kPi, 0.0f);
+                if (state->structureFactorPanelOpen
+                    && structureFactorAllowsAutomaticUpdates(state->structureFactorUpdateMode))
+                {
+                    state->structureFactorPendingCompute = true;
+                }
                 markPickBufferDirty(*state);
             }        
             else if ((mods & GLFW_MOD_SHIFT) != 0)
@@ -2087,6 +2302,11 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, 0.5f * bx::kPi, 0.0f, 0.0f);
+                if (state->structureFactorPanelOpen
+                    && structureFactorAllowsAutomaticUpdates(state->structureFactorUpdateMode))
+                {
+                    state->structureFactorPendingCompute = true;
+                }
                 markPickBufferDirty(*state);
             }
             break;
@@ -2094,6 +2314,11 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             if ((mods & GLFW_MOD_CONTROL) != 0)
             {
                 applySceneRotation(*state, -0.5f * bx::kPi, 0.0f, 0.0f);
+                if (state->structureFactorPanelOpen
+                    && structureFactorAllowsAutomaticUpdates(state->structureFactorUpdateMode))
+                {
+                    state->structureFactorPendingCompute = true;
+                }
                 markPickBufferDirty(*state);
             }
             break;
@@ -2368,11 +2593,22 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
             {
                 state->structureFactorInteractionLowResActive = false;
                 if (state->structureFactorPanelOpen
-                    && state->structureFactorAutoUpdate
+                    && structureFactorAllowsAutomaticUpdates(state->structureFactorUpdateMode)
                     && state->structureFactorDirty)
                 {
                     state->structureFactorPendingCompute = true;
                 }
+            }
+            else if (state->structureFactorPanelOpen
+                     && state->structureFactorDirty
+                     && state->rightMouseDown == false
+                     && state->leftMouseDown == false
+                     && state->leftDragActive == false
+                     && state->leftTranslateMode == false
+                     && state->structureFactorUpdateMode
+                            == StructureFactorUpdateMode::UpdateWhenStationary)
+            {
+                state->structureFactorPendingCompute = true;
             }
         }
     }
@@ -2396,11 +2632,22 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
             {
                 state->structureFactorInteractionLowResActive = false;
                 if (state->structureFactorPanelOpen
-                    && state->structureFactorAutoUpdate
+                    && structureFactorAllowsAutomaticUpdates(state->structureFactorUpdateMode)
                     && state->structureFactorDirty)
                 {
                     state->structureFactorPendingCompute = true;
                 }
+            }
+            else if (state->structureFactorPanelOpen
+                     && state->structureFactorDirty
+                     && state->rightMouseDown == false
+                     && state->leftMouseDown == false
+                     && state->leftDragActive == false
+                     && state->leftTranslateMode == false
+                     && state->structureFactorUpdateMode
+                            == StructureFactorUpdateMode::UpdateWhenStationary)
+            {
+                state->structureFactorPendingCompute = true;
             }
         }
     }
@@ -2557,8 +2804,11 @@ static bool openTrajectoryFile(const std::string &path,
     markPickBufferDirty(viewerState);
     destroyStructureFactorResources(structureFactorResources);
     markStructureFactorDirty(viewerState);
-    viewerState.structureFactorAutoUpdate =
-        particleSystem.particles().size() <= kLargeStructureFactorParticleThreshold;
+    viewerState.structureFactorUpdateMode =
+        particleSystem.particles().size() <= kLargeStructureFactorParticleThreshold
+            ? StructureFactorUpdateMode::UpdateAlways
+            : StructureFactorUpdateMode::UpdateWhenStationary;
+    viewerState.structureFactorBatchState = {};
     viewerState.structureFactorPendingCompute = false;
     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
     viewerState.fileOpenStatusMessage.clear();
@@ -2633,8 +2883,10 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         markAllHelperSystemsDirty(viewerState);
         markPickBufferDirty(viewerState);
         viewerState.structureFactorInteractionLowResActive = false;
+        viewerState.structureFactorBatchState = {};
         viewerState.structureFactorPendingCompute =
-            viewerState.structureFactorPanelOpen && viewerState.structureFactorAutoUpdate;
+            viewerState.structureFactorPanelOpen
+            && structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode);
         return;
     }
 
@@ -2804,7 +3056,6 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         updateStructureFactorPreview(viewerState, simulationBox,
                                      particleSystem, structureFactorResources);
-        viewerState.structureFactorPendingCompute = false;
     }
 
     if (viewerState.pendingDescribeSelection)
@@ -3172,6 +3423,22 @@ int main(int argc, char **argv)
     ScreenshotCallback screenshotCallback;
     int exitCode = 0;
     s_resourceSearchRoots = buildResourceSearchRoots(argc > 0 ? argv[0] : nullptr);
+
+    {
+        const fs::path configPath = resolveResourcePath("cvt.ini");
+        if (!configPath.empty())
+        {
+            const ViewerConfig config = loadViewerConfig(configPath);
+            viewerState.showUi                              = config.showUi;
+            viewerState.showBox                             = config.showBox;
+            viewerState.basicControlsDefaultOpen            = config.basicControlsOpen;
+            viewerState.lightingLevelIndex                  = static_cast<uint8_t>(config.lightingLevel);
+            viewerState.structureFactorUseGpu               = config.structureFactorUseGpu;
+            viewerState.structureFactorSuppressCentralPeak  = config.structureFactorSuppressCentralPeak;
+            viewerState.structureFactorBatchModesPerStep    = config.structureFactorCpuModesPerStep;
+            viewerState.structureFactorGpuBatchRowsPerStep  = config.structureFactorGpuRowsPerStep;
+        }
+    }
 
     glfwSetErrorCallback(glfw_errorCallback);
     GlfwLibraryGuard glfwGuard;

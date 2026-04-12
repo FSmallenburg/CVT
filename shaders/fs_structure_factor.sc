@@ -8,6 +8,7 @@ uniform vec4 u_sfParams0; // particle texture width, height, particle count, 1/N
 uniform vec4 u_sfParams1; // maxModeX, maxModeY, stepX, stepY
 uniform vec4 u_sfParams2; // stepZ, logScale, suppressCentralPeak, allowOutOfPlaneModes
 uniform vec4 u_sfRotation[3];
+uniform vec4 u_sfBatchParams; // uvOffsetX, uvOffsetY, uvScaleX, uvScaleY
 
 vec3 rotateScreenWaveVector(vec3 screenVector)
 {
@@ -78,8 +79,10 @@ void main()
         return;
     }
 
-    float screenModeX = (v_texcoord0.x - 0.5) * 2.0 * u_sfParams1.x;
-    float screenModeY = (0.5 - v_texcoord0.y) * 2.0 * u_sfParams1.y;
+    vec2 globalUv = vec2(u_sfBatchParams.x + v_texcoord0.x * u_sfBatchParams.z,
+                         u_sfBatchParams.y + v_texcoord0.y * u_sfBatchParams.w);
+    float screenModeX = (globalUv.x - 0.5) * 2.0 * u_sfParams1.x;
+    float screenModeY = (0.5 - globalUv.y) * 2.0 * u_sfParams1.y;
     bool suppressCentralPeak = u_sfParams2.z > 0.5;
     if (suppressCentralPeak && abs(screenModeX) < 0.5 && abs(screenModeY) < 0.5)
     {

@@ -57,6 +57,7 @@ add_executable(cvt
     src/SphereType.cpp
     src/StructureFactor.cpp
     src/TrajectoryReader.cpp
+    src/ViewerConfig.cpp
     src/ViewerSupport.cpp
     src/ViewerUi.cpp
     ${BGFX_DIR}/3rdparty/dear-imgui/imgui.cpp

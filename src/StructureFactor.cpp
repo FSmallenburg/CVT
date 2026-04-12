@@ -109,6 +109,30 @@ float structureFactorValueForIndex(const std::vector<const Particle *> &sampledP
     return logScale ? float(std::log1p(intensity)) : float(intensity);
 }
 
+float structureFactorValueForMode(const std::vector<std::array<float, 3>> &sampledPositions,
+                                  const StructureFactorModeIndex &mode,
+                                  double stepX, double stepY, double stepZ,
+                                  bool logScale)
+{
+    const double kx = stepX * double(mode.a);
+    const double ky = stepY * double(mode.b);
+    const double kz = stepZ * double(mode.c);
+
+    double sumReal = 0.0;
+    double sumImag = 0.0;
+    for (const std::array<float, 3> &position : sampledPositions)
+    {
+        const double phase = kx * double(position[0]) + ky * double(position[1])
+                             + kz * double(position[2]);
+        sumReal += std::cos(phase);
+        sumImag += std::sin(phase);
+    }
+
+    const double inverseParticleCount = 1.0 / double(sampledPositions.size());
+    const double intensity = inverseParticleCount * (sumReal * sumReal + sumImag * sumImag);
+    return logScale ? float(std::log1p(intensity)) : float(intensity);
+}
+
 std::array<float, 4> structureFactorColor(float t)
 {
     t = std::clamp(t, 0.0f, 1.0f);
@@ -218,6 +242,262 @@ std::vector<float> blurScalarImage(const std::vector<float> &values,
 }
 
 } // namespace
+
+bool beginStructureFactorBatch(const ParticleSystem &particleSystem,
+                               const SimulationBox &simulationBox,
+                               const StructureFactorSettings &settings,
+                               uint32_t computeRevision,
+                               StructureFactorBatchState &batch,
+                               std::string &error)
+{
+    error.clear();
+    batch = {};
+
+    if (settings.previewSize == 0u)
+    {
+        error = "Preview size must be at least 1 pixel.";
+        return false;
+    }
+
+    if (settings.maxModeX < 0 || settings.maxModeY < 0)
+    {
+        error = "Reciprocal-space mode limits must be non-negative.";
+        return false;
+    }
+
+    if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
+    {
+        error = "Structure factor rendering currently requires a rectangular simulation box.";
+        return false;
+    }
+
+    const bx::Vec3 boxSize = simulationBox.size();
+    const double lx = static_cast<double>(boxSize.x);
+    const double ly = static_cast<double>(boxSize.y);
+    const double lz = static_cast<double>(boxSize.z);
+    if (!(lx > 1.0e-9) || !(ly > 1.0e-9))
+    {
+        error = "Simulation box extents Lx and Ly must both be positive.";
+        return false;
+    }
+    if (settings.allowOutOfPlaneModes && !(lz > 1.0e-9))
+    {
+        error = "Simulation box extent Lz must be positive for view-aligned out-of-plane sampling.";
+        return false;
+    }
+
+    std::vector<const Particle *> sampledParticles;
+    if (!collectStructureFactorParticles(particleSystem, settings.useVisibleParticlesOnly,
+                                         sampledParticles, error))
+    {
+        return false;
+    }
+
+    batch.active = true;
+    batch.computeRevision = computeRevision;
+    batch.width = settings.previewSize;
+    batch.height = settings.previewSize;
+    batch.particleCount = sampledParticles.size();
+    batch.stepX = (2.0 * kPi) / lx;
+    batch.stepY = (2.0 * kPi) / ly;
+    batch.stepZ = settings.allowOutOfPlaneModes ? (2.0 * kPi) / lz : 0.0;
+    batch.sampledPositions.reserve(sampledParticles.size());
+    for (const Particle *particle : sampledParticles)
+    {
+        batch.sampledPositions.push_back(
+            {particle->position.x, particle->position.y, particle->position.z});
+    }
+
+    const size_t pixelCount = size_t(batch.width) * size_t(batch.height);
+    batch.pixelModeIndices.resize(pixelCount);
+    std::unordered_map<ReciprocalIndex, uint32_t, ReciprocalIndexHash> modeIndexByValue;
+    modeIndexByValue.reserve(pixelCount);
+
+    for (uint16_t pixelY = 0; pixelY < batch.height; ++pixelY)
+    {
+        const float normalizedY = batch.height > 1u
+                                      ? float(pixelY) / float(batch.height - 1u)
+                                      : 0.5f;
+        const float screenModeY = (0.5f - normalizedY) * 2.0f * float(settings.maxModeY);
+
+        for (uint16_t pixelX = 0; pixelX < batch.width; ++pixelX)
+        {
+            const float normalizedX = batch.width > 1u
+                                          ? float(pixelX) / float(batch.width - 1u)
+                                          : 0.5f;
+            const float screenModeX =
+                (normalizedX - 0.5f) * 2.0f * float(settings.maxModeX);
+
+            const bx::Vec3 screenWaveVector{
+                float(double(screenModeX) * batch.stepX),
+                float(double(screenModeY) * batch.stepY),
+                0.0f,
+            };
+            const bx::Vec3 boxWaveVector =
+                rotateScreenWaveVectorToBoxFrame(settings.sceneRotation, screenWaveVector);
+
+            ReciprocalIndex index;
+            index.a = static_cast<int>(std::lround(double(boxWaveVector.x) / batch.stepX));
+            index.b = static_cast<int>(std::lround(double(boxWaveVector.y) / batch.stepY));
+            index.c = settings.allowOutOfPlaneModes
+                          ? static_cast<int>(std::lround(double(boxWaveVector.z) / batch.stepZ))
+                          : 0;
+
+            uint32_t mappedIndex = 0u;
+            const auto existing = modeIndexByValue.find(index);
+            if (existing != modeIndexByValue.end())
+            {
+                mappedIndex = existing->second;
+            }
+            else
+            {
+                mappedIndex = static_cast<uint32_t>(batch.uniqueModes.size());
+                batch.uniqueModes.push_back({index.a, index.b, index.c});
+                modeIndexByValue.emplace(index, mappedIndex);
+            }
+
+            const size_t pixelIndex = size_t(pixelY) * size_t(batch.width) + size_t(pixelX);
+            batch.pixelModeIndices[pixelIndex] = mappedIndex;
+        }
+    }
+
+    batch.modeValues.assign(batch.uniqueModes.size(), 0.0f);
+    batch.nextModeIndex = 0u;
+    batch.accumulatedComputeMilliseconds = 0.0f;
+    return true;
+}
+
+bool advanceStructureFactorBatch(const StructureFactorSettings &settings,
+                                 uint32_t modesPerStep,
+                                 StructureFactorBatchState &batch,
+                                 StructureFactorImage &image,
+                                 bool &finished,
+                                 float &stepMilliseconds,
+                                 std::string &error)
+{
+    error.clear();
+    finished = false;
+    stepMilliseconds = 0.0f;
+
+    if (!batch.active)
+    {
+        error = "Structure-factor batch is not active.";
+        return false;
+    }
+
+    if (batch.nextModeIndex >= batch.uniqueModes.size())
+    {
+        finished = true;
+    }
+    else
+    {
+        const auto stepStart = std::chrono::steady_clock::now();
+        const uint32_t safeModesPerStep = std::max<uint32_t>(modesPerStep, 1u);
+        const uint32_t endModeIndex = std::min<uint32_t>(
+            batch.nextModeIndex + safeModesPerStep,
+            static_cast<uint32_t>(batch.uniqueModes.size()));
+
+        for (uint32_t modeIndex = batch.nextModeIndex; modeIndex < endModeIndex; ++modeIndex)
+        {
+            batch.modeValues[modeIndex] =
+                structureFactorValueForMode(batch.sampledPositions,
+                                            batch.uniqueModes[modeIndex],
+                                            batch.stepX, batch.stepY, batch.stepZ,
+                                            settings.logScale);
+        }
+
+        const auto stepEnd = std::chrono::steady_clock::now();
+        stepMilliseconds =
+            std::chrono::duration<float, std::milli>(stepEnd - stepStart).count();
+        batch.accumulatedComputeMilliseconds += stepMilliseconds;
+        batch.nextModeIndex = endModeIndex;
+        finished = batch.nextModeIndex >= batch.uniqueModes.size();
+    }
+
+    if (!finished)
+    {
+        return true;
+    }
+
+    image = {};
+    image.width = batch.width;
+    image.height = batch.height;
+    image.particleCount = batch.particleCount;
+    image.computeMilliseconds = batch.accumulatedComputeMilliseconds;
+    image.rgba8Pixels.resize(size_t(image.width) * size_t(image.height) * 4u);
+
+    float displayMin = std::numeric_limits<float>::max();
+    float displayMax = std::numeric_limits<float>::lowest();
+    bool foundRangeValue = false;
+    for (size_t modeIndex = 0u; modeIndex < batch.uniqueModes.size(); ++modeIndex)
+    {
+        const StructureFactorModeIndex &mode = batch.uniqueModes[modeIndex];
+        if (settings.suppressCentralPeak && mode.a == 0 && mode.b == 0 && mode.c == 0)
+        {
+            continue;
+        }
+
+        const float value = batch.modeValues[modeIndex];
+        displayMin = std::min(displayMin, value);
+        displayMax = std::max(displayMax, value);
+        foundRangeValue = true;
+    }
+
+    if (!foundRangeValue)
+    {
+        displayMin = 0.0f;
+        displayMax = 1.0f;
+    }
+    else if (displayMax - displayMin < 1.0e-6f)
+    {
+        displayMax = displayMin + 1.0f;
+    }
+
+    image.displayMin = displayMin;
+    image.displayMax = displayMax;
+
+    std::vector<float> normalizedValues(size_t(image.width) * size_t(image.height), 0.0f);
+    for (size_t pixelIndex = 0u; pixelIndex < normalizedValues.size(); ++pixelIndex)
+    {
+        const uint32_t modeIndex = batch.pixelModeIndices[pixelIndex];
+        const StructureFactorModeIndex &mode = batch.uniqueModes[modeIndex];
+        float value = batch.modeValues[modeIndex];
+        if (settings.suppressCentralPeak && mode.a == 0 && mode.b == 0 && mode.c == 0)
+        {
+            value = displayMin;
+        }
+
+        normalizedValues[pixelIndex] =
+            std::clamp((value - displayMin) / (displayMax - displayMin), 0.0f, 1.0f);
+    }
+
+    normalizedValues = blurScalarImage(normalizedValues, image.width, image.height,
+                                       settings.blurRadius);
+
+    const float colorRangeMin = std::clamp(settings.colorRangeMin, 0.0f, 0.99f);
+    const float colorRangeMax = std::clamp(settings.colorRangeMax,
+                                           colorRangeMin + 0.01f, 1.0f);
+
+    for (size_t sourceIndex = 0u; sourceIndex < normalizedValues.size(); ++sourceIndex)
+    {
+        const float t = std::clamp((normalizedValues[sourceIndex] - colorRangeMin)
+                                       / (colorRangeMax - colorRangeMin),
+                                   0.0f, 1.0f);
+        const std::array<float, 4> color = structureFactorColor(t);
+        const size_t pixelIndex = sourceIndex * 4u;
+        image.rgba8Pixels[pixelIndex + 0u] =
+            static_cast<uint8_t>(std::lround(color[0] * 255.0f));
+        image.rgba8Pixels[pixelIndex + 1u] =
+            static_cast<uint8_t>(std::lround(color[1] * 255.0f));
+        image.rgba8Pixels[pixelIndex + 2u] =
+            static_cast<uint8_t>(std::lround(color[2] * 255.0f));
+        image.rgba8Pixels[pixelIndex + 3u] =
+            static_cast<uint8_t>(std::lround(color[3] * 255.0f));
+    }
+
+    batch.active = false;
+    return true;
+}
 
 bool computeStructureFactorImage(const ParticleSystem &particleSystem,
                                  const SimulationBox &simulationBox,

@@ -48,6 +48,31 @@ struct StructureFactorGpuParticleData
     std::vector<float> rgba32fPixels;
 };
 
+struct StructureFactorModeIndex
+{
+    int a = 0;
+    int b = 0;
+    int c = 0;
+};
+
+struct StructureFactorBatchState
+{
+    bool active = false;
+    uint32_t computeRevision = 0u;
+    uint16_t width = 0;
+    uint16_t height = 0;
+    size_t particleCount = 0u;
+    double stepX = 0.0;
+    double stepY = 0.0;
+    double stepZ = 0.0;
+    std::vector<std::array<float, 3>> sampledPositions;
+    std::vector<StructureFactorModeIndex> uniqueModes;
+    std::vector<uint32_t> pixelModeIndices;
+    std::vector<float> modeValues;
+    uint32_t nextModeIndex = 0u;
+    float accumulatedComputeMilliseconds = 0.0f;
+};
+
 bool computeStructureFactorImage(const ParticleSystem &particleSystem,
                                  const SimulationBox &simulationBox,
                                  const StructureFactorSettings &settings,
@@ -57,3 +82,16 @@ bool buildStructureFactorGpuParticleData(const ParticleSystem &particleSystem,
                                          const StructureFactorSettings &settings,
                                          StructureFactorGpuParticleData &data,
                                          std::string &error);
+bool beginStructureFactorBatch(const ParticleSystem &particleSystem,
+                               const SimulationBox &simulationBox,
+                               const StructureFactorSettings &settings,
+                               uint32_t computeRevision,
+                               StructureFactorBatchState &batch,
+                               std::string &error);
+bool advanceStructureFactorBatch(const StructureFactorSettings &settings,
+                                 uint32_t modesPerStep,
+                                 StructureFactorBatchState &batch,
+                                 StructureFactorImage &image,
+                                 bool &finished,
+                                 float &stepMilliseconds,
+                                 std::string &error);

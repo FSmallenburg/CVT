@@ -3,6 +3,7 @@
 #include "ColorPalette.h"
 #include "ParticleSystem.h"
 #include "SimulationBox.h"
+#include "StructureFactor.h"
 #include "TrajectoryReader.h"
 
 #include <bgfx/bgfx.h>
@@ -41,6 +42,13 @@ enum class BondOrderScatterMode : uint8_t
     RawAxesQBar,
     PrincipalComponentsQ,
     PrincipalComponentsQBar,
+};
+
+enum class StructureFactorUpdateMode : uint8_t
+{
+    UpdateWhenStationary = 0,
+    UpdateAlways,
+    ManualOnly,
 };
 
 struct ParticleSizeColorStats
@@ -97,6 +105,7 @@ struct ViewerState
     bool showUi = true;
     bool showStats = false;
     bool showBox = true;
+    bool basicControlsDefaultOpen = false;
     bool patchRenderSystemsDirty = true;
     bool bondRenderSystemsDirty = true;
     bool nearestNeighborRenderSystemsDirty = true;
@@ -195,7 +204,8 @@ struct ViewerState
     bool structureFactorDirty = true;
     bool structureFactorPendingCompute = false;
     bool structureFactorPanelOpen = false;
-    bool structureFactorAutoUpdate = true;
+    StructureFactorUpdateMode structureFactorUpdateMode =
+        StructureFactorUpdateMode::UpdateAlways;
     bool structureFactorUseGpu = true;
     bool structureFactorSpecifyModeCount = false;
     bool structureFactorInteractionLowResActive = false;
@@ -210,6 +220,10 @@ struct ViewerState
     int structureFactorMaxModeX = 100;
     int structureFactorMaxModeY = 100;
     uint32_t structureFactorDataRevision = 1u;
+    uint32_t structureFactorComputeRevision = 1u;
+    uint32_t structureFactorBatchModesPerStep = 32u;
+    uint16_t structureFactorGpuBatchRowsPerStep = 16u;
+    StructureFactorBatchState structureFactorBatchState{};
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
 };
@@ -254,6 +268,7 @@ struct StructureFactorResources
     bgfx::UniformHandle params1Uniform = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle params2Uniform = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle rotationUniform = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle batchParamsUniform = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle colorParamsUniform = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle colorRangeUniform = BGFX_INVALID_HANDLE;
     uint16_t width = 0;
@@ -273,6 +288,10 @@ struct StructureFactorResources
     bool lastRenderUsedGpu = false;
     bool lastRenderWasLowRes = false;
     uint16_t lastRenderSize = 0u;
+    bool gpuBatchActive = false;
+    uint32_t gpuBatchRevision = 0u;
+    uint16_t gpuBatchNextRow = 0u;
+    float gpuBatchAccumulatedMilliseconds = 0.0f;
 };
 
 float computeCutPlaneStep(const SimulationBox &simulationBox);
@@ -289,6 +308,8 @@ void markBondDiagramGeometryDirty(ViewerState &state);
 void markBondDiagramViewDirty(ViewerState &state);
 void markBondOrderScatterDataDirty(ViewerState &state);
 void markStructureFactorDirty(ViewerState &state);
+bool structureFactorAllowsAutomaticUpdates(StructureFactorUpdateMode mode);
+bool structureFactorAllowsInteractionUpdates(StructureFactorUpdateMode mode);
 void markPickBufferDirty(ViewerState &state);
 bool hasValidPickBuffer(const ViewerState &state);
 size_t availableColorModeCount(const ViewerState &state);

@@ -75,6 +75,10 @@ void resetStructureFactorPreviewTexture(StructureFactorResources &structureFacto
     structureFactorResources.height = 0;
     structureFactorResources.enabled = false;
     structureFactorResources.disableReason.clear();
+    structureFactorResources.gpuBatchActive = false;
+    structureFactorResources.gpuBatchRevision = 0u;
+    structureFactorResources.gpuBatchNextRow = 0u;
+    structureFactorResources.gpuBatchAccumulatedMilliseconds = 0.0f;
 }
 
 }
@@ -91,7 +95,7 @@ void markAllHelperSystemsDirty(ViewerState &state)
     {
         state.structureFactorDataRevision = 1u;
     }
-    state.structureFactorDirty = true;
+    markStructureFactorDirty(state);
 }
 
 void markVisibilityDependentHelperSystemsDirty(ViewerState &state)
@@ -147,6 +151,21 @@ void markBondOrderScatterDataDirty(ViewerState &state)
 void markStructureFactorDirty(ViewerState &state)
 {
     state.structureFactorDirty = true;
+    ++state.structureFactorComputeRevision;
+    if (state.structureFactorComputeRevision == 0u)
+    {
+        state.structureFactorComputeRevision = 1u;
+    }
+}
+
+bool structureFactorAllowsAutomaticUpdates(StructureFactorUpdateMode mode)
+{
+    return mode != StructureFactorUpdateMode::ManualOnly;
+}
+
+bool structureFactorAllowsInteractionUpdates(StructureFactorUpdateMode mode)
+{
+    return mode == StructureFactorUpdateMode::UpdateAlways;
 }
 
 float computeCutPlaneStep(const SimulationBox &simulationBox)
@@ -754,6 +773,10 @@ void destroyStructureFactorResources(StructureFactorResources &structureFactorRe
     {
         bgfx::destroy(structureFactorResources.rotationUniform);
     }
+    if (bgfx::isValid(structureFactorResources.batchParamsUniform))
+    {
+        bgfx::destroy(structureFactorResources.batchParamsUniform);
+    }
     if (bgfx::isValid(structureFactorResources.colorParamsUniform))
     {
         bgfx::destroy(structureFactorResources.colorParamsUniform);
@@ -772,6 +795,7 @@ void destroyStructureFactorResources(StructureFactorResources &structureFactorRe
     structureFactorResources.params1Uniform = BGFX_INVALID_HANDLE;
     structureFactorResources.params2Uniform = BGFX_INVALID_HANDLE;
     structureFactorResources.rotationUniform = BGFX_INVALID_HANDLE;
+    structureFactorResources.batchParamsUniform = BGFX_INVALID_HANDLE;
     structureFactorResources.colorParamsUniform = BGFX_INVALID_HANDLE;
     structureFactorResources.colorRangeUniform = BGFX_INVALID_HANDLE;
     structureFactorResources.particleTextureWidth = 0;
@@ -787,6 +811,10 @@ void destroyStructureFactorResources(StructureFactorResources &structureFactorRe
     structureFactorResources.lastRenderUsedGpu = false;
     structureFactorResources.lastRenderWasLowRes = false;
     structureFactorResources.lastRenderSize = 0u;
+    structureFactorResources.gpuBatchActive = false;
+    structureFactorResources.gpuBatchRevision = 0u;
+    structureFactorResources.gpuBatchNextRow = 0u;
+    structureFactorResources.gpuBatchAccumulatedMilliseconds = 0.0f;
 }
 
 bool createStructureFactorRenderTarget(StructureFactorResources &structureFactorResources,
@@ -971,9 +999,14 @@ void applySceneRotation(ViewerState &state, float angleX, float angleY, float an
     const bool interactiveRotation =
         (state.leftMouseDown && state.leftDragActive && !state.leftTranslateMode)
         || state.rightMouseDown;
-    if (interactiveRotation && state.structureFactorAutoUpdate)
+    if (interactiveRotation
+        && structureFactorAllowsInteractionUpdates(state.structureFactorUpdateMode))
     {
         state.structureFactorInteractionLowResActive = true;
+        if (state.structureFactorPanelOpen)
+        {
+            state.structureFactorPendingCompute = true;
+        }
     }
     else if (!interactiveRotation)
     {

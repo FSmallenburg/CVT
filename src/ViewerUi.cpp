@@ -613,6 +613,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
     ImGui::Separator();
 
+    ImGui::SetNextItemOpen(viewerState.basicControlsDefaultOpen, ImGuiCond_Once);
     if (ImGui::CollapsingHeader("Basic controls"))
     {
         if (ImGui::Checkbox("Show simulation box (b)", &viewerState.showBox))
@@ -964,7 +965,8 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         if (viewerState.structureFactorPanelOpen)
         {
             const bool structureFactorPanelJustOpened = !wasStructureFactorPanelOpen;
-            if (structureFactorPanelJustOpened && viewerState.structureFactorDirty)
+            if (structureFactorPanelJustOpened && viewerState.structureFactorDirty
+                && structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode))
             {
                 viewerState.structureFactorInteractionLowResActive = false;
                 viewerState.structureFactorPendingCompute = true;
@@ -974,6 +976,23 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             const bool isLargeStructureFactorSystem =
                 structureFactorParticleCount > kLargeStructureFactorParticleThreshold;
 
+            if (structureFactorResources != nullptr && structureFactorResources->enabled
+                && bgfx::isValid(structureFactorResources->colorTexture))
+            {
+                ImGui::Text("Last compute: %.1f ms using %zu particles",
+                            structureFactorResources->computeMilliseconds,
+                            structureFactorResources->particleCount);
+                const float sofqImageSize = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                ImGui::Image(structureFactorResources->colorTexture,
+                             ImVec2(sofqImageSize, sofqImageSize));
+            }
+            else if (structureFactorResources != nullptr
+                     && !structureFactorResources->disableReason.empty())
+            {
+                ImGui::TextWrapped("Structure factor unavailable: %s",
+                                   structureFactorResources->disableReason.c_str());
+            }
+
             if (ImGui::Button("Compute structure factor"))
             {
                 viewerState.structureFactorInteractionLowResActive = false;
@@ -981,14 +1000,60 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 viewerState.structureFactorPendingCompute = true;
             }
             ImGui::SameLine();
-            if (ImGui::Checkbox("Auto update##StructureFactor",
-                                &viewerState.structureFactorAutoUpdate))
+            static const char *kStructureFactorUpdateModeLabelsSmall[] = {
+                "update when stationary",
+                "update always",
+                "manual only",
+            };
+            static const StructureFactorUpdateMode kStructureFactorUpdateModesSmall[] = {
+                StructureFactorUpdateMode::UpdateWhenStationary,
+                StructureFactorUpdateMode::UpdateAlways,
+                StructureFactorUpdateMode::ManualOnly,
+            };
+            static const char *kStructureFactorUpdateModeLabelsLarge[] = {
+                "update when stationary",
+                "manual only",
+            };
+            static const StructureFactorUpdateMode kStructureFactorUpdateModesLarge[] = {
+                StructureFactorUpdateMode::UpdateWhenStationary,
+                StructureFactorUpdateMode::ManualOnly,
+            };
+
+            const char *const *updateModeLabels = isLargeStructureFactorSystem
+                                                       ? kStructureFactorUpdateModeLabelsLarge
+                                                       : kStructureFactorUpdateModeLabelsSmall;
+            const StructureFactorUpdateMode *updateModes = isLargeStructureFactorSystem
+                                                               ? kStructureFactorUpdateModesLarge
+                                                               : kStructureFactorUpdateModesSmall;
+            const int updateModeCount = isLargeStructureFactorSystem ? 2 : 3;
+            if (isLargeStructureFactorSystem
+                && viewerState.structureFactorUpdateMode == StructureFactorUpdateMode::UpdateAlways)
             {
-                if (!viewerState.structureFactorAutoUpdate)
+                viewerState.structureFactorUpdateMode =
+                    StructureFactorUpdateMode::UpdateWhenStationary;
+            }
+
+            int updateModeIndex = 0;
+            for (int modeIndex = 0; modeIndex < updateModeCount; ++modeIndex)
+            {
+                if (updateModes[modeIndex] == viewerState.structureFactorUpdateMode)
+                {
+                    updateModeIndex = modeIndex;
+                    break;
+                }
+            }
+            if (ImGui::Combo("Update mode##StructureFactor",
+                             &updateModeIndex,
+                             updateModeLabels,
+                             updateModeCount))
+            {
+                viewerState.structureFactorUpdateMode = updateModes[updateModeIndex];
+                if (!structureFactorAllowsInteractionUpdates(viewerState.structureFactorUpdateMode))
                 {
                     viewerState.structureFactorInteractionLowResActive = false;
                 }
-                else if (viewerState.structureFactorDirty)
+                if (viewerState.structureFactorDirty
+                    && structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode))
                 {
                     viewerState.structureFactorPendingCompute = true;
                 }
@@ -999,6 +1064,37 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     "For systems larger than %zu particles, structure-factor "
                     "calculations may be slow or buggy.",
                     kLargeStructureFactorParticleThreshold);
+                ImGui::TextDisabled("Large systems are automatically batched across frames.");
+            }
+
+            int batchModesPerStep = int(viewerState.structureFactorBatchModesPerStep);
+            if (ImGui::SliderInt("CPU modes per step", &batchModesPerStep, 8, 512))
+            {
+                viewerState.structureFactorBatchModesPerStep =
+                    static_cast<uint32_t>(std::clamp(batchModesPerStep, 8, 512));
+            }
+
+            int gpuBatchRowsPerStep = int(viewerState.structureFactorGpuBatchRowsPerStep);
+            if (ImGui::SliderInt("GPU rows per step", &gpuBatchRowsPerStep, 4, 128))
+            {
+                viewerState.structureFactorGpuBatchRowsPerStep =
+                    static_cast<uint16_t>(std::clamp(gpuBatchRowsPerStep, 4, 128));
+            }
+
+            if (viewerState.structureFactorBatchState.active)
+            {
+                const uint32_t totalModes =
+                    static_cast<uint32_t>(viewerState.structureFactorBatchState.uniqueModes.size());
+                const uint32_t completedModes =
+                    viewerState.structureFactorBatchState.nextModeIndex;
+                ImGui::Text("Batch progress: %u / %u", completedModes, totalModes);
+            }
+            else if (structureFactorResources != nullptr
+                     && structureFactorResources->gpuBatchActive)
+            {
+                ImGui::Text("GPU batch progress: %u / %u rows",
+                            unsigned(structureFactorResources->gpuBatchNextRow),
+                            unsigned(viewerState.structureFactorImageSize));
             }
 
             bool useGpu = viewerState.structureFactorUseGpu;
@@ -1007,7 +1103,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 viewerState.structureFactorInteractionLowResActive = false;
                 viewerState.structureFactorUseGpu = useGpu;
                 markStructureFactorDirty(viewerState);
-                if (viewerState.structureFactorAutoUpdate)
+                if (structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode))
                 {
                     viewerState.structureFactorPendingCompute = true;
                 }
@@ -1071,6 +1167,11 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     std::clamp(colorRangeMin, 0.0f, viewerState.structureFactorColorRangeMax - 0.01f);
                 markStructureFactorDirty(viewerState);
             }
+            if (ImGui::IsItemDeactivatedAfterEdit()
+                && structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode))
+            {
+                viewerState.structureFactorPendingCompute = true;
+            }
 
             float colorRangeMax = viewerState.structureFactorColorRangeMax;
             if (ImGui::SliderFloat("Maximum intensity", &colorRangeMax, 0.01f, 1.0f, "%.2f"))
@@ -1079,6 +1180,11 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 viewerState.structureFactorColorRangeMax =
                     std::clamp(colorRangeMax, viewerState.structureFactorColorRangeMin + 0.01f, 1.0f);
                 markStructureFactorDirty(viewerState);
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit()
+                && structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode))
+            {
+                viewerState.structureFactorPendingCompute = true;
             }
 
             bool logScale = viewerState.structureFactorLogScale;
@@ -1117,23 +1223,6 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             if (structureFactorResources != nullptr && !structureFactorResources->statusText.empty())
             {
                 ImGui::TextWrapped("%s", structureFactorResources->statusText.c_str());
-            }
-
-            if (structureFactorResources != nullptr && structureFactorResources->enabled
-                && bgfx::isValid(structureFactorResources->colorTexture))
-            {
-                ImGui::Text("Last compute: %.1f ms using %zu particles",
-                            structureFactorResources->computeMilliseconds,
-                            structureFactorResources->particleCount);
-                const float sofqImageSize = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
-                ImGui::Image(structureFactorResources->colorTexture,
-                             ImVec2(sofqImageSize, sofqImageSize));
-            }
-            else if (structureFactorResources != nullptr
-                     && !structureFactorResources->disableReason.empty())
-            {
-                ImGui::TextWrapped("Structure factor unavailable: %s",
-                                   structureFactorResources->disableReason.c_str());
             }
         }
 
