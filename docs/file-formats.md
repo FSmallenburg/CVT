@@ -31,7 +31,7 @@ Notes:
 - Blank lines and lines starting with # are ignored.
 - Frame header accepts either `N` or `& N`.
 - Box line accepts either:
-  - rectangular box as three floats: `Lx Ly Lz`
+  - rectangular box as three floats: `Lx Ly Lz` (even for 2D systems!)
   - spherical bounds starting with `ball`:
     - `ball originalRadius`
     - `ball originalRadius currentRadius`
@@ -43,6 +43,8 @@ All particle lines begin with:
 ```text
 <label> <x> <y> <z> ...
 ```
+
+Note that a z-coordinate is expected to be present even for 2D files!
 
 ### .sph and .dsk
 
@@ -95,6 +97,7 @@ Rules:
 
 Rules:
 
+- This will show as regular polygons in 2D. One vertex is always along the positive x-axis.
 - sideCount must be between 3 and 65535.
 
 ### .ptc (patchy)
