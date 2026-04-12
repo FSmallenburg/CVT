@@ -2,6 +2,8 @@
 
 CVT is a bgfx/GLFW-based viewer for colloid and particle trajectory files.
 
+© 2026 Frank Smallenburg. Released under the [MIT License](LICENSE).
+
 ## Quick start
 
 For a typical fresh setup:
