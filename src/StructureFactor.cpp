@@ -55,6 +55,7 @@ bx::Vec3 rotateScreenWaveVectorToBoxFrame(const std::array<float, 16> &rotation,
 
 bool collectStructureFactorParticles(const ParticleSystem &particleSystem,
                                      bool useVisibleParticlesOnly,
+                                     const std::array<bool, kParticlePaletteColorCount> &includedSpecies,
                                      std::vector<const Particle *> &sampledParticles,
                                      std::string &error)
 {
@@ -62,10 +63,11 @@ bool collectStructureFactorParticles(const ParticleSystem &particleSystem,
     sampledParticles.reserve(particleSystem.particles().size());
     for (const Particle &particle : particleSystem.particles())
     {
-        if (!useVisibleParticlesOnly || particle.visible)
-        {
-            sampledParticles.push_back(&particle);
-        }
+        if (useVisibleParticlesOnly && !particle.visible)
+            continue;
+        if (!includedSpecies[particleTypeIndex(particle.typeLabel)])
+            continue;
+        sampledParticles.push_back(&particle);
     }
 
     if (sampledParticles.empty())
@@ -290,6 +292,7 @@ bool beginStructureFactorBatch(const ParticleSystem &particleSystem,
 
     std::vector<const Particle *> sampledParticles;
     if (!collectStructureFactorParticles(particleSystem, settings.useVisibleParticlesOnly,
+                                         settings.includedSpecies,
                                          sampledParticles, error))
     {
         return false;
@@ -545,6 +548,7 @@ bool computeStructureFactorImage(const ParticleSystem &particleSystem,
 
     std::vector<const Particle *> sampledParticles;
     if (!collectStructureFactorParticles(particleSystem, settings.useVisibleParticlesOnly,
+                                         settings.includedSpecies,
                                          sampledParticles, error))
     {
         return false;
@@ -697,6 +701,7 @@ bool buildStructureFactorGpuParticleData(const ParticleSystem &particleSystem,
 
     std::vector<const Particle *> sampledParticles;
     if (!collectStructureFactorParticles(particleSystem, settings.useVisibleParticlesOnly,
+                                         settings.includedSpecies,
                                          sampledParticles, error))
     {
         return false;
@@ -1199,6 +1204,7 @@ void updateStructureFactorPreview(ViewerState &viewerState,
     settings.logScale = viewerState.structureFactorLogScale;
     settings.suppressCentralPeak = viewerState.structureFactorSuppressCentralPeak;
     settings.useVisibleParticlesOnly = viewerState.structureFactorUseVisibleParticlesOnly;
+    settings.includedSpecies = viewerState.structureFactorIncludedSpecies;
     settings.allowOutOfPlaneModes =
         viewerState.fileDimensionality == TrajectoryReader::Dimensionality::ThreeDimensional;
     std::copy(std::begin(viewerState.sceneRotation), std::end(viewerState.sceneRotation),

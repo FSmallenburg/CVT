@@ -1067,20 +1067,6 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 ImGui::TextDisabled("Large systems are automatically batched across frames.");
             }
 
-            int batchModesPerStep = int(viewerState.structureFactorBatchModesPerStep);
-            if (ImGui::SliderInt("CPU modes per step", &batchModesPerStep, 8, 512))
-            {
-                viewerState.structureFactorBatchModesPerStep =
-                    static_cast<uint32_t>(std::clamp(batchModesPerStep, 8, 512));
-            }
-
-            int gpuBatchRowsPerStep = int(viewerState.structureFactorGpuBatchRowsPerStep);
-            if (ImGui::SliderInt("GPU rows per step", &gpuBatchRowsPerStep, 4, 128))
-            {
-                viewerState.structureFactorGpuBatchRowsPerStep =
-                    static_cast<uint16_t>(std::clamp(gpuBatchRowsPerStep, 4, 128));
-            }
-
             if (viewerState.structureFactorBatchState.active)
             {
                 const uint32_t totalModes =
@@ -1158,6 +1144,11 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     static_cast<uint8_t>(std::clamp(blurRadius, 0, 2));
                 markStructureFactorDirty(viewerState);
             }
+            if (ImGui::IsItemDeactivatedAfterEdit()
+                && structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode))
+            {
+                viewerState.structureFactorPendingCompute = true;
+            }
 
             float colorRangeMin = viewerState.structureFactorColorRangeMin;
             if (ImGui::SliderFloat("Minimum intensity", &colorRangeMin, 0.0f, 0.99f, "%.2f"))
@@ -1214,6 +1205,47 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     viewerState.structureFactorDataRevision = 1u;
                 }
                 markStructureFactorDirty(viewerState);
+            }
+
+            if (viewerState.maxSeenParticleTypeIndex > 0u)
+            {
+                ImGui::TextUnformatted("Species included in S(k)");
+                for (uint8_t typeIndex = 0u;
+                     typeIndex <= viewerState.maxSeenParticleTypeIndex;
+                     ++typeIndex)
+                {
+                    bool included = viewerState.structureFactorIncludedSpecies[typeIndex];
+                    const char typeLabel[] = {
+                        static_cast<char>('a' + bx::min<uint8_t>(typeIndex, 25u)),
+                        '\0',
+                    };
+                    const std::string checkboxLabel = std::string(typeLabel)
+                                                      + "##SfkSpecies"
+                                                      + std::to_string(typeIndex);
+                    if (ImGui::Checkbox(checkboxLabel.c_str(), &included))
+                    {
+                        viewerState.structureFactorIncludedSpecies[typeIndex] = included;
+                        viewerState.structureFactorInteractionLowResActive = false;
+                        ++viewerState.structureFactorDataRevision;
+                        if (viewerState.structureFactorDataRevision == 0u)
+                        {
+                            viewerState.structureFactorDataRevision = 1u;
+                        }
+                        markStructureFactorDirty(viewerState);
+                        if (structureFactorAllowsAutomaticUpdates(
+                                viewerState.structureFactorUpdateMode))
+                        {
+                            viewerState.structureFactorPendingCompute = true;
+                        }
+                    }
+                    const bool continueSameLine =
+                        typeIndex < viewerState.maxSeenParticleTypeIndex
+                        && ((typeIndex + 1u) % 6u) != 0u;
+                    if (continueSameLine)
+                    {
+                        ImGui::SameLine();
+                    }
+                }
             }
 
             ImGui::Text("Status: %s",

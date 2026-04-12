@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ColorPalette.h"
 #include "ParticleSystem.h"
 #include "SimulationBox.h"
 
@@ -28,6 +29,7 @@ struct StructureFactorSettings
     bool suppressCentralPeak = true;
     bool useVisibleParticlesOnly = false;
     bool allowOutOfPlaneModes = false;
+    std::array<bool, kParticlePaletteColorCount> includedSpecies{};
     std::array<float, 16> sceneRotation{
         1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,

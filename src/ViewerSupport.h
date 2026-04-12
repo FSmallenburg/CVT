@@ -100,6 +100,7 @@ struct ViewerState
         particleTypeVisible.fill(true);
         bondOrderScatterTypeEnabled.fill(true);
         bondOrderScatterCache.enabledSpecies.fill(true);
+        structureFactorIncludedSpecies.fill(true);
     }
 
     bool showUi = true;
@@ -212,6 +213,7 @@ struct ViewerState
     bool structureFactorLogScale = true;
     bool structureFactorSuppressCentralPeak = true;
     bool structureFactorUseVisibleParticlesOnly = false;
+    std::array<bool, kParticlePaletteColorCount> structureFactorIncludedSpecies{};
     uint8_t structureFactorBlurRadius = 1u;
     float structureFactorColorRangeMin = 0.08f;
     float structureFactorColorRangeMax = 0.5f;
