@@ -580,11 +580,6 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 {
                     return setParticleError("invalid order-parameter value in ordered sphere line");
                 }
-                if (particle.orderParameters.empty())
-                {
-                    return setParticleError(
-                        "ordered sphere particles require one or more order parameters after the radius");
-                }
 
                 if (!expectedOrderParameterCount.has_value())
                 {

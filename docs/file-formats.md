@@ -58,8 +58,8 @@ All particle lines begin with:
 
 Rules:
 
-- At least one order parameter is required.
-- All particles in the same frame must provide the same number of order parameters.
+- Order parameters are optional; lines with only radius are valid.
+- If order parameters are present, all particles in the same frame must provide the same number of order parameters.
 
 ### .rod
 
@@ -75,7 +75,7 @@ or
 
 Rules:
 
-- Exactly 3 or 4 trailing numeric fields are required.
+- Exactly 3 or 4 trailing numeric fields are required after the particle coordinates.
 
 ### .cub
 
@@ -106,7 +106,19 @@ Rules:
 Rules:
 
 - Requires coreRadius, cosHalfAngle, capDiameter, and 9 rotation-matrix values.
-- Optional trailing bond ids are integers.
+- Optional trailing bond ids are integers. The number of these integers indicates the number of patches on the particle
+- For the integers, a value of -1 indicates no bond, otherwise the number indicates a bond to a different particle.
+- Patches are placed evenly around the particle. Not all patch numbers are supported.
+- Supported patch numbers and their position in the reference orientation (see src/PatchPlacement.cpp for exact placement):
+    - 1: positive z-direction
+    - 2: postive and negative z-direction
+    - 3: evenly spaced around the equator
+    - 4: tetrahedral
+    - 5: triangular bipyramid
+    - 6: octahedral
+    - 12: icosahedral
+
+
 
 ### .pat (legacy patchy)
 
@@ -117,11 +129,11 @@ Rules:
 Rules:
 
 - Uses built-in legacy defaults for core/cap size.
-- Optional trailing bond ids are integers.
+- Optional trailing bond ids are integers. (Same as .ptc format)
 
 ### .patch (patchy 2D)
 
-Same token layout as .ptc, but interpreted as planar patch placement.
+Same token layout as .ptc, but interpreted as planar patch placement. Patches are always evenly spaced around the particle circumference.
 
 ## Error reporting behavior
 
