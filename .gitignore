@@ -13,6 +13,16 @@ install_manifest.txt
 snapshot_*.png
 
 *.local.md
+*.local.ps1
+*.local.json
+
+out/store/
+*.msix
+*.msixupload
+
+*.pfx
+*.cer
+certs/
 
 third_party/bgfx/.build/
 third_party/bx/.build/

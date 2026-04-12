@@ -137,29 +137,3 @@ if(CVT_BUILD_SHADERS)
             "Build will continue without shader compilation; run compileshaders.sh manually.")
     endif()
 endif()
-
-option(CVT_INSTALL_TEST_INPUTS "Install sample input files with the app" OFF)
-
-install(TARGETS cvt
-    RUNTIME DESTINATION .
-    BUNDLE DESTINATION .
-)
-
-install(FILES
-    ${CMAKE_SOURCE_DIR}/cvt.ini
-    ${CMAKE_SOURCE_DIR}/LICENSE
-    ${CMAKE_SOURCE_DIR}/THIRD_PARTY_LICENSES
-    DESTINATION .
-)
-
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/shaders/
-    DESTINATION shaders
-    FILES_MATCHING
-    PATTERN "*.bin"
-)
-
-if(CVT_INSTALL_TEST_INPUTS)
-    install(DIRECTORY ${CMAKE_SOURCE_DIR}/TestInputFiles/
-        DESTINATION TestInputFiles
-    )
-endif()
