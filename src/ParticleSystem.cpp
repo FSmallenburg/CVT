@@ -23,10 +23,6 @@ struct PreparedRenderParticle
                                            0.0f, 0.0f, 1.0f};
     std::array<float, 4> color{1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> sizeParams{1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 16> particleTransform{1.0f, 0.0f, 0.0f, 0.0f,
-                                            0.0f, 1.0f, 0.0f, 0.0f,
-                                            0.0f, 0.0f, 1.0f, 0.0f,
-                                            0.0f, 0.0f, 0.0f, 1.0f};
     uint32_t id = 0u;
     bool hasOrientationMatrix = false;
 };
@@ -218,7 +214,6 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
         m_instanceDataPerPart.resize(parts.size());
     }
 
-    const bool reuseParticleTransform = parts.size() > 1u;
     std::vector<PreparedRenderParticle> preparedParticles;
     preparedParticles.reserve(m_particles.size());
 
@@ -261,13 +256,6 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
             }
         }
 
-        transformParticle.position = prepared.position;
-        transformParticle.rotation = prepared.rotation;
-        transformParticle.direction = prepared.direction;
-        transformParticle.orientationMatrix = prepared.orientationMatrix;
-        transformParticle.hasOrientationMatrix = prepared.hasOrientationMatrix;
-        m_particleType->buildParticleTransform(transformParticle, prepared.particleTransform.data());
-
         preparedParticles.push_back(prepared);
     }
 
@@ -299,17 +287,8 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
 
             float *instanceBase = instanceData.data() + visibleCount * kInstanceFloatCount;
             float *outTransform = instanceBase;
-            if (reuseParticleTransform)
-            {
-                m_particleType->buildPartTransformFromParticleTransform(
-                    transformParticle, prepared.particleTransform.data(), parentTransform,
-                    partIndex, outTransform);
-            }
-            else
-            {
-                m_particleType->buildPartTransform(transformParticle, parentTransform, partIndex,
-                                                   outTransform);
-            }
+            m_particleType->buildPartTransform(transformParticle, parentTransform, partIndex,
+                                               outTransform);
 
             std::array<float, 4> visibleColor =
                 usePickColors ? encodeParticleIdColor(prepared.id) : prepared.color;
