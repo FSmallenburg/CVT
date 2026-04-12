@@ -1332,6 +1332,70 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         ImGui::Unindent();
     }
 
+    ImGui::Spacing();
+    ImGui::SetNextItemOpen(false, ImGuiCond_Once);
+    if (ImGui::CollapsingHeader("Keyboard commands"))
+    {
+        if (ImGui::BeginTabBar("##KeyboardCommandsTabs"))
+        {
+            if (ImGui::BeginTabItem("Reference"))
+            {
+                ImGui::TextUnformatted("Global");
+                ImGui::BulletText("F1: Toggle stats");
+                ImGui::BulletText("F2 or Shift+U: Toggle controls panel");
+                ImGui::BulletText("Q or Esc: Quit");
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted("View and timeline");
+                ImGui::BulletText("Enter or Numpad Enter: Reset view rotation");
+                ImGui::BulletText("Ctrl + Arrow keys: Rotate view by 90 degrees");
+                ImGui::BulletText("Left/Right: Previous/next frame");
+                ImGui::BulletText("Shift + Left/Right: First/last frame");
+                ImGui::BulletText("A: Align view to selection");
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted("Rendering and modes");
+                ImGui::BulletText("B: Toggle simulation box");
+                ImGui::BulletText("W: Toggle wrap particles to box");
+                ImGui::BulletText("M: Cycle color mode");
+                ImGui::BulletText("Shift+M: Toggle mobility mode");
+                ImGui::BulletText("Shift+B: Toggle bond mode");
+                ImGui::BulletText("Shift+N: Toggle neighbor mode");
+                ImGui::BulletText("S: Cycle lighting level");
+                ImGui::BulletText("/ or Numpad Divide: Decrease particle size scale");
+                ImGui::BulletText("Shift+8 or Numpad Multiply: Increase particle size scale");
+                ImGui::BulletText("Shift+= or Numpad Add: Increase particle resolution");
+                ImGui::BulletText("- or Numpad Subtract: Decrease particle resolution");
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted("Selection and analysis");
+                ImGui::BulletText("H: Hide selected");
+                ImGui::BulletText("Shift+H: Reveal all particles");
+                ImGui::BulletText("U: Clear selection");
+                ImGui::BulletText("I: Invert selection");
+                ImGui::BulletText("D: Print selected IDs");
+                ImGui::BulletText("V: Print visible particle count");
+                ImGui::BulletText("E: Run overlap check");
+                ImGui::BulletText("Ctrl+B: Select particles bonded to selection");
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted("Species visibility and cut plane");
+                ImGui::BulletText("1-0 (or Numpad 1-0): Toggle species visibility");
+                ImGui::BulletText("Shift+1-0: Show only that species");
+                ImGui::BulletText(".: Step cut plane");
+                ImGui::BulletText(",: Step cut plane (opposite direction)");
+                ImGui::BulletText("Shift+.: Enable cut plane");
+                ImGui::BulletText("Shift+,: Disable cut plane");
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted("Capture");
+                ImGui::BulletText("P: Screenshot");
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+    }
+
     if (markPickDirty)
     {
         markPickBufferDirty(viewerState);
