@@ -829,6 +829,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                          static_cast<int>(colorModeLabelPointers.size())))
         {
             viewerState.colorMode = static_cast<ColorMode>(colorModeIndex);
+            viewerState.frankKasperViewModeEnabled = false;
             markColorDependentHelperSystemsDirty(viewerState);
         }
 
@@ -1055,19 +1056,14 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
             ImGui::EndDisabled();
 
-            ImGui::BeginDisabled(!viewerState.neighborAnalysisValid);
-            if (ImGui::Checkbox("Calculate Frank-Kasper bonds", 
-                               &viewerState.calculateFrankKasperBonds))
+            if (ImGui::Button("Switch to FK view mode"))
             {
-                std::cout << "ViewerUi: Checkbox toggled, calculateFrankKasperBonds = " 
-                          << viewerState.calculateFrankKasperBonds << std::endl;
-                if (viewerState.calculateFrankKasperBonds)
+                viewerState.pendingActivateFrankKasperView = true;
+                if (!viewerState.neighborAnalysisValid)
                 {
-                    std::cout << "ViewerUi: Setting pendingCalculateFrankKasperBonds to true" << std::endl;
-                    viewerState.pendingCalculateFrankKasperBonds = true;
+                    viewerState.pendingFindNeighbors = true;
                 }
             }
-            ImGui::EndDisabled();
 
             drawBondOrderScatterPanel(viewerState, particleSystem,
                                       isTwoDimensional,

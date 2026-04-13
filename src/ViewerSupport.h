@@ -148,8 +148,9 @@ struct ViewerState
     bool neighborAnalysisPanelOpen = false;
     bool pendingFindNeighbors = false;
     bool pendingRefreshAnalysisResults = false;
-    bool calculateFrankKasperBonds = false;
-    bool pendingCalculateFrankKasperBonds = false;
+    bool frankKasperBondsCached = false;
+    bool frankKasperViewModeEnabled = false;
+    bool pendingActivateFrankKasperView = false;
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     std::array<bool, kParticlePaletteColorCount> bondOrderScatterTypeEnabled{};

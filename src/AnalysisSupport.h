@@ -9,7 +9,8 @@ void applyColorMode(ParticleSystem &particleSystem,
                     ColorMode colorMode,
                     bool supportsOrientationMode,
                     bool uniformUsesOrientation,
-                    ParticleColorStatsCache &statsCache);
+                    ParticleColorStatsCache &statsCache,
+                    const ViewerState &viewerState);
 
 void computeAnalysisResults(ViewerState &viewerState,
                             ParticleSystem &particleSystem);

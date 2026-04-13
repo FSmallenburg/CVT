@@ -443,7 +443,8 @@ void applyColorMode(ParticleSystem &particleSystem,
                     ColorMode colorMode,
                     bool supportsOrientationMode,
                     bool uniformUsesOrientation,
-                    ParticleColorStatsCache &statsCache)
+                    ParticleColorStatsCache &statsCache,
+                    const ViewerState &viewerState)
 {
     std::vector<Particle> &particles = particleSystem.particles();
 
@@ -457,9 +458,43 @@ void applyColorMode(ParticleSystem &particleSystem,
 
     const std::vector<PatchyParticleData> *patchMetadata =
         particleSystem.hasPatchyMetadata() ? &particleSystem.patchyMetadata() : nullptr;
+    const std::vector<std::vector<NearestNeighborData>> *neighborLists =
+        particleSystem.hasNeighborAnalysis() ? &particleSystem.neighborAnalysis() : nullptr;
+    const bool useFrankKasperColoring =
+        viewerState.frankKasperViewModeEnabled
+        && colorMode == ColorMode::BondCount
+        && patchMetadata != nullptr
+        && neighborLists != nullptr;
+
+    constexpr std::array<float, 4> kFrankKasperNeighbor12UnbondedColor = {
+        0.93f, 0.80f, 0.28f, 1.0f
+    };
+    constexpr std::array<float, 4> kFrankKasperUnbondedColor = {
+        0.30f, 0.30f, 0.34f, 1.0f
+    };
+
     for (size_t index = 0; index < particles.size(); ++index)
     {
         Particle &particle = particles[index];
+        if (useFrankKasperColoring && index < patchMetadata->size()
+            && index < neighborLists->size())
+        {
+            const size_t fkBondCount = (*patchMetadata)[index].bondIds.size();
+            const size_t neighborCount = (*neighborLists)[index].size();
+            if (fkBondCount == 0u)
+            {
+                particle.color = neighborCount == 12u
+                                     ? kFrankKasperNeighbor12UnbondedColor
+                                     : kFrankKasperUnbondedColor;
+            }
+            else
+            {
+                particle.color = colorFromLetter(
+                    static_cast<char>('A' + (fkBondCount % kParticlePaletteColorCount)));
+            }
+            continue;
+        }
+
         particle.color = resolveParticleColor(particle,
                                               index,
                                               colorMode,
@@ -774,6 +809,8 @@ void printSelectedBondOrderParameters(const ViewerState &viewerState,
 void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &particleSystem)
 {
     viewerState.neighborAnalysisValid = false;
+    viewerState.frankKasperBondsCached = false;
+    viewerState.frankKasperViewModeEnabled = false;
     particleSystem.clearNeighborAnalysis();
     markBondOrderScatterDataDirty(viewerState);
     markNearestNeighborRenderSystemsDirty(viewerState);
@@ -1003,11 +1040,10 @@ void findNearestNeighbors(const ViewerState &viewerState,
 void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
                                ParticleSystem &targetParticleSystem)
 {
-    std::cout << "calculateFrankKasperBonds: Starting calculation" << std::endl;
-
     if (!particleSystem.hasNeighborAnalysis())
     {
-        std::cout << "calculateFrankKasperBonds: No neighbor analysis available" << std::endl;
+        std::cout << "Frank-Kasper bonds: skipped (neighbor analysis unavailable)."
+                  << std::endl;
         return;
     }
 
@@ -1016,9 +1052,7 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
     const std::vector<Particle> &particles = particleSystem.particles();
     const size_t particleCount = particles.size();
 
-    std::cout << "calculateFrankKasperBonds: Processing " << particleCount << " particles" << std::endl;
-
-    // Initialize patchy metadata for bonding
+    // Rebuild patch metadata with FK bond connectivity.
     targetParticleSystem.clearPatchyMetadata();
     for (size_t i = 0; i < particleCount; ++i)
     {
@@ -1028,7 +1062,7 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
 
     std::vector<PatchyParticleData> &patchyMetadata = targetParticleSystem.patchyMetadata();
 
-    // Build a set of neighbors for each particle for efficient lookup
+    // Build a set of neighbors for each particle for efficient common-neighbor lookup.
     std::vector<std::unordered_set<uint32_t>> neighborSets(particleCount);
     for (size_t i = 0; i < particleCount; ++i)
     {
@@ -1038,7 +1072,7 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
         }
     }
 
-    // Find Frank-Kasper bonds: pairs with exactly 6 common neighbors
+    // Frank-Kasper criterion: bonded pair shares exactly 6 common neighbors.
     const uint32_t maxBondsPerParticle = 12u;
     std::vector<uint32_t> bondCountPerParticle(particleCount, 0u);
     uint32_t totalBondPairsCreated = 0u;
@@ -1050,13 +1084,12 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
             continue;
         }
 
-        // For each neighbor, count common neighbors
         for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
         {
             const uint32_t neighborIndex = neighbor.neighborIndex;
             if (neighborIndex <= particleIndex)
             {
-                // Only process each pair once (when particleIndex > neighborIndex)
+                // Process each unordered pair exactly once.
                 continue;
             }
 
@@ -1065,7 +1098,6 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
                 continue;
             }
 
-            // Count common neighbors
             uint32_t commonNeighborCount = 0u;
             for (uint32_t commonNeighborIndex : neighborSets[particleIndex])
             {
@@ -1075,23 +1107,18 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
                 }
             }
 
-            // If exactly 6 common neighbors, create a Frank-Kasper bond
             if (commonNeighborCount == 6u)
             {
-                // Check if both particles can still accept more bonds (limit 12 per particle)
                 if (bondCountPerParticle[particleIndex] >= maxBondsPerParticle
                     || bondCountPerParticle[neighborIndex] >= maxBondsPerParticle)
                 {
                     continue;
                 }
 
-                // Store bond in particle with lower index pointing to higher index
-                // Bond ID is the 0-based index of the neighbor particle
                 int32_t bondId = static_cast<int32_t>(neighborIndex);
                 patchyMetadata[particleIndex].bondIds.push_back(bondId);
                 ++bondCountPerParticle[particleIndex];
 
-                // Also store reverse bond: higher index particle points to lower index
                 int32_t reverseBondId = static_cast<int32_t>(particleIndex);
                 patchyMetadata[neighborIndex].bondIds.push_back(reverseBondId);
                 ++bondCountPerParticle[neighborIndex];
@@ -1101,7 +1128,7 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
         }
     }
 
-    std::cout << "calculateFrankKasperBonds: Created " << totalBondPairsCreated 
-              << " bond pairs (total " << (totalBondPairsCreated * 2) << " directed bonds)" << std::endl;
-    std::cout << "calculateFrankKasperBonds: Completed successfully" << std::endl;
+    std::cout << "Frank-Kasper bonds: " << totalBondPairsCreated
+              << " bond pairs found (" << (totalBondPairsCreated * 2u)
+              << " directed bonds)." << std::endl;
 }

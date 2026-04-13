@@ -813,6 +813,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                     (static_cast<size_t>(state->colorMode) + 1u)
                     % availableColorModeCount(*state);
                 state->colorMode = static_cast<ColorMode>(nextMode);
+                state->frankKasperViewModeEnabled = false;
                 markColorDependentHelperSystemsDirty(*state);
             }
             break;
@@ -1383,6 +1384,8 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         findNearestNeighbors(viewerState, simulationBox, particleSystem);
         viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
+        viewerState.frankKasperBondsCached = false;
+        viewerState.frankKasperViewModeEnabled = false;
         markNearestNeighborRenderSystemsDirty(viewerState);
         markBondDiagramGeometryDirty(viewerState);
         if (viewerState.neighborAnalysisValid)
@@ -1429,14 +1432,68 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         markPickBufferDirty(viewerState);
     }
 
-    if (viewerState.pendingCalculateFrankKasperBonds)
+    if (viewerState.pendingActivateFrankKasperView)
     {
-        std::cout << "main: Processing pendingCalculateFrankKasperBonds" << std::endl;
-        calculateFrankKasperBonds(particleSystem, particleSystem);
-        std::cout << "main: Marking bond systems dirty" << std::endl;
-        markBondLikeHelperSystemsDirty(viewerState);
-        markPickBufferDirty(viewerState);
-        viewerState.pendingCalculateFrankKasperBonds = false;
+        if (!viewerState.neighborAnalysisValid)
+        {
+            viewerState.pendingFindNeighbors = true;
+        }
+        else
+        {
+            if (!viewerState.frankKasperBondsCached)
+            {
+                calculateFrankKasperBonds(particleSystem, particleSystem);
+                viewerState.frankKasperBondsCached = true;
+            }
+
+            const std::vector<Particle> &particles = particleSystem.particles();
+            if (particleSystem.hasPatchyMetadata() && particleSystem.hasNeighborAnalysis())
+            {
+                const std::vector<PatchyParticleData> &patchMetadata =
+                    particleSystem.patchyMetadata();
+                const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+                    particleSystem.neighborAnalysis();
+                size_t hiddenByFkFilterCount = 0u;
+                for (size_t index = 0u;
+                     index < particles.size() && index < patchMetadata.size()
+                         && index < neighborLists.size();
+                     ++index)
+                {
+                    const size_t fkBondCount = patchMetadata[index].bondIds.size();
+                    const size_t neighborCount = neighborLists[index].size();
+                    if (fkBondCount == 0u && neighborCount != 12u)
+                    {
+                        if (viewerState.hiddenIds.insert(particles[index].id).second)
+                        {
+                            ++hiddenByFkFilterCount;
+                        }
+                    }
+                }
+
+                const bool visibilityChanged =
+                    applyParticleVisibilityFilters(particleSystem, viewerState);
+                if (hiddenByFkFilterCount > 0u || visibilityChanged)
+                {
+                    markVisibilityDependentHelperSystemsDirty(viewerState);
+                }
+
+                std::cout << "Frank-Kasper view: hid " << hiddenByFkFilterCount
+                          << " particles with 0 FK bonds and neighbor count != 12."
+                          << std::endl;
+            }
+
+            viewerState.bondModeEnabled = true;
+            viewerState.mobilityModeEnabled = false;
+            viewerState.nearestNeighborModeEnabled = false;
+            viewerState.colorMode = ColorMode::BondCount;
+            viewerState.analysisColorMode = AnalysisColorMode::Disabled;
+            viewerState.frankKasperViewModeEnabled = true;
+            viewerState.pendingActivateFrankKasperView = false;
+
+            markColorDependentHelperSystemsDirty(viewerState);
+            markBondLikeHelperSystemsDirty(viewerState);
+            markPickBufferDirty(viewerState);
+        }
     }
 
     if (!viewerState.structureFactorPanelOpen)
@@ -2104,7 +2161,7 @@ int main(int argc, char **argv)
 
             applyColorMode(particleSystem, viewerState.colorMode,
                            particleFileType == TrajectoryReader::FileType::Rod, false,
-                           viewerState.particleColorStatsCache);
+                           viewerState.particleColorStatsCache, viewerState);
             applyAnalysisColorMode(particleSystem, viewerState);
             if (viewerState.mobilitySystemDirty)
             {
@@ -2113,7 +2170,7 @@ int main(int argc, char **argv)
                 viewerState.mobilitySystemDirty = false;
             }
             applyColorMode(mobilitySystem, viewerState.colorMode, true, true,
-                           viewerState.mobilityColorStatsCache);
+                           viewerState.mobilityColorStatsCache, viewerState);
             applyAnalysisColorMode(mobilitySystem, particleSystem, viewerState);
             updateAuxiliaryRenderSystemsIfNeeded(viewerState, layout, sphereStacks,
                                                  sphereSlices, particleFileType,
