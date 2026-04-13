@@ -14,6 +14,7 @@ If a pull request changes extension detection or parsing behavior in `src/Trajec
 - .rod: Rod
 - .cub: Cube
 - .gon: Polygon
+- .voro: Convex Voronoi polyhedron
 - .ptc: Patchy
 - .pat: Patchy legacy
 - .patch: Patchy 2D
@@ -100,6 +101,24 @@ Rules:
 - This will show as regular polygons in 2D. One vertex is always along the positive x-axis.
 - sideCount must be between 3 and 65535.
 
+### .voro
+
+```text
+<label> <x> <y> <z> <size> <r00> <r01> <r02> <r10> <r11> <r12> <r20> <r21> <r22>
+```
+
+Rules:
+
+- Requires size plus 9 rotation-matrix values.
+- The base convex polyhedron is normalized to unit volume before this size factor is applied.
+- A sibling file named `voropoints.dat` must exist in the same folder as the `.voro` file.
+- `voropoints.dat` contains one or more point-set blocks:
+  - One line with integer `k`
+  - Followed by `k` lines with `x y z`
+- Each block defines one convex particle shape: the Voronoi cell of the origin with respect to that block's points.
+- Shape mapping is by particle label (case-insensitive): A/a->shape 0, B/b->shape 1, C/c->shape 2, etc., wrapping when labels exceed available shape blocks.
+- If `voropoints.dat` is missing or malformed, file open fails with an error.
+
 ### .ptc (patchy)
 
 ```text
@@ -148,6 +167,7 @@ Examples:
 - missing particle line
 - unsupported extension
 - invalid numeric token
+- missing or malformed `voropoints.dat` for `.voro`
 
 ## Validation checklist
 

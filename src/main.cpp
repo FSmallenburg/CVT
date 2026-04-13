@@ -1127,8 +1127,22 @@ static bool openTrajectoryFile(const std::string &path,
         return false;
     }
 
-    ParticleSystem loadedParticleSystem(
-        createParticleType(layout, openedTrajectory->fileType(), sphereStacks, sphereSlices));
+    std::unique_ptr<ParticleType> loadedParticleType;
+    try
+    {
+        loadedParticleType = createParticleType(layout, openedTrajectory->fileType(),
+                                                openedTrajectory->voronoiPointSets(),
+                                                sphereStacks, sphereSlices);
+    }
+    catch (const std::exception &exception)
+    {
+        viewerState.fileOpenStatusMessage = "Failed to open trajectory file: " + path
+                                            + " (" + exception.what() + ")";
+        std::cerr << viewerState.fileOpenStatusMessage << std::endl;
+        return false;
+    }
+
+    ParticleSystem loadedParticleSystem(std::move(loadedParticleType));
     SimulationBox loadedSimulationBox = simulationBox;
     if (!openedTrajectory->loadFrame(0, loadedParticleSystem, loadedSimulationBox))
     {
@@ -1535,7 +1549,12 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
 
     if (changedSphereResolution)
     {
+        const std::vector<std::vector<bx::Vec3>> emptyVoronoiPointSets;
+        const std::vector<std::vector<bx::Vec3>> &voronoiPointSets =
+            (trajectoryReader != nullptr) ? trajectoryReader->voronoiPointSets()
+                                          : emptyVoronoiPointSets;
         particleSystem.setType(createParticleType(layout, particleFileType,
+                                                  voronoiPointSets,
                                                   sphereStacks, sphereSlices));
         markAllHelperSystemsDirty(viewerState);
         markPickBufferDirty(viewerState);

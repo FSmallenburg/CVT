@@ -560,6 +560,8 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
         return "cube";
     case TrajectoryReader::FileType::Polygon:
         return "polygon";
+    case TrajectoryReader::FileType::Voronoi:
+        return "voronoi polyhedron";
     case TrajectoryReader::FileType::Patchy:
     case TrajectoryReader::FileType::PatchyLegacy:
         return "patchy";

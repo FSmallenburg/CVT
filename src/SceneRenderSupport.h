@@ -7,8 +7,10 @@
 #include "ViewerSupport.h"
 
 #include <bgfx/bgfx.h>
+#include <bx/math.h>
 
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -61,8 +63,13 @@ std::unique_ptr<ParticleType> createCubeParticleType(const bgfx::VertexLayout &l
 std::unique_ptr<ParticleType> createOctahedronParticleType(const bgfx::VertexLayout &layout);
 std::unique_ptr<ParticleType> createPolygonParticleType(const bgfx::VertexLayout &layout,
                                                         uint16_t sideCount);
+std::unique_ptr<ParticleType> createVoronoiParticleType(
+    const bgfx::VertexLayout &layout,
+    const std::vector<std::vector<bx::Vec3>> &pointSets,
+    std::string &error);
 std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layout,
                                                  TrajectoryReader::FileType fileType,
+                                                 const std::vector<std::vector<bx::Vec3>> &voronoiPointSets,
                                                  uint16_t stacks,
                                                  uint16_t slices);
 

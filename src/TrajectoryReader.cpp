@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -59,6 +60,10 @@ std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path
     {
         return TrajectoryReader::FileType::Polygon;
     }
+    if (extension == ".voro")
+    {
+        return TrajectoryReader::FileType::Voronoi;
+    }
     if (extension == ".ptc")
     {
         return TrajectoryReader::FileType::Patchy;
@@ -87,6 +92,7 @@ TrajectoryReader::Dimensionality detectDimensionality(TrajectoryReader::FileType
     case TrajectoryReader::FileType::OrderedSphere:
     case TrajectoryReader::FileType::Rod:
     case TrajectoryReader::FileType::Cube:
+    case TrajectoryReader::FileType::Voronoi:
     case TrajectoryReader::FileType::Patchy:
     case TrajectoryReader::FileType::PatchyLegacy:
         return TrajectoryReader::Dimensionality::ThreeDimensional;
@@ -199,6 +205,126 @@ bool parseIntToken(const std::string &token, int32_t &value)
     }
 }
 
+bool orthonormalizeRotationMatrix(std::array<float, 9> &matrix)
+{
+    bx::Vec3 x{matrix[0], matrix[1], matrix[2]};
+    bx::Vec3 y{matrix[3], matrix[4], matrix[5]};
+
+    const float xLength = bx::length(x);
+    const float yLength = bx::length(y);
+    if (xLength <= 1.0e-6f || yLength <= 1.0e-6f)
+    {
+        return false;
+    }
+
+    x = bx::mul(x, 1.0f / xLength);
+
+    // Remove x component from y before normalization (Gram-Schmidt).
+    y = bx::sub(y, bx::mul(x, bx::dot(y, x)));
+    const float yOrthoLength = bx::length(y);
+    if (yOrthoLength <= 1.0e-6f)
+    {
+        return false;
+    }
+    y = bx::mul(y, 1.0f / yOrthoLength);
+
+    bx::Vec3 z = bx::cross(x, y);
+    const float zLength = bx::length(z);
+    if (zLength <= 1.0e-6f)
+    {
+        return false;
+    }
+    z = bx::mul(z, 1.0f / zLength);
+
+    // Recompute y so x,y,z are exactly orthonormal and right-handed.
+    y = bx::cross(z, x);
+
+    matrix = {
+        x.x, x.y, x.z,
+        y.x, y.y, y.z,
+        z.x, z.y, z.z,
+    };
+
+    return true;
+}
+
+bool parseVoronoiPointSets(const std::string &trajectoryPath,
+                          std::vector<std::vector<bx::Vec3>> &outPointSets,
+                          std::string &error)
+{
+    outPointSets.clear();
+
+    const std::filesystem::path sourcePath(trajectoryPath);
+    const std::filesystem::path pointSetPath = sourcePath.parent_path() / "voropoints.dat";
+    std::ifstream pointSetInput(pointSetPath);
+    if (!pointSetInput)
+    {
+        error = "Missing voropoints.dat next to trajectory file: " + pointSetPath.string();
+        return false;
+    }
+
+    std::string line;
+    while (readNextDataLine(pointSetInput, line))
+    {
+        std::istringstream countStream(line);
+        size_t pointCount = 0u;
+        if (!(countStream >> pointCount) || pointCount == 0u)
+        {
+            error = "Invalid point-set size line in " + pointSetPath.string() + ": '" + line
+                    + "'";
+            return false;
+        }
+
+        std::vector<bx::Vec3> pointSet;
+        pointSet.reserve(pointCount);
+        for (size_t pointIndex = 0u; pointIndex < pointCount; ++pointIndex)
+        {
+            if (!readNextDataLine(pointSetInput, line))
+            {
+                error = "Unexpected end of " + pointSetPath.string()
+                        + " while reading point set with " + std::to_string(pointCount)
+                        + " points";
+                return false;
+            }
+
+            std::istringstream pointStream(line);
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+            if (!(pointStream >> x >> y >> z))
+            {
+                error = "Invalid Voronoi point line in " + pointSetPath.string() + ": '"
+                        + line + "'";
+                return false;
+            }
+
+            pointSet.push_back({x, y, z});
+        }
+
+        outPointSets.push_back(std::move(pointSet));
+    }
+
+    if (outPointSets.empty())
+    {
+        error = "No Voronoi point sets found in " + pointSetPath.string();
+        return false;
+    }
+
+    return true;
+}
+
+size_t voronoiShapeIndexForLabel(char label, size_t shapeCount)
+{
+    const unsigned char rawLabel = static_cast<unsigned char>(label);
+    if (std::isalpha(rawLabel) != 0)
+    {
+        const int alphaIndex = std::toupper(rawLabel) - 'A';
+        return static_cast<size_t>(std::max(alphaIndex, 0)) % shapeCount;
+    }
+
+    return static_cast<size_t>(std::toupper(rawLabel)) % shapeCount;
+}
+
 } // namespace
 
 TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
@@ -210,18 +336,27 @@ TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
         if (extension.empty())
         {
             m_error = "Unsupported trajectory file extension in " + m_path
-                      + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
+                      + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         else
         {
             m_error = "Unsupported trajectory file extension '" + extension + "' in "
-                      + m_path + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .ptc, .pat, .patch";
+                      + m_path + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         return;
     }
 
     m_fileType = *detectedFileType;
     m_dimensionality = detectDimensionality(m_fileType);
+
+    if (m_fileType == FileType::Voronoi)
+    {
+        if (!parseVoronoiPointSets(m_path, m_voronoiPointSets, m_error))
+        {
+            return;
+        }
+    }
+
     scanFrames();
 }
 
@@ -248,6 +383,11 @@ TrajectoryReader::FileType TrajectoryReader::fileType() const
 TrajectoryReader::Dimensionality TrajectoryReader::dimensionality() const
 {
     return m_dimensionality;
+}
+
+const std::vector<std::vector<bx::Vec3>> &TrajectoryReader::voronoiPointSets() const
+{
+    return m_voronoiPointSets;
 }
 
 bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSystem,
@@ -404,6 +544,11 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 }
             }
 
+            if (!orthonormalizeRotationMatrix(parsedOrientationMatrix))
+            {
+                return setParticleError("invalid Voronoi rotation matrix (degenerate)");
+            }
+
             for (size_t row = 0; row < 3u; ++row)
             {
                 for (size_t column = 0; column < 3u; ++column)
@@ -458,6 +603,60 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
             particle.sizeParams[1] = static_cast<float>(sideCount);
             particle.sizeParams[2] = 1.0f;
             particle.sizeParams[3] = 1.0f;
+        }
+        else if (m_fileType == FileType::Voronoi)
+        {
+            std::vector<std::string> tokens;
+            std::string token;
+            while (particleStream >> token)
+            {
+                tokens.push_back(token);
+            }
+
+            if (tokens.size() != 10u)
+            {
+                return setParticleError(
+                    "Voronoi particles require size followed by 9 rotation matrix values");
+            }
+
+            if (m_voronoiPointSets.empty())
+            {
+                return setParticleError("no Voronoi point sets loaded");
+            }
+
+            float scale = 1.0f;
+            if (!parseFloatToken(tokens[0], scale) || scale <= 0.0f)
+            {
+                return setParticleError("invalid Voronoi particle size");
+            }
+
+            std::array<float, 9> parsedOrientationMatrix{};
+            for (size_t matrixIndex = 0; matrixIndex < 9u; ++matrixIndex)
+            {
+                if (!parseFloatToken(tokens[1u + matrixIndex],
+                                     parsedOrientationMatrix[matrixIndex]))
+                {
+                    return setParticleError("invalid rotation matrix entry at index "
+                                            + std::to_string(matrixIndex));
+                }
+            }
+
+            for (size_t row = 0; row < 3u; ++row)
+            {
+                for (size_t column = 0; column < 3u; ++column)
+                {
+                    particle.orientationMatrix[row * 3u + column] =
+                        parsedOrientationMatrix[column * 3u + row];
+                }
+            }
+
+            const size_t shapeIndex =
+                voronoiShapeIndexForLabel(label, m_voronoiPointSets.size());
+            particle.hasOrientationMatrix = true;
+            particle.sizeParams[0] = scale;
+            particle.sizeParams[1] = scale;
+            particle.sizeParams[2] = scale;
+            particle.sizeParams[3] = static_cast<float>(shapeIndex);
         }
         else if (m_fileType == FileType::Patchy
                  || m_fileType == FileType::PatchyLegacy

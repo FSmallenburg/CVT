@@ -11,12 +11,15 @@
 #include "PolygonType.h"
 #include "RodType.h"
 #include "SphereType.h"
+#include "VoronoiCellBuilder.h"
+#include "VoronoiType.h"
 
 #include <bx/math.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <stdexcept>
 
 namespace
 {
@@ -749,8 +752,39 @@ std::unique_ptr<ParticleType> createPolygonParticleType(const bgfx::VertexLayout
     return std::make_unique<PolygonType>(layout, sideCount);
 }
 
+std::unique_ptr<ParticleType> createVoronoiParticleType(
+    const bgfx::VertexLayout &layout,
+    const std::vector<std::vector<bx::Vec3>> &pointSets,
+    std::string &error)
+{
+    if (pointSets.empty())
+    {
+        error = "No Voronoi point sets were provided.";
+        return nullptr;
+    }
+
+    std::vector<VoronoiMeshData> meshDataByShape;
+    meshDataByShape.reserve(pointSets.size());
+    for (size_t pointSetIndex = 0u; pointSetIndex < pointSets.size(); ++pointSetIndex)
+    {
+        VoronoiMeshData meshData;
+        std::string buildError;
+        if (!buildVoronoiCellMesh(pointSets[pointSetIndex], meshData, buildError))
+        {
+            error = "Failed to build Voronoi shape #" + std::to_string(pointSetIndex)
+                    + ": " + buildError;
+            return nullptr;
+        }
+        meshDataByShape.push_back(std::move(meshData));
+    }
+
+    error.clear();
+    return std::make_unique<VoronoiType>(layout, meshDataByShape);
+}
+
 std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layout,
                                                  TrajectoryReader::FileType fileType,
+                                                 const std::vector<std::vector<bx::Vec3>> &voronoiPointSets,
                                                  uint16_t stacks,
                                                  uint16_t slices)
 {
@@ -771,6 +805,18 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
     if (fileType == TrajectoryReader::FileType::Polygon)
     {
         return createPolygonParticleType(layout, 3u);
+    }
+    if (fileType == TrajectoryReader::FileType::Voronoi)
+    {
+        std::string error;
+        std::unique_ptr<ParticleType> voronoiType =
+            createVoronoiParticleType(layout, voronoiPointSets, error);
+        if (!voronoiType)
+        {
+            throw std::runtime_error(error.empty() ? "Failed to create Voronoi mesh type."
+                                                   : error);
+        }
+        return voronoiType;
     }
 
     return createSphereParticleType(layout, stacks, slices);

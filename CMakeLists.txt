@@ -58,6 +58,8 @@ add_executable(cvt
     src/SphereType.cpp
     src/StructureFactor.cpp
     src/TrajectoryReader.cpp
+    src/VoronoiCellBuilder.cpp
+    src/VoronoiType.cpp
     src/ViewerConfig.cpp
     src/ViewerSupport.cpp
     src/ViewerUi.cpp
