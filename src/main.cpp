@@ -486,13 +486,17 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
                             const std::unordered_set<uint32_t> &selectedIds,
                             const SimulationBox &simulationBox)
 {
+    const auto displayParticleId = [](uint32_t particleId) {
+        return particleId > 0u ? (particleId - 1u) : 0u;
+    };
+
     std::vector<uint32_t> sortedIds(selectedIds.begin(), selectedIds.end());
     std::sort(sortedIds.begin(), sortedIds.end());
 
     std::cout << "Selected particle IDs:";
     for (uint32_t particleId : sortedIds)
     {
-        std::cout << ' ' << particleId;
+        std::cout << ' ' << displayParticleId(particleId);
     }
     std::cout << std::endl;
 
@@ -520,9 +524,11 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
     const float centerDistance = bx::length(displacement);
     const float radiusSum = particleRadius(*firstParticle) + particleRadius(*secondParticle);
     std::cout << std::fixed << std::setprecision(6)
-              << "Center distance(" << sortedIds[0] << ", " << sortedIds[1]
+              << "Center distance(" << displayParticleId(sortedIds[0]) << ", "
+              << displayParticleId(sortedIds[1])
               << "): " << centerDistance << '\n'
-              << "Radius sum(" << sortedIds[0] << ", " << sortedIds[1]
+              << "Radius sum(" << displayParticleId(sortedIds[0]) << ", "
+              << displayParticleId(sortedIds[1])
               << "): " << radiusSum << std::endl;
 }
 
@@ -1716,16 +1722,20 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
         "Left click toggles selection. H hides selected. Shift+H reveals all.");
     if (isSphereLikeFileType(particleFileType))
     {
+        const uint32_t displayLastPickedId =
+            viewerState.lastPickedId > 0u ? (viewerState.lastPickedId - 1u) : 0u;
         bgfx::dbgTextPrintf(0, 2, 0x0f, "Selected: %d  Last pick: %u  %s: %ux%u",
-                            (int)viewerState.selectedIds.size(), viewerState.lastPickedId,
+                            (int)viewerState.selectedIds.size(), displayLastPickedId,
                             particleTypeName(particleFileType), sphereStacks, sphereSlices);
         bgfx::dbgTextPrintf(0, 3, 0x0f,
                             "Drag rotates. Shift+drag translates. A aligns to a selected pair. D/V print info.");
     }
     else
     {
+        const uint32_t displayLastPickedId =
+            viewerState.lastPickedId > 0u ? (viewerState.lastPickedId - 1u) : 0u;
         bgfx::dbgTextPrintf(0, 2, 0x0f, "Selected: %d  Last pick: %u  %s: %ux%u",
-                            (int)viewerState.selectedIds.size(), viewerState.lastPickedId,
+                            (int)viewerState.selectedIds.size(), displayLastPickedId,
                             particleTypeName(particleFileType), sphereStacks, sphereSlices);
         bgfx::dbgTextPrintf(0, 3, 0x0f,
                             "Drag rotates. Shift+drag translates. A aligns to a selected pair. D/V print info.");

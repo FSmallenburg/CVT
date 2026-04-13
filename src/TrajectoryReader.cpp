@@ -40,6 +40,10 @@ std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path
     {
         return TrajectoryReader::FileType::Sphere;
     }
+    if (extension == ".bsph")
+    {
+        return TrajectoryReader::FileType::BondedSphere;
+    }
     if (extension == ".osph")
     {
         return TrajectoryReader::FileType::OrderedSphere;
@@ -89,6 +93,7 @@ TrajectoryReader::Dimensionality detectDimensionality(TrajectoryReader::FileType
     case TrajectoryReader::FileType::Patchy2D:
         return TrajectoryReader::Dimensionality::TwoDimensional;
     case TrajectoryReader::FileType::Sphere:
+    case TrajectoryReader::FileType::BondedSphere:
     case TrajectoryReader::FileType::OrderedSphere:
     case TrajectoryReader::FileType::Rod:
     case TrajectoryReader::FileType::Cube:
@@ -336,12 +341,12 @@ TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
         if (extension.empty())
         {
             m_error = "Unsupported trajectory file extension in " + m_path
-                      + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
+                      + ". Expected one of: .sph, .bsph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         else
         {
             m_error = "Unsupported trajectory file extension '" + extension + "' in "
-                      + m_path + ". Expected one of: .sph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
+                      + m_path + ". Expected one of: .sph, .bsph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         return;
     }
@@ -789,6 +794,24 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                     return setParticleError(
                         "ordered sphere particles must all provide the same number of order parameters");
                 }
+            }
+            else if (m_fileType == FileType::BondedSphere)
+            {
+                PatchyParticleData patchData;
+                int32_t bondId = -1;
+                while (particleStream >> bondId)
+                {
+                    patchData.bondIds.push_back(bondId);
+                }
+
+                if (!particleStream.eof())
+                {
+                    return setParticleError("invalid bonded-sphere bond id token");
+                }
+
+                particleSystem.addParticle(particle);
+                particleSystem.addPatchyMetadata(patchData);
+                continue;
             }
         }
 

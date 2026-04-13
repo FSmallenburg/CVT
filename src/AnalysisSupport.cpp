@@ -780,7 +780,8 @@ void printSelectedBondOrderParameters(const ViewerState &viewerState,
 
         foundSelectedParticle = true;
         const ParticleAnalysisData &analysis = analysisResults[particleIndex];
-        std::cout << "  Particle " << particle.id
+        const uint32_t displayParticleId = particle.id > 0u ? (particle.id - 1u) : 0u;
+        std::cout << "  Particle " << displayParticleId
                   << ": nearest neighbors=" << analysis.neighborCount;
         if (isTwoDimensional)
         {

@@ -9,6 +9,7 @@ If a pull request changes extension detection or parsing behavior in `src/Trajec
 ## Supported extensions
 
 - .sph: Sphere
+- .bsph: Bonded sphere
 - .osph: Ordered sphere
 - .dsk: Disk
 - .rod: Rod
@@ -52,6 +53,18 @@ Note that a z-coordinate is expected to be present even for 2D files!
 ```text
 <label> <x> <y> <z> <radius>
 ```
+
+### .bsph
+
+```text
+<label> <x> <y> <z> <radius> [bondId ...]
+```
+
+Rules:
+
+- Identical to `.sph` for geometry and rendering as spheres.
+- Optional trailing bond ids are integers and are treated like patchy bond connectivity.
+- When bond mode is enabled, these bonds are rendered the same way as patchy bonds.
 
 ### .osph
 

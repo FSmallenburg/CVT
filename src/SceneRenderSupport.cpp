@@ -789,6 +789,7 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
                                                  uint16_t slices)
 {
     if (fileType == TrajectoryReader::FileType::Sphere
+        || fileType == TrajectoryReader::FileType::BondedSphere
         || fileType == TrajectoryReader::FileType::OrderedSphere
         || fileType == TrajectoryReader::FileType::Disk)
     {
@@ -825,6 +826,7 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
 bool isSphereLikeFileType(TrajectoryReader::FileType fileType)
 {
     return fileType == TrajectoryReader::FileType::Sphere
+           || fileType == TrajectoryReader::FileType::BondedSphere
            || fileType == TrajectoryReader::FileType::OrderedSphere
            || fileType == TrajectoryReader::FileType::Disk;
 }

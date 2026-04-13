@@ -73,6 +73,7 @@ double computePackingFraction(const ParticleSystem &particleSystem,
         switch (fileType)
         {
         case FileType::Sphere:
+        case FileType::BondedSphere:
         case FileType::OrderedSphere:
         {
             const double r = static_cast<double>(p.sizeParams[0]);
@@ -554,6 +555,8 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
         return "disk";
     case TrajectoryReader::FileType::OrderedSphere:
         return "ordered sphere";
+    case TrajectoryReader::FileType::BondedSphere:
+        return "bonded sphere";
     case TrajectoryReader::FileType::Rod:
         return "rod";
     case TrajectoryReader::FileType::Cube:
