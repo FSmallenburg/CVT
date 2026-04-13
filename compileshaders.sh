@@ -43,6 +43,10 @@ find_shaderc() {
 		"${script_dir}/build-release/shaderc"
 		"${script_dir}/build-debug/bin/shaderc"
 		"${script_dir}/build-release/bin/shaderc"
+		"${bgfx_shaderc_build_dir}/shaderc"
+		"${bgfx_shaderc_build_dir}/bin/shaderc"
+		"${bgfx_shaderc_build_dir}/bin/shadercRelease"
+		"${bgfx_shaderc_build_dir}/bin/shadercDebug"
 	)
 
 	for bgfx_candidate_bin_dir in "${bgfx_dir}"/.build/*/bin; do

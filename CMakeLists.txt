@@ -124,12 +124,68 @@ if(CVT_BUILD_SHADERS)
     endif()
 
     if(CVT_BASH_EXECUTABLE)
-        add_custom_target(cvt-shaders
+        set(CVT_SHADER_OUTPUTS
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/vs_instancing.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/fs_instancing.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/vs_picking.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/fs_picking.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/vs_lines.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/fs_lines.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/vs_structure_factor.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/fs_structure_factor.bin
+            ${CMAKE_SOURCE_DIR}/shaders/glsl/fs_structure_factor_color.bin
+        )
+
+        if(WIN32)
+            list(APPEND CVT_SHADER_OUTPUTS
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/vs_instancing.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/fs_instancing.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/vs_picking.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/fs_picking.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/vs_lines.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/fs_lines.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/vs_structure_factor.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/fs_structure_factor.bin
+                ${CMAKE_SOURCE_DIR}/shaders/dxbc/fs_structure_factor_color.bin
+            )
+        elseif(APPLE)
+            list(APPEND CVT_SHADER_OUTPUTS
+                ${CMAKE_SOURCE_DIR}/shaders/metal/vs_instancing.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/fs_instancing.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/vs_picking.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/fs_picking.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/vs_lines.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/fs_lines.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/vs_structure_factor.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/fs_structure_factor.bin
+                ${CMAKE_SOURCE_DIR}/shaders/metal/fs_structure_factor_color.bin
+            )
+        endif()
+
+        set(CVT_SHADER_STAMP ${CMAKE_CURRENT_BINARY_DIR}/cvt-shaders.stamp)
+        add_custom_command(
+            OUTPUT ${CVT_SHADER_STAMP}
             COMMAND ${CVT_BASH_EXECUTABLE} ${CMAKE_SOURCE_DIR}/compileshaders.sh
+            COMMAND ${CMAKE_COMMAND} -E touch ${CVT_SHADER_STAMP}
+            DEPENDS
+                ${CMAKE_SOURCE_DIR}/compileshaders.sh
+                ${CMAKE_SOURCE_DIR}/shaders/varying.def.sc
+                ${CMAKE_SOURCE_DIR}/shaders/vs_instancing.sc
+                ${CMAKE_SOURCE_DIR}/shaders/fs_instancing.sc
+                ${CMAKE_SOURCE_DIR}/shaders/vs_picking.sc
+                ${CMAKE_SOURCE_DIR}/shaders/fs_picking.sc
+                ${CMAKE_SOURCE_DIR}/shaders/vs_lines.sc
+                ${CMAKE_SOURCE_DIR}/shaders/fs_lines.sc
+                ${CMAKE_SOURCE_DIR}/shaders/vs_structure_factor.sc
+                ${CMAKE_SOURCE_DIR}/shaders/fs_structure_factor.sc
+                ${CMAKE_SOURCE_DIR}/shaders/fs_structure_factor_color.sc
+            BYPRODUCTS ${CVT_SHADER_OUTPUTS}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             COMMENT "Compiling runtime shaders"
             VERBATIM
         )
+
+        add_custom_target(cvt-shaders DEPENDS ${CVT_SHADER_STAMP})
         add_dependencies(cvt cvt-shaders)
     else()
         message(WARNING

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ParticleSystem.h"
+#include "SimulationBox.h"
 #include "TrajectoryReader.h"
 #include "ViewerSupport.h"
 
@@ -20,6 +21,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                         const BondDiagramResources *bondDiagramResources,
                         const StructureFactorResources *structureFactorResources,
                         TrajectoryReader::FileType particleFileType,
+                        const SimulationBox &simulationBox,
                         const std::string &loadedPath,
                         size_t currentFrame, size_t totalFrames,
                         uint16_t windowWidth, uint16_t windowHeight,

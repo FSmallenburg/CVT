@@ -2050,6 +2050,7 @@ int main(int argc, char **argv)
 
             drawViewerControls(viewerState, particleSystem, &bondDiagramResources,
                                &structureFactorResources, particleFileType,
+                               simulationBox,
                                loadedPath, currentFrame, totalFrames,
                                static_cast<uint16_t>(width), static_cast<uint16_t>(height),
                                cutPlaneMinSceneZ, cutPlaneMaxSceneZ);

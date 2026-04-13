@@ -26,6 +26,115 @@ constexpr uint16_t kMinRenderViewportWidth = 640u;
 constexpr float kMinParticleSizeScale = 0.01f;
 constexpr size_t kLargeStructureFactorParticleThreshold = 25000u;
 
+// Returns the packing fraction (volume fraction in 3D, area fraction in 2D).
+// Returns a negative value when the box has zero measure or the type is unsupported.
+double computePackingFraction(const ParticleSystem &particleSystem,
+                               const SimulationBox &simulationBox,
+                               TrajectoryReader::FileType fileType,
+                               TrajectoryReader::Dimensionality dimensionality)
+{
+    using FileType     = TrajectoryReader::FileType;
+    using Dimensionality = TrajectoryReader::Dimensionality;
+    using Shape        = SimulationBox::Shape;
+
+    const bool is2D = (dimensionality == Dimensionality::TwoDimensional);
+
+    // ---- box measure (volume or area) --------------------------------
+    double boxMeasure = 0.0;
+    if (simulationBox.shape() == Shape::Spherical)
+    {
+        const double r = static_cast<double>(simulationBox.renderRadius());
+        boxMeasure = (4.0 / 3.0) * bx::kPi * r * r * r;
+    }
+    else
+    {
+        const bx::Vec3 sz = simulationBox.size();
+        if (is2D)
+        {
+            boxMeasure = static_cast<double>(sz.x) * static_cast<double>(sz.y);
+        }
+        else
+        {
+            boxMeasure = static_cast<double>(sz.x) * static_cast<double>(sz.y)
+                         * static_cast<double>(sz.z);
+        }
+    }
+
+    if (boxMeasure <= 0.0)
+    {
+        return -1.0;
+    }
+
+    // ---- per-particle contribution -----------------------------------
+    double particleSum = 0.0;
+    for (const Particle &p : particleSystem.particles())
+    {
+        double contrib = 0.0;
+        switch (fileType)
+        {
+        case FileType::Sphere:
+        case FileType::OrderedSphere:
+        {
+            const double r = static_cast<double>(p.sizeParams[0]);
+            contrib = (4.0 / 3.0) * bx::kPi * r * r * r;
+            break;
+        }
+        case FileType::Disk:
+        {
+            const double r = static_cast<double>(p.sizeParams[0]);
+            contrib = bx::kPi * r * r;
+            break;
+        }
+        case FileType::Rod:
+        {
+            // Capsule: cylinder (radius r, length L) + two hemispherical caps (radius rcap).
+            const double r    = static_cast<double>(p.sizeParams[0]);
+            const double L    = static_cast<double>(p.sizeParams[1]);
+            const double rcap = static_cast<double>(p.sizeParams[2]);
+            contrib = bx::kPi * r * r * L + (4.0 / 3.0) * bx::kPi * rcap * rcap * rcap;
+            break;
+        }
+        case FileType::Cube:
+        {
+            const double e = static_cast<double>(p.sizeParams[0]);
+            contrib = e * e * e;
+            break;
+        }
+        case FileType::Polygon:
+        {
+            // Regular n-gon with circumradius r: area = (n * r² * sin(2π/n)) / 2
+            const double r = static_cast<double>(p.sizeParams[0]);
+            const int    n = static_cast<int>(std::round(static_cast<double>(p.sizeParams[1])));
+            if (n >= 3)
+            {
+                contrib = 0.5 * n * r * r * std::sin(2.0 * bx::kPi / n);
+            }
+            break;
+        }
+        case FileType::Patchy:
+        case FileType::PatchyLegacy:
+        {
+            // Treat as a sphere using the core radius.
+            const double r = static_cast<double>(p.sizeParams[0]);
+            contrib = (4.0 / 3.0) * bx::kPi * r * r * r;
+            break;
+        }
+        case FileType::Patchy2D:
+        {
+            // Treat as a disk using the core radius.
+            const double r = static_cast<double>(p.sizeParams[0]);
+            contrib = bx::kPi * r * r;
+            break;
+        }
+        }
+        particleSum += contrib;
+    }
+
+    return particleSum / boxMeasure;
+}
+
+
+
 int analysisColorModeComboIndex(AnalysisColorMode analysisColorMode)
 {
     switch (analysisColorMode)
@@ -555,6 +664,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                         const BondDiagramResources *bondDiagramResources,
                         const StructureFactorResources *structureFactorResources,
                         TrajectoryReader::FileType particleFileType,
+                        const SimulationBox &simulationBox,
                         const std::string &loadedPath,
                         size_t currentFrame, size_t totalFrames,
                         uint16_t windowWidth, uint16_t windowHeight,
@@ -597,6 +707,15 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
     ImGui::Text("Particle type: %s", particleTypeName(particleFileType));
     ImGui::Text("Visible: %zu", countVisibleParticles(particleSystem));
     ImGui::Text("Selected: %zu", viewerState.selectedIds.size());
+    {
+        const double phi = computePackingFraction(particleSystem, simulationBox,
+                                                   particleFileType,
+                                                   viewerState.fileDimensionality);
+        if (phi >= 0.0)
+        {
+            ImGui::Text("Packing fraction: %.4f", phi);
+        }
+    }
 
     if (totalFrames > 1)
     {
