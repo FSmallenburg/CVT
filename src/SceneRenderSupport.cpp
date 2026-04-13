@@ -977,7 +977,8 @@ void updateAuxiliaryRenderSystemsIfNeeded(ViewerState &viewerState,
         rebuildPatchRenderSystems(particleSystem, patchRenderSystems);
         viewerState.patchRenderSystemsDirty = false;
     }
-    if (isPatchyFileType(particleFileType) && viewerState.bondRenderSystemsDirty)
+    if ((isPatchyFileType(particleFileType) || particleSystem.hasPatchyMetadata()) 
+        && viewerState.bondRenderSystemsDirty)
     {
         ensureBondRenderSystems(layout, sphereStacks, sphereSlices, bondRenderSystems);
         rebuildBondRenderSystems(particleSystem, simulationBox,

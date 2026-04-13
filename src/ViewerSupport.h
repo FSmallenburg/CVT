@@ -145,8 +145,11 @@ struct ViewerState
     float neighborCutoffFactor = 1.3f;
     bool autoFindNeighbors = false;
     bool neighborAnalysisValid = false;
+    bool neighborAnalysisPanelOpen = false;
     bool pendingFindNeighbors = false;
     bool pendingRefreshAnalysisResults = false;
+    bool calculateFrankKasperBonds = false;
+    bool pendingCalculateFrankKasperBonds = false;
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     std::array<bool, kParticlePaletteColorCount> bondOrderScatterTypeEnabled{};

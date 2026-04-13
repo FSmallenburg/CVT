@@ -30,3 +30,6 @@ void invalidateNeighborAnalysis(ViewerState &viewerState,
 void findNearestNeighbors(const ViewerState &viewerState,
                           const SimulationBox &simulationBox,
                           ParticleSystem &particleSystem);
+
+void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
+                               ParticleSystem &targetParticleSystem);

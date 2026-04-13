@@ -59,7 +59,9 @@ class ParticleSystem
     std::vector<Particle> &particles();
     const std::vector<Particle> &particles() const;
     bool hasPatchyMetadata() const;
+    std::vector<PatchyParticleData> &patchyMetadata();
     const std::vector<PatchyParticleData> &patchyMetadata() const;
+    void clearPatchyMetadata();
     void clearNeighborAnalysis();
     void resizeNeighborAnalysis(size_t count);
     bool hasNeighborAnalysis() const;

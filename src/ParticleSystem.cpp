@@ -123,9 +123,19 @@ bool ParticleSystem::hasPatchyMetadata() const
     return !m_patchyMetadata.empty() && m_patchyMetadata.size() == m_particles.size();
 }
 
+std::vector<PatchyParticleData> &ParticleSystem::patchyMetadata()
+{
+    return m_patchyMetadata;
+}
+
 const std::vector<PatchyParticleData> &ParticleSystem::patchyMetadata() const
 {
     return m_patchyMetadata;
+}
+
+void ParticleSystem::clearPatchyMetadata()
+{
+    m_patchyMetadata.clear();
 }
 
 void ParticleSystem::clearNeighborAnalysis()

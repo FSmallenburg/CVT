@@ -999,3 +999,109 @@ void findNearestNeighbors(const ViewerState &viewerState,
         }
     }
 }
+
+void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
+                               ParticleSystem &targetParticleSystem)
+{
+    std::cout << "calculateFrankKasperBonds: Starting calculation" << std::endl;
+
+    if (!particleSystem.hasNeighborAnalysis())
+    {
+        std::cout << "calculateFrankKasperBonds: No neighbor analysis available" << std::endl;
+        return;
+    }
+
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const size_t particleCount = particles.size();
+
+    std::cout << "calculateFrankKasperBonds: Processing " << particleCount << " particles" << std::endl;
+
+    // Initialize patchy metadata for bonding
+    targetParticleSystem.clearPatchyMetadata();
+    for (size_t i = 0; i < particleCount; ++i)
+    {
+        PatchyParticleData patchData{};
+        targetParticleSystem.addPatchyMetadata(patchData);
+    }
+
+    std::vector<PatchyParticleData> &patchyMetadata = targetParticleSystem.patchyMetadata();
+
+    // Build a set of neighbors for each particle for efficient lookup
+    std::vector<std::unordered_set<uint32_t>> neighborSets(particleCount);
+    for (size_t i = 0; i < particleCount; ++i)
+    {
+        for (const NearestNeighborData &neighbor : neighborLists[i])
+        {
+            neighborSets[i].insert(neighbor.neighborIndex);
+        }
+    }
+
+    // Find Frank-Kasper bonds: pairs with exactly 6 common neighbors
+    const uint32_t maxBondsPerParticle = 12u;
+    std::vector<uint32_t> bondCountPerParticle(particleCount, 0u);
+    uint32_t totalBondPairsCreated = 0u;
+
+    for (size_t particleIndex = 0; particleIndex < particleCount; ++particleIndex)
+    {
+        if (neighborLists[particleIndex].empty())
+        {
+            continue;
+        }
+
+        // For each neighbor, count common neighbors
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            const uint32_t neighborIndex = neighbor.neighborIndex;
+            if (neighborIndex <= particleIndex)
+            {
+                // Only process each pair once (when particleIndex > neighborIndex)
+                continue;
+            }
+
+            if (neighborIndex >= neighborSets.size())
+            {
+                continue;
+            }
+
+            // Count common neighbors
+            uint32_t commonNeighborCount = 0u;
+            for (uint32_t commonNeighborIndex : neighborSets[particleIndex])
+            {
+                if (neighborSets[neighborIndex].contains(commonNeighborIndex))
+                {
+                    ++commonNeighborCount;
+                }
+            }
+
+            // If exactly 6 common neighbors, create a Frank-Kasper bond
+            if (commonNeighborCount == 6u)
+            {
+                // Check if both particles can still accept more bonds (limit 12 per particle)
+                if (bondCountPerParticle[particleIndex] >= maxBondsPerParticle
+                    || bondCountPerParticle[neighborIndex] >= maxBondsPerParticle)
+                {
+                    continue;
+                }
+
+                // Store bond in particle with lower index pointing to higher index
+                // Bond ID is the 0-based index of the neighbor particle
+                int32_t bondId = static_cast<int32_t>(neighborIndex);
+                patchyMetadata[particleIndex].bondIds.push_back(bondId);
+                ++bondCountPerParticle[particleIndex];
+
+                // Also store reverse bond: higher index particle points to lower index
+                int32_t reverseBondId = static_cast<int32_t>(particleIndex);
+                patchyMetadata[neighborIndex].bondIds.push_back(reverseBondId);
+                ++bondCountPerParticle[neighborIndex];
+
+                ++totalBondPairsCreated;
+            }
+        }
+    }
+
+    std::cout << "calculateFrankKasperBonds: Created " << totalBondPairsCreated 
+              << " bond pairs (total " << (totalBondPairsCreated * 2) << " directed bonds)" << std::endl;
+    std::cout << "calculateFrankKasperBonds: Completed successfully" << std::endl;
+}

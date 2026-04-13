@@ -1429,6 +1429,16 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         markPickBufferDirty(viewerState);
     }
 
+    if (viewerState.pendingCalculateFrankKasperBonds)
+    {
+        std::cout << "main: Processing pendingCalculateFrankKasperBonds" << std::endl;
+        calculateFrankKasperBonds(particleSystem, particleSystem);
+        std::cout << "main: Marking bond systems dirty" << std::endl;
+        markBondLikeHelperSystemsDirty(viewerState);
+        markPickBufferDirty(viewerState);
+        viewerState.pendingCalculateFrankKasperBonds = false;
+    }
+
     if (!viewerState.structureFactorPanelOpen)
     {
         viewerState.structureFactorPendingCompute = false;

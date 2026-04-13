@@ -8,21 +8,19 @@ CVT is a bgfx/GLFW-based viewer for colloid and particle trajectory files. This 
 For a typical fresh setup:
 
 ```bash
-git clone --recurse-submodules <repo-url>
+git clone --recurse-submodules https://github.com/FSmallenburg/CVT
 cd CVT
-```
-
-1. **Compile the runtime shaders** (optional if you build with CMake; shaders are compiled automatically during `cmake --build`):
-
-```bash
-./compileshaders.sh
 ```
 
 Then build CVT using the preset for your platform:
 
-- **Linux:** `cmake --preset debug` then `cmake --build --preset debug`
-- **Windows (MSYS2 MinGW64):** `cmake --preset mingw-debug` then `cmake --build --preset build-mingw-debug`
-- **macOS:** `cmake --preset macos-debug` then `cmake --build --preset build-macos-debug`
+- **Linux:** `cmake --preset release` then `cmake --build --preset release`
+- **Windows (MSYS2 MinGW64):** `cmake --preset mingw-release` then `cmake --build --preset build-mingw-release`
+- **macOS:** `cmake --preset macos-release` then `cmake --build --preset build-macos-release`
+
+Note that the first build may take some time.
+
+You can use `compileshaders.sh` to compile the shaders, but in principle this should happen during the cmake build.
 
 ## Documentation
 

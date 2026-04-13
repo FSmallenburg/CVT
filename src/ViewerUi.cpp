@@ -673,6 +673,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                         float cutPlaneMinSceneZ, float cutPlaneMaxSceneZ)
 {
     const bool wasStructureFactorPanelOpen = viewerState.structureFactorPanelOpen;
+    const bool wasNeighborAnalysisPanelOpen = viewerState.neighborAnalysisPanelOpen;
     viewerState.bondDiagramRenderRequested = false;
     viewerState.structureFactorPanelOpen = false;
 
@@ -908,8 +909,16 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         ImGui::Indent();
         ImGui::TextDisabled("Tools for neighbor metrics, bond diagrams, and S(k).");
 
-        if (ImGui::CollapsingHeader("Neighbor analysis"))
+        viewerState.neighborAnalysisPanelOpen = ImGui::CollapsingHeader("Neighbor analysis");
+        if (viewerState.neighborAnalysisPanelOpen)
         {
+            const bool neighborAnalysisPanelJustOpened = !wasNeighborAnalysisPanelOpen;
+            if (neighborAnalysisPanelJustOpened)
+            {
+                viewerState.autoFindNeighbors = true;
+                viewerState.pendingFindNeighbors = true;
+            }
+
             const bool isTwoDimensional =
                 viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
             const bool uses2DBondOrientationalColor =
@@ -1043,6 +1052,20 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             if (ImGui::Button("Print selected bond-order values"))
             {
                 viewerState.pendingDescribeSelectedBondOrder = true;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::BeginDisabled(!viewerState.neighborAnalysisValid);
+            if (ImGui::Checkbox("Calculate Frank-Kasper bonds", 
+                               &viewerState.calculateFrankKasperBonds))
+            {
+                std::cout << "ViewerUi: Checkbox toggled, calculateFrankKasperBonds = " 
+                          << viewerState.calculateFrankKasperBonds << std::endl;
+                if (viewerState.calculateFrankKasperBonds)
+                {
+                    std::cout << "ViewerUi: Setting pendingCalculateFrankKasperBonds to true" << std::endl;
+                    viewerState.pendingCalculateFrankKasperBonds = true;
+                }
             }
             ImGui::EndDisabled();
 
