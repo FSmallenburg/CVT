@@ -24,6 +24,22 @@ The right-side Viewer Controls panel shows:
 - Basic controls, Analysis panels, Structure factor panel, size distribution
 - Keyboard commands section (collapsed by default)
 
+## Neighbor analysis FK controls
+
+Inside the Neighbor analysis panel:
+
+- Switch to FK view mode:
+	- Computes Frank-Kasper bonds from the current neighbor graph.
+	- Enables bond rendering and switches coloring to bond-count mode.
+- Hide unbonded (!12 neighbors):
+	- Hidden until FK mode has been activated at least once.
+	- When enabled, hides particles that have zero FK bonds and whose neighbor count is not 12.
+- Auto-recalculate FK:
+	- Hidden until FK mode has been activated at least once.
+	- Enabled by default after first FK activation.
+	- When enabled, FK bonds are recomputed automatically after neighbor recomputation events
+		(for example cutoff changes or frame changes).
+
 ## Interaction basics
 
 - Left drag: rotate view

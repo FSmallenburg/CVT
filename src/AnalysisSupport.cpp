@@ -812,6 +812,8 @@ void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &partic
     viewerState.neighborAnalysisValid = false;
     viewerState.frankKasperBondsCached = false;
     viewerState.frankKasperViewModeEnabled = false;
+    viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
+    viewerState.pendingRecalculateFrankKasperBonds = false;
     particleSystem.clearNeighborAnalysis();
     markBondOrderScatterDataDirty(viewerState);
     markNearestNeighborRenderSystemsDirty(viewerState);
@@ -1043,8 +1045,6 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
 {
     if (!particleSystem.hasNeighborAnalysis())
     {
-        std::cout << "Frank-Kasper bonds: skipped (neighbor analysis unavailable)."
-                  << std::endl;
         return;
     }
 
@@ -1076,8 +1076,6 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
     // Frank-Kasper criterion: bonded pair shares exactly 6 common neighbors.
     const uint32_t maxBondsPerParticle = 12u;
     std::vector<uint32_t> bondCountPerParticle(particleCount, 0u);
-    uint32_t totalBondPairsCreated = 0u;
-
     for (size_t particleIndex = 0; particleIndex < particleCount; ++particleIndex)
     {
         if (neighborLists[particleIndex].empty())
@@ -1123,13 +1121,7 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
                 int32_t reverseBondId = static_cast<int32_t>(particleIndex);
                 patchyMetadata[neighborIndex].bondIds.push_back(reverseBondId);
                 ++bondCountPerParticle[neighborIndex];
-
-                ++totalBondPairsCreated;
             }
         }
     }
-
-    std::cout << "Frank-Kasper bonds: " << totalBondPairsCreated
-              << " bond pairs found (" << (totalBondPairsCreated * 2u)
-              << " directed bonds)." << std::endl;
 }

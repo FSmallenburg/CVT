@@ -1067,6 +1067,22 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     viewerState.pendingFindNeighbors = true;
                 }
             }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!viewerState.frankKasperViewActivatedOnce);
+            if (ImGui::Checkbox("Hide unbonded (!12 neighbors)",
+                                &viewerState.hideNonFrankKasperUnbonded))
+            {
+                viewerState.pendingToggleFrankKasperUnbondedVisibility = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!viewerState.frankKasperViewActivatedOnce);
+            if (ImGui::Checkbox("Auto-recalculate FK", &viewerState.frankKasperAutoRecalculate)
+                && viewerState.frankKasperAutoRecalculate)
+            {
+                viewerState.pendingRecalculateFrankKasperBonds = true;
+            }
+            ImGui::EndDisabled();
 
             drawBondOrderScatterPanel(viewerState, particleSystem,
                                       isTwoDimensional,

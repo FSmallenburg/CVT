@@ -337,6 +337,7 @@ constexpr uint16_t kBondDiagramPreviewSize = 192u;
 constexpr size_t kLargeStructureFactorParticleThreshold = 25000u;
 constexpr uint16_t kBondDiagramSphereStacks = 10u;
 constexpr uint16_t kBondDiagramSphereSlices = 10u;
+constexpr uint8_t kFrankKasperNeighborCountNoHide = 12u;
 float s_uiScrollX = 0.0f;
 float s_uiScrollY = 0.0f;
 
@@ -530,6 +531,86 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
               << "Radius sum(" << displayParticleId(sortedIds[0]) << ", "
               << displayParticleId(sortedIds[1])
               << "): " << radiusSum << std::endl;
+}
+
+void removeFrankKasperUnbondedVisibilityFilter(ViewerState &viewerState)
+{
+    for (uint32_t particleId : viewerState.frankKasperAutoHiddenIds)
+    {
+        viewerState.hiddenIds.erase(particleId);
+    }
+    viewerState.frankKasperAutoHiddenIds.clear();
+}
+
+void applyFrankKasperUnbondedVisibilityFilter(ViewerState &viewerState,
+                                              const ParticleSystem &particleSystem)
+{
+    removeFrankKasperUnbondedVisibilityFilter(viewerState);
+
+    if (!viewerState.hideNonFrankKasperUnbonded
+        || !particleSystem.hasPatchyMetadata()
+        || !particleSystem.hasNeighborAnalysis())
+    {
+        return;
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<PatchyParticleData> &patchMetadata = particleSystem.patchyMetadata();
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+
+    for (size_t index = 0u;
+         index < particles.size() && index < patchMetadata.size()
+             && index < neighborLists.size();
+         ++index)
+    {
+        const size_t fkBondCount = patchMetadata[index].bondIds.size();
+        const size_t neighborCount = neighborLists[index].size();
+        if (fkBondCount == 0u && neighborCount != kFrankKasperNeighborCountNoHide)
+        {
+            const uint32_t particleId = particles[index].id;
+            if (!viewerState.hiddenIds.contains(particleId))
+            {
+                viewerState.hiddenIds.insert(particleId);
+                viewerState.frankKasperAutoHiddenIds.insert(particleId);
+            }
+        }
+    }
+}
+
+void resetFrankKasperState(ViewerState &viewerState, bool resetActivationState)
+{
+    removeFrankKasperUnbondedVisibilityFilter(viewerState);
+    viewerState.frankKasperBondsCached = false;
+    viewerState.frankKasperViewModeEnabled = false;
+    viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
+    viewerState.pendingRecalculateFrankKasperBonds = false;
+    if (resetActivationState)
+    {
+        viewerState.hideNonFrankKasperUnbonded = true;
+        viewerState.frankKasperAutoRecalculate = true;
+        viewerState.frankKasperViewActivatedOnce = false;
+    }
+}
+
+bool applyFrankKasperVisibilityModeIfActive(ViewerState &viewerState,
+                                            const ParticleSystem &particleSystem)
+{
+    if (!viewerState.frankKasperViewModeEnabled)
+    {
+        return false;
+    }
+
+    if (viewerState.hideNonFrankKasperUnbonded)
+    {
+        applyFrankKasperUnbondedVisibilityFilter(viewerState, particleSystem);
+    }
+    else
+    {
+        removeFrankKasperUnbondedVisibilityFilter(viewerState);
+    }
+
+    return true;
 }
 
 } // namespace
@@ -1182,6 +1263,7 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.mobilityColorStatsCache = {};
     viewerState.selectedIds.clear();
     viewerState.hiddenIds.clear();
+    resetFrankKasperState(viewerState, true);
     viewerState.lastPickedId = 0u;
     viewerState.pendingPickRequest = false;
     viewerState.pendingPickReadback = false;
@@ -1302,7 +1384,10 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                   float cutPlaneStep, float cutPlaneMinSceneZ,
                                   float cutPlaneMaxSceneZ, int &exitCode)
 {
-    if (viewerState.autoFindNeighbors && !viewerState.neighborAnalysisValid)
+    if ((viewerState.autoFindNeighbors
+         || (viewerState.frankKasperAutoRecalculate
+             && viewerState.frankKasperViewActivatedOnce))
+        && !viewerState.neighborAnalysisValid)
     {
         viewerState.pendingFindNeighbors = true;
     }
@@ -1341,6 +1426,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     if (viewerState.pendingRevealAll)
     {
         const bool hiddenChanged = revealAllParticles(particleSystem, viewerState.hiddenIds);
+        viewerState.frankKasperAutoHiddenIds.clear();
         const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
                                                                       viewerState);
         if (hiddenChanged || visibilityChanged)
@@ -1388,10 +1474,10 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
 
     if (viewerState.pendingFindNeighbors)
     {
+        const bool wasFrankKasperViewModeEnabled = viewerState.frankKasperViewModeEnabled;
+        resetFrankKasperState(viewerState, false);
         findNearestNeighbors(viewerState, simulationBox, particleSystem);
         viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
-        viewerState.frankKasperBondsCached = false;
-        viewerState.frankKasperViewModeEnabled = false;
         markNearestNeighborRenderSystemsDirty(viewerState);
         markBondDiagramGeometryDirty(viewerState);
         if (viewerState.neighborAnalysisValid)
@@ -1412,6 +1498,19 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         }
         viewerState.pendingFindNeighbors = false;
         viewerState.pendingRefreshAnalysisResults = false;
+        if (viewerState.neighborAnalysisValid
+            && viewerState.frankKasperAutoRecalculate
+            && viewerState.frankKasperViewActivatedOnce)
+        {
+            viewerState.frankKasperViewModeEnabled = wasFrankKasperViewModeEnabled;
+            viewerState.pendingRecalculateFrankKasperBonds = true;
+        }
+        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                      viewerState);
+        if (visibilityChanged)
+        {
+            markVisibilityDependentHelperSystemsDirty(viewerState);
+        }
         markPickBufferDirty(viewerState);
     }
 
@@ -1438,6 +1537,53 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         markPickBufferDirty(viewerState);
     }
 
+    if (viewerState.pendingToggleFrankKasperUnbondedVisibility)
+    {
+        if (viewerState.frankKasperViewActivatedOnce)
+        {
+            if (applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem))
+            {
+                const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                              viewerState);
+                if (visibilityChanged)
+                {
+                    markVisibilityDependentHelperSystemsDirty(viewerState);
+                }
+                markPickBufferDirty(viewerState);
+            }
+        }
+        viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
+    }
+
+    if (viewerState.pendingRecalculateFrankKasperBonds)
+    {
+        if (!viewerState.neighborAnalysisValid)
+        {
+            viewerState.pendingFindNeighbors = true;
+        }
+        else
+        {
+            calculateFrankKasperBonds(particleSystem, particleSystem);
+            viewerState.frankKasperBondsCached = true;
+
+            if (applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem))
+            {
+                const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                              viewerState);
+                if (visibilityChanged)
+                {
+                    markVisibilityDependentHelperSystemsDirty(viewerState);
+                }
+
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+
+            markBondLikeHelperSystemsDirty(viewerState);
+            markPickBufferDirty(viewerState);
+            viewerState.pendingRecalculateFrankKasperBonds = false;
+        }
+    }
+
     if (viewerState.pendingActivateFrankKasperView)
     {
         if (!viewerState.neighborAnalysisValid)
@@ -1452,40 +1598,13 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                 viewerState.frankKasperBondsCached = true;
             }
 
-            const std::vector<Particle> &particles = particleSystem.particles();
-            if (particleSystem.hasPatchyMetadata() && particleSystem.hasNeighborAnalysis())
+            applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem);
+
+            const bool visibilityChanged =
+                applyParticleVisibilityFilters(particleSystem, viewerState);
+            if (visibilityChanged)
             {
-                const std::vector<PatchyParticleData> &patchMetadata =
-                    particleSystem.patchyMetadata();
-                const std::vector<std::vector<NearestNeighborData>> &neighborLists =
-                    particleSystem.neighborAnalysis();
-                size_t hiddenByFkFilterCount = 0u;
-                for (size_t index = 0u;
-                     index < particles.size() && index < patchMetadata.size()
-                         && index < neighborLists.size();
-                     ++index)
-                {
-                    const size_t fkBondCount = patchMetadata[index].bondIds.size();
-                    const size_t neighborCount = neighborLists[index].size();
-                    if (fkBondCount == 0u && neighborCount != 12u)
-                    {
-                        if (viewerState.hiddenIds.insert(particles[index].id).second)
-                        {
-                            ++hiddenByFkFilterCount;
-                        }
-                    }
-                }
-
-                const bool visibilityChanged =
-                    applyParticleVisibilityFilters(particleSystem, viewerState);
-                if (hiddenByFkFilterCount > 0u || visibilityChanged)
-                {
-                    markVisibilityDependentHelperSystemsDirty(viewerState);
-                }
-
-                std::cout << "Frank-Kasper view: hid " << hiddenByFkFilterCount
-                          << " particles with 0 FK bonds and neighbor count != 12."
-                          << std::endl;
+                markVisibilityDependentHelperSystemsDirty(viewerState);
             }
 
             viewerState.bondModeEnabled = true;
@@ -1494,6 +1613,8 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
             viewerState.colorMode = ColorMode::BondCount;
             viewerState.analysisColorMode = AnalysisColorMode::Disabled;
             viewerState.frankKasperViewModeEnabled = true;
+            viewerState.frankKasperViewActivatedOnce = true;
+            viewerState.frankKasperAutoRecalculate = true;
             viewerState.pendingActivateFrankKasperView = false;
 
             markColorDependentHelperSystemsDirty(viewerState);

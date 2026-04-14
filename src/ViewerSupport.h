@@ -150,7 +150,12 @@ struct ViewerState
     bool pendingRefreshAnalysisResults = false;
     bool frankKasperBondsCached = false;
     bool frankKasperViewModeEnabled = false;
+    bool frankKasperViewActivatedOnce = false;
+    bool hideNonFrankKasperUnbonded = true;
+    bool frankKasperAutoRecalculate = true;
     bool pendingActivateFrankKasperView = false;
+    bool pendingToggleFrankKasperUnbondedVisibility = false;
+    bool pendingRecalculateFrankKasperBonds = false;
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     std::array<bool, kParticlePaletteColorCount> bondOrderScatterTypeEnabled{};
@@ -160,6 +165,7 @@ struct ViewerState
     uint16_t sizeDistributionBinCount = 32u;
     std::unordered_set<uint32_t> selectedIds;
     std::unordered_set<uint32_t> hiddenIds;
+    std::unordered_set<uint32_t> frankKasperAutoHiddenIds;
     bool pendingHideSelected = false;
     bool pendingRevealAll = false;
     bool pendingOverlapCheck = false;
