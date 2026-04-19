@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -96,6 +97,35 @@ struct BondOrderScatterInteractionState
     float dragStartY = 0.0f;
 };
 
+struct RdfPairCurve
+{
+    uint8_t typeIndexA = 0u;
+    uint8_t typeIndexB = 0u;
+    std::vector<float> values;
+};
+
+struct RdfBatchState
+{
+    bool active = false;
+    bool lowResMode = false;
+    uint32_t dataRevision = 0u;
+    uint16_t binCount = 0u;
+    float maxRadius = 0.0f;
+    float binWidth = 0.0f;
+    bool usedNonPeriodicFallback = false;
+    double measure = 0.0;
+    size_t sampleCount = 0u;
+    std::array<size_t, kParticlePaletteColorCount> typeCounts{};
+    std::vector<size_t> sampleIndices;
+    std::vector<double> pairCounts;
+    std::unordered_map<uint16_t, std::vector<double>> pairCountsByType;
+    size_t nextI = 0u;
+    size_t nextJ = 1u;
+    uint64_t processedPairChecks = 0u;
+    uint64_t totalPairChecks = 0u;
+    float accumulatedComputeMilliseconds = 0.0f;
+};
+
 struct ViewerState
 {
     ViewerState()
@@ -105,6 +135,7 @@ struct ViewerState
         bondOrderScatterTypeEnabled.fill(true);
         bondOrderScatterCache.enabledSpecies.fill(true);
         structureFactorIncludedSpecies.fill(true);
+        rdfIncludedSpecies.fill(true);
     }
 
     bool showUi = true;
@@ -244,6 +275,30 @@ struct ViewerState
     uint32_t structureFactorBatchModesPerStep = 32u;
     uint16_t structureFactorGpuBatchRowsPerStep = 16u;
     StructureFactorBatchState structureFactorBatchState{};
+    bool rdfDirty = true;
+    bool rdfPendingCompute = false;
+    bool rdfPanelOpen = false;
+    bool rdfAuto = true;
+    bool rdfShowPairCurves = false;
+    bool rdfInteractionLowResActive = false;
+    bool rdfNeedsFullResolutionRefine = false;
+    bool rdfUseVisibleParticlesOnly = false;
+    std::array<bool, kParticlePaletteColorCount> rdfIncludedSpecies{};
+    uint16_t rdfBinCount = 96u;
+    uint16_t rdfLowResBinCount = 48u;
+    float rdfMaxRadius = 0.0f;
+    uint32_t rdfPairChecksPerStep = 1500000u;
+    uint32_t rdfLowResPairChecksPerStep = 350000u;
+    uint32_t rdfDataRevision = 1u;
+    float rdfComputedRadius = 0.0f;
+    float rdfBinWidth = 0.0f;
+    float rdfComputeMilliseconds = 0.0f;
+    size_t rdfSampleParticleCount = 0u;
+    std::string rdfStatusText;
+    std::vector<float> rdfBinCenters;
+    std::vector<float> rdfValues;
+    std::vector<RdfPairCurve> rdfPairCurves;
+    RdfBatchState rdfBatchState{};
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
 };
@@ -344,6 +399,8 @@ void markBondDiagramViewDirty(ViewerState &state);
 void markBondOrderScatterDataDirty(ViewerState &state);
 /// Marks the structure-factor image dirty so it is recomputed.
 void markStructureFactorDirty(ViewerState &state);
+/// Marks RDF data dirty so it is recomputed.
+void markRdfDirty(ViewerState &state);
 /// Returns true when @p mode allows the structure factor to update while the
 /// simulation is playing (i.e. not ManualOnly).
 bool structureFactorAllowsAutomaticUpdates(StructureFactorUpdateMode mode);

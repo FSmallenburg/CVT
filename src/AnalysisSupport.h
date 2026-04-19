@@ -58,3 +58,10 @@ void findNearestNeighbors(const ViewerState &viewerState,
 /// different (e.g. a bond-only render system).
 void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
                                ParticleSystem &targetParticleSystem);
+
+/// Computes per-frame radial distribution function g(r) from particle centers
+/// using the current RDF settings in @p viewerState and writes results back to
+/// @p viewerState (overall curve + type-pair curves).
+void computeRadialDistributionFunction(ViewerState &viewerState,
+                                       const SimulationBox &simulationBox,
+                                       const ParticleSystem &particleSystem);

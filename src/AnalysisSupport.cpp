@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -1125,4 +1127,379 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
             }
         }
     }
+}
+
+void computeRadialDistributionFunction(ViewerState &viewerState,
+                                       const SimulationBox &simulationBox,
+                                       const ParticleSystem &particleSystem)
+{
+    const auto computeStart = std::chrono::steady_clock::now();
+
+    const bool isTwoDimensional =
+        viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
+    const int axisCount = isTwoDimensional ? 2 : 3;
+    RdfBatchState &batch = viewerState.rdfBatchState;
+    const bool requestedLowResMode = viewerState.rdfInteractionLowResActive;
+    const bool lowResMode = batch.active ? batch.lowResMode : requestedLowResMode;
+    const uint32_t requestedPairBudget = lowResMode
+                                             ? viewerState.rdfLowResPairChecksPerStep
+                                             : viewerState.rdfPairChecksPerStep;
+    const uint64_t pairBudget = std::max<uint64_t>(requestedPairBudget, 10000u);
+    const size_t requestedBinCount = std::clamp<size_t>(
+        lowResMode ? std::min<uint16_t>(viewerState.rdfBinCount, viewerState.rdfLowResBinCount)
+                   : viewerState.rdfBinCount,
+        8u,
+        512u);
+
+    auto failAndClear = [&](const std::string &message) {
+        viewerState.rdfStatusText = message;
+        viewerState.rdfBinCenters.clear();
+        viewerState.rdfValues.clear();
+        viewerState.rdfPairCurves.clear();
+        viewerState.rdfSampleParticleCount = 0u;
+        viewerState.rdfComputedRadius = 0.0f;
+        viewerState.rdfBinWidth = 0.0f;
+        viewerState.rdfComputeMilliseconds = 0.0f;
+        viewerState.rdfPendingCompute = false;
+        viewerState.rdfDirty = false;
+        viewerState.rdfBatchState = {};
+    };
+
+    const bool needBatchInit = !batch.active
+                               || batch.dataRevision != viewerState.rdfDataRevision
+                               || batch.binCount != requestedBinCount;
+    if (needBatchInit)
+    {
+        batch = {};
+        batch.active = true;
+        batch.lowResMode = lowResMode;
+        batch.dataRevision = viewerState.rdfDataRevision;
+        batch.binCount = static_cast<uint16_t>(requestedBinCount);
+
+        const std::vector<Particle> &particles = particleSystem.particles();
+        batch.sampleIndices.reserve(particles.size());
+        for (size_t particleIndex = 0u; particleIndex < particles.size(); ++particleIndex)
+        {
+            const Particle &particle = particles[particleIndex];
+            if (viewerState.rdfUseVisibleParticlesOnly && !particle.visible)
+            {
+                continue;
+            }
+
+            const uint8_t typeIndex = particleTypeIndex(particle.typeLabel);
+            if (typeIndex >= kParticlePaletteColorCount
+                || !viewerState.rdfIncludedSpecies[typeIndex])
+            {
+                continue;
+            }
+
+            batch.sampleIndices.push_back(particleIndex);
+            ++batch.typeCounts[typeIndex];
+        }
+
+        batch.sampleCount = batch.sampleIndices.size();
+        viewerState.rdfSampleParticleCount = batch.sampleCount;
+        if (batch.sampleCount < 2u)
+        {
+            failAndClear("Need at least two particles after filtering.");
+            return;
+        }
+
+        const bx::Vec3 boxSize = simulationBox.size();
+        const bool sphericalBounds = simulationBox.shape() == SimulationBox::Shape::Spherical;
+        if (sphericalBounds)
+        {
+            const double radius = static_cast<double>(simulationBox.renderRadius());
+            batch.measure = isTwoDimensional
+                                ? (double(bx::kPi) * radius * radius)
+                                : ((4.0 / 3.0) * double(bx::kPi) * radius * radius * radius);
+        }
+        else
+        {
+            batch.measure = isTwoDimensional
+                                ? (double(boxSize.x) * double(boxSize.y))
+                                : (double(boxSize.x) * double(boxSize.y) * double(boxSize.z));
+        }
+        if (batch.measure <= 1.0e-12)
+        {
+            failAndClear("RDF unavailable: simulation box measure is zero.");
+            return;
+        }
+
+        float maxRadius = viewerState.rdfMaxRadius;
+        bool usedNonPeriodicFallback = false;
+        if (!(maxRadius > 0.0f))
+        {
+            float shortestPeriodicExtent = std::numeric_limits<float>::max();
+            float shortestExtent = std::numeric_limits<float>::max();
+            for (int axis = 0; axis < axisCount; ++axis)
+            {
+                const float axisExtent =
+                    axis == 0 ? boxSize.x : (axis == 1 ? boxSize.y : boxSize.z);
+                if (!(axisExtent > 0.0f))
+                {
+                    continue;
+                }
+
+                shortestExtent = bx::min(shortestExtent, axisExtent);
+                if (simulationBox.isPeriodic(static_cast<size_t>(axis)))
+                {
+                    shortestPeriodicExtent = bx::min(shortestPeriodicExtent, axisExtent);
+                }
+            }
+
+            if (shortestPeriodicExtent < std::numeric_limits<float>::max())
+            {
+                maxRadius = 0.5f * shortestPeriodicExtent;
+            }
+            else if (shortestExtent < std::numeric_limits<float>::max())
+            {
+                maxRadius = 0.5f * shortestExtent;
+                usedNonPeriodicFallback = true;
+            }
+        }
+
+        if (!(maxRadius > 1.0e-6f))
+        {
+            failAndClear("RDF unavailable: maximum radius is not positive.");
+            return;
+        }
+
+        const float binWidth = maxRadius / static_cast<float>(batch.binCount);
+        if (!(binWidth > 0.0f))
+        {
+            failAndClear("RDF unavailable: invalid bin width.");
+            return;
+        }
+
+        batch.maxRadius = maxRadius;
+        batch.binWidth = binWidth;
+        batch.usedNonPeriodicFallback = usedNonPeriodicFallback;
+        batch.pairCounts.assign(batch.binCount, 0.0);
+        batch.pairCountsByType.clear();
+        batch.nextI = 0u;
+        batch.nextJ = 1u;
+        batch.processedPairChecks = 0u;
+        batch.totalPairChecks = (static_cast<uint64_t>(batch.sampleCount)
+                                 * static_cast<uint64_t>(batch.sampleCount - 1u))
+                                / 2u;
+        batch.accumulatedComputeMilliseconds = 0.0f;
+
+        viewerState.rdfComputedRadius = batch.maxRadius;
+        viewerState.rdfBinWidth = batch.binWidth;
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const bx::Vec3 boxSize = simulationBox.size();
+    const bool sphericalBounds = simulationBox.shape() == SimulationBox::Shape::Spherical;
+
+    uint64_t processedThisStep = 0u;
+    while (processedThisStep < pairBudget && (batch.nextI + 1u) < batch.sampleCount)
+    {
+        const Particle &particleI = particles[batch.sampleIndices[batch.nextI]];
+        const uint8_t typeI = particleTypeIndex(particleI.typeLabel);
+
+        while (processedThisStep < pairBudget && batch.nextJ < batch.sampleCount)
+        {
+            const Particle &particleJ = particles[batch.sampleIndices[batch.nextJ]];
+            const uint8_t typeJ = particleTypeIndex(particleJ.typeLabel);
+
+            ++processedThisStep;
+            ++batch.processedPairChecks;
+
+            bx::Vec3 displacement = {
+                particleJ.position.x - particleI.position.x,
+                particleJ.position.y - particleI.position.y,
+                isTwoDimensional ? 0.0f : (particleJ.position.z - particleI.position.z),
+            };
+
+            if (!sphericalBounds)
+            {
+                if (simulationBox.isPeriodic(0))
+                {
+                    displacement.x = wrapNeighborDelta(displacement.x, boxSize.x);
+                }
+                if (simulationBox.isPeriodic(1))
+                {
+                    displacement.y = wrapNeighborDelta(displacement.y, boxSize.y);
+                }
+                if (!isTwoDimensional && simulationBox.isPeriodic(2))
+                {
+                    displacement.z = wrapNeighborDelta(displacement.z, boxSize.z);
+                }
+            }
+
+            const float distance = isTwoDimensional
+                                       ? std::sqrt(displacement.x * displacement.x
+                                                   + displacement.y * displacement.y)
+                                       : bx::length(displacement);
+            if (distance > 1.0e-6f && distance < batch.maxRadius)
+            {
+                const size_t binIndex = bx::min<size_t>(
+                    static_cast<size_t>(distance / batch.binWidth),
+                    static_cast<size_t>(batch.binCount - 1u));
+                batch.pairCounts[binIndex] += 1.0;
+
+                const uint8_t typeMin = bx::min(typeI, typeJ);
+                const uint8_t typeMax = bx::max(typeI, typeJ);
+                const uint16_t pairKey = static_cast<uint16_t>((typeMin << 8u) | typeMax);
+                auto &counts = batch.pairCountsByType[pairKey];
+                if (counts.empty())
+                {
+                    counts.assign(batch.binCount, 0.0);
+                }
+                counts[binIndex] += 1.0;
+            }
+
+            ++batch.nextJ;
+        }
+
+        if (batch.nextJ >= batch.sampleCount)
+        {
+            ++batch.nextI;
+            batch.nextJ = batch.nextI + 1u;
+        }
+    }
+
+    const auto computeEnd = std::chrono::steady_clock::now();
+    const float stepMilliseconds =
+        std::chrono::duration<float, std::milli>(computeEnd - computeStart).count();
+    batch.accumulatedComputeMilliseconds += stepMilliseconds;
+
+    auto populateCurvesFromBatch = [&](double pairCountScale) {
+        const double sampleDensity = static_cast<double>(batch.sampleCount) / batch.measure;
+        viewerState.rdfBinCenters.resize(batch.binCount);
+        viewerState.rdfValues.assign(batch.binCount, 0.0f);
+        for (size_t binIndex = 0u; binIndex < batch.binCount; ++binIndex)
+        {
+            const double radiusCenter = (static_cast<double>(binIndex) + 0.5)
+                                        * static_cast<double>(batch.binWidth);
+            const double shellMeasure = isTwoDimensional
+                                            ? (2.0 * double(bx::kPi) * radiusCenter
+                                               * static_cast<double>(batch.binWidth))
+                                            : (4.0 * double(bx::kPi) * radiusCenter * radiusCenter
+                                               * static_cast<double>(batch.binWidth));
+            viewerState.rdfBinCenters[binIndex] = static_cast<float>(radiusCenter);
+
+            if (shellMeasure <= 0.0)
+            {
+                continue;
+            }
+
+            const double denominator =
+                static_cast<double>(batch.sampleCount) * sampleDensity * shellMeasure;
+            const double scaledPairCount = pairCountScale * batch.pairCounts[binIndex];
+            viewerState.rdfValues[binIndex] = denominator > 0.0
+                                                  ? static_cast<float>((2.0 * scaledPairCount)
+                                                                       / denominator)
+                                                  : 0.0f;
+        }
+
+        viewerState.rdfPairCurves.clear();
+        viewerState.rdfPairCurves.reserve(batch.pairCountsByType.size());
+        for (const auto &[pairKey, counts] : batch.pairCountsByType)
+        {
+            const uint8_t typeA = static_cast<uint8_t>((pairKey >> 8u) & 0xFFu);
+            const uint8_t typeB = static_cast<uint8_t>(pairKey & 0xFFu);
+            const size_t countA = batch.typeCounts[typeA];
+            const size_t countB = batch.typeCounts[typeB];
+            if (countA == 0u || countB == 0u)
+            {
+                continue;
+            }
+
+            RdfPairCurve curve{};
+            curve.typeIndexA = typeA;
+            curve.typeIndexB = typeB;
+            curve.values.assign(batch.binCount, 0.0f);
+
+            for (size_t binIndex = 0u; binIndex < batch.binCount; ++binIndex)
+            {
+                const double radiusCenter = (static_cast<double>(binIndex) + 0.5)
+                                            * static_cast<double>(batch.binWidth);
+                const double shellMeasure = isTwoDimensional
+                                                ? (2.0 * double(bx::kPi) * radiusCenter
+                                                   * static_cast<double>(batch.binWidth))
+                                                : (4.0 * double(bx::kPi) * radiusCenter
+                                                   * radiusCenter
+                                                   * static_cast<double>(batch.binWidth));
+                if (shellMeasure <= 0.0)
+                {
+                    continue;
+                }
+
+                const double scaledPairCount = pairCountScale * counts[binIndex];
+                const double numerator = (typeA == typeB)
+                                             ? (2.0 * scaledPairCount)
+                                             : scaledPairCount;
+                const double densityTerm = (typeA == typeB)
+                                               ? (static_cast<double>(countA)
+                                                  * static_cast<double>(countA)
+                                                  / batch.measure)
+                                               : (static_cast<double>(countA)
+                                                  * static_cast<double>(countB)
+                                                  / batch.measure);
+                const double denominator = densityTerm * shellMeasure;
+                curve.values[binIndex] = denominator > 0.0
+                                             ? static_cast<float>(numerator / denominator)
+                                             : 0.0f;
+            }
+
+            viewerState.rdfPairCurves.push_back(std::move(curve));
+        }
+
+        std::sort(viewerState.rdfPairCurves.begin(), viewerState.rdfPairCurves.end(),
+                  [](const RdfPairCurve &lhs, const RdfPairCurve &rhs) {
+                      if (lhs.typeIndexA != rhs.typeIndexA)
+                      {
+                          return lhs.typeIndexA < rhs.typeIndexA;
+                      }
+                      return lhs.typeIndexB < rhs.typeIndexB;
+                  });
+
+        viewerState.rdfSampleParticleCount = batch.sampleCount;
+        viewerState.rdfComputedRadius = batch.maxRadius;
+        viewerState.rdfBinWidth = batch.binWidth;
+    };
+
+    const bool finished = (batch.nextI + 1u) >= batch.sampleCount;
+
+    const double progressiveScale =
+        (batch.processedPairChecks > 0u && batch.processedPairChecks < batch.totalPairChecks)
+            ? (double(batch.totalPairChecks) / double(batch.processedPairChecks))
+            : 1.0;
+    populateCurvesFromBatch(progressiveScale);
+    viewerState.rdfComputeMilliseconds = batch.accumulatedComputeMilliseconds;
+
+    if (!finished)
+    {
+        viewerState.rdfStatusText =
+            "RDF batching: " + std::to_string(batch.processedPairChecks)
+            + "/" + std::to_string(batch.totalPairChecks)
+            + " pairs (latest step " + std::to_string(stepMilliseconds)
+            + " ms, showing progressive estimate).";
+        viewerState.rdfPendingCompute = true;
+        viewerState.rdfDirty = true;
+        return;
+    }
+
+    if (batch.lowResMode)
+    {
+        viewerState.rdfStatusText =
+            "Computed low-resolution interaction preview ("
+            + std::to_string(batch.processedPairChecks)
+            + " pairs). Full-resolution recompute will run after interaction.";
+        viewerState.rdfNeedsFullResolutionRefine = true;
+    }
+    else
+    {
+        viewerState.rdfStatusText = batch.usedNonPeriodicFallback
+                                        ? "Computed with non-periodic fallback radius."
+                                        : "Computed.";
+        viewerState.rdfNeedsFullResolutionRefine = false;
+    }
+
+    viewerState.rdfPendingCompute = false;
+    viewerState.rdfDirty = false;
+    batch.active = false;
 }

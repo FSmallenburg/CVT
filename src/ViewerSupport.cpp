@@ -97,6 +97,7 @@ void markAllHelperSystemsDirty(ViewerState &state)
         state.structureFactorDataRevision = 1u;
     }
     markStructureFactorDirty(state);
+    markRdfDirty(state);
 }
 
 void markVisibilityDependentHelperSystemsDirty(ViewerState &state)
@@ -156,6 +157,17 @@ void markStructureFactorDirty(ViewerState &state)
     if (state.structureFactorComputeRevision == 0u)
     {
         state.structureFactorComputeRevision = 1u;
+    }
+}
+
+void markRdfDirty(ViewerState &state)
+{
+    state.rdfDirty = true;
+    state.rdfBatchState = {};
+    ++state.rdfDataRevision;
+    if (state.rdfDataRevision == 0u)
+    {
+        state.rdfDataRevision = 1u;
     }
 }
 
@@ -1012,6 +1024,19 @@ void applySceneRotation(ViewerState &state, float angleX, float angleY, float an
     else if (!interactiveRotation)
     {
         state.structureFactorInteractionLowResActive = false;
+    }
+
+    if (interactiveRotation && state.rdfPanelOpen && state.rdfAuto)
+    {
+        state.rdfInteractionLowResActive = true;
+        if (state.rdfDirty)
+        {
+            state.rdfPendingCompute = true;
+        }
+    }
+    else if (!interactiveRotation)
+    {
+        state.rdfInteractionLowResActive = false;
     }
 
     markBondDiagramViewDirty(state);

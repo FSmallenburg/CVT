@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <vector>
 
 namespace
@@ -173,6 +174,55 @@ AnalysisColorMode analysisColorModeFromComboIndex(int comboIndex, bool isTwoDime
     default:
         return AnalysisColorMode::Disabled;
     }
+}
+
+std::string rdfPairLabel(uint8_t typeA, uint8_t typeB)
+{
+    const char labelA[] = {
+        static_cast<char>('a' + bx::min<uint8_t>(typeA, 25u)),
+        '\0',
+    };
+    const char labelB[] = {
+        static_cast<char>('a' + bx::min<uint8_t>(typeB, 25u)),
+        '\0',
+    };
+    return std::string(labelA) + "-" + std::string(labelB);
+}
+
+float rdfAutoRadiusFromBox(const SimulationBox &simulationBox,
+                           TrajectoryReader::Dimensionality dimensionality)
+{
+    const bx::Vec3 boxSize = simulationBox.size();
+    const int axisCount = dimensionality == TrajectoryReader::Dimensionality::TwoDimensional
+                              ? 2
+                              : 3;
+
+    float shortestPeriodicExtent = std::numeric_limits<float>::max();
+    float shortestExtent = std::numeric_limits<float>::max();
+    for (int axis = 0; axis < axisCount; ++axis)
+    {
+        const float axisExtent = axis == 0 ? boxSize.x : (axis == 1 ? boxSize.y : boxSize.z);
+        if (!(axisExtent > 0.0f))
+        {
+            continue;
+        }
+
+        shortestExtent = bx::min(shortestExtent, axisExtent);
+        if (simulationBox.isPeriodic(static_cast<size_t>(axis)))
+        {
+            shortestPeriodicExtent = bx::min(shortestPeriodicExtent, axisExtent);
+        }
+    }
+
+    if (shortestPeriodicExtent < std::numeric_limits<float>::max())
+    {
+        return 0.5f * shortestPeriodicExtent;
+    }
+    if (shortestExtent < std::numeric_limits<float>::max())
+    {
+        return 0.5f * shortestExtent;
+    }
+    return 0.0f;
 }
 
 struct SizeDistributionData
@@ -679,8 +729,10 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 {
     const bool wasStructureFactorPanelOpen = viewerState.structureFactorPanelOpen;
     const bool wasNeighborAnalysisPanelOpen = viewerState.neighborAnalysisPanelOpen;
+    const bool wasRdfPanelOpen = viewerState.rdfPanelOpen;
     viewerState.bondDiagramRenderRequested = false;
     viewerState.structureFactorPanelOpen = false;
+    viewerState.rdfPanelOpen = false;
 
     if (!viewerState.showUi || !ImGuiBgfx::isAvailable())
     {
@@ -913,7 +965,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
     if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::Indent();
-        ImGui::TextDisabled("Tools for neighbor metrics, bond diagrams, and S(k).");
+        ImGui::TextDisabled("Tools for neighbor metrics, RDF, bond diagrams, and S(k).");
 
         viewerState.neighborAnalysisPanelOpen = ImGui::CollapsingHeader("Neighbor analysis");
         if (viewerState.neighborAnalysisPanelOpen)
@@ -1416,6 +1468,173 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             if (structureFactorResources != nullptr && !structureFactorResources->statusText.empty())
             {
                 ImGui::TextWrapped("%s", structureFactorResources->statusText.c_str());
+            }
+        }
+
+        ImGui::Spacing();
+        viewerState.rdfPanelOpen = ImGui::CollapsingHeader("Radial distribution function");
+        if (viewerState.rdfPanelOpen)
+        {
+            const bool rdfPanelJustOpened = !wasRdfPanelOpen;
+            if (rdfPanelJustOpened && viewerState.rdfDirty && viewerState.rdfAuto)
+            {
+                viewerState.rdfPendingCompute = true;
+            }
+
+            if (ImGui::Button("Compute RDF"))
+            {
+                viewerState.rdfPendingCompute = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Auto##RDF", &viewerState.rdfAuto)
+                && viewerState.rdfAuto
+                && viewerState.rdfDirty)
+            {
+                viewerState.rdfPendingCompute = true;
+            }
+
+            int rdfBinCount = int(viewerState.rdfBinCount);
+            if (ImGui::SliderInt("Bins##RDF", &rdfBinCount, 8, 256))
+            {
+                viewerState.rdfBinCount = static_cast<uint16_t>(std::clamp(rdfBinCount, 8, 256));
+                markRdfDirty(viewerState);
+                if (viewerState.rdfAuto)
+                {
+                    viewerState.rdfPendingCompute = true;
+                }
+            }
+
+            const float autoRadius = rdfAutoRadiusFromBox(simulationBox,
+                                                          viewerState.fileDimensionality);
+            bool useAutoRadius = viewerState.rdfMaxRadius <= 0.0f;
+            if (ImGui::Checkbox("Auto r_max##RDF", &useAutoRadius))
+            {
+                viewerState.rdfMaxRadius = useAutoRadius ? 0.0f : bx::max(autoRadius, 0.1f);
+                markRdfDirty(viewerState);
+                if (viewerState.rdfAuto)
+                {
+                    viewerState.rdfPendingCompute = true;
+                }
+            }
+            if (useAutoRadius)
+            {
+                ImGui::Text("r_max auto: %.3f", autoRadius);
+            }
+            else
+            {
+                const bx::Vec3 boxSize = simulationBox.size();
+                const float minExtent =
+                    viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional
+                        ? bx::min(boxSize.x, boxSize.y)
+                        : bx::min(boxSize.x, bx::min(boxSize.y, boxSize.z));
+                const float sliderMax = bx::max(0.1f, 0.5f * minExtent);
+                float rdfMaxRadius = bx::max(viewerState.rdfMaxRadius, 0.1f);
+                if (ImGui::SliderFloat("r_max##RDF", &rdfMaxRadius, 0.1f, sliderMax, "%.3f"))
+                {
+                    viewerState.rdfMaxRadius = rdfMaxRadius;
+                    markRdfDirty(viewerState);
+                    if (viewerState.rdfAuto)
+                    {
+                        viewerState.rdfPendingCompute = true;
+                    }
+                }
+            }
+
+            bool rdfVisibleOnly = viewerState.rdfUseVisibleParticlesOnly;
+            if (ImGui::Checkbox("Visible particles only##RDF", &rdfVisibleOnly))
+            {
+                viewerState.rdfUseVisibleParticlesOnly = rdfVisibleOnly;
+                markRdfDirty(viewerState);
+                if (viewerState.rdfAuto)
+                {
+                    viewerState.rdfPendingCompute = true;
+                }
+            }
+
+            ImGui::Checkbox("Show pair curves##RDF", &viewerState.rdfShowPairCurves);
+
+            if (viewerState.maxSeenParticleTypeIndex > 0u)
+            {
+                ImGui::TextUnformatted("Species included in RDF computation");
+                ImGui::TextDisabled("These checkboxes control which species are included in all RDF curves.");
+                for (uint8_t typeIndex = 0u;
+                     typeIndex <= viewerState.maxSeenParticleTypeIndex;
+                     ++typeIndex)
+                {
+                    bool included = viewerState.rdfIncludedSpecies[typeIndex];
+                    const char typeLabel[] = {
+                        static_cast<char>('a' + bx::min<uint8_t>(typeIndex, 25u)),
+                        '\0',
+                    };
+                    const std::string checkboxLabel = std::string(typeLabel)
+                                                      + "##RdfSpecies"
+                                                      + std::to_string(typeIndex);
+                    if (ImGui::Checkbox(checkboxLabel.c_str(), &included))
+                    {
+                        viewerState.rdfIncludedSpecies[typeIndex] = included;
+                        markRdfDirty(viewerState);
+                        if (viewerState.rdfAuto)
+                        {
+                            viewerState.rdfPendingCompute = true;
+                        }
+                    }
+                    const bool continueSameLine =
+                        typeIndex < viewerState.maxSeenParticleTypeIndex
+                        && ((typeIndex + 1u) % 6u) != 0u;
+                    if (continueSameLine)
+                    {
+                        ImGui::SameLine();
+                    }
+                }
+            }
+
+            ImGui::Text("Status: %s", viewerState.rdfDirty ? "stale - recompute needed"
+                                                            : "up to date");
+            if (!viewerState.rdfStatusText.empty())
+            {
+                ImGui::TextWrapped("%s", viewerState.rdfStatusText.c_str());
+            }
+            if (!viewerState.rdfBinCenters.empty())
+            {
+                ImGui::Text("Last compute: %.2f ms | particles: %zu | r_max: %.3f | dr: %.4f",
+                            viewerState.rdfComputeMilliseconds,
+                            viewerState.rdfSampleParticleCount,
+                            viewerState.rdfComputedRadius,
+                            viewerState.rdfBinWidth);
+
+                const float plotWidth = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                if (ImPlot::GetCurrentContext() != nullptr
+                    && ImPlot::BeginPlot("##RdfPlot",
+                                         ImVec2(plotWidth, 200.0f),
+                                         ImPlotFlags_None))
+                {
+                    ImPlot::SetupLegend(ImPlotLocation_NorthEast, ImPlotLegendFlags_None);
+                    ImPlot::SetupAxes("r", "g(r)",
+                                      ImPlotAxisFlags_AutoFit,
+                                      ImPlotAxisFlags_AutoFit);
+                    ImPlot::PlotLine("g(r) overall",
+                                     viewerState.rdfBinCenters.data(),
+                                     viewerState.rdfValues.data(),
+                                     static_cast<int>(viewerState.rdfValues.size()));
+
+                    if (viewerState.rdfShowPairCurves)
+                    {
+                        for (const RdfPairCurve &curve : viewerState.rdfPairCurves)
+                        {
+                            const std::string pairLabel =
+                                "g_" + rdfPairLabel(curve.typeIndexA, curve.typeIndexB) + "(r)";
+                            ImPlot::PlotLine(pairLabel.c_str(),
+                                             viewerState.rdfBinCenters.data(),
+                                             curve.values.data(),
+                                             static_cast<int>(curve.values.size()));
+                        }
+                    }
+                    ImPlot::EndPlot();
+                }
+            }
+            else
+            {
+                ImGui::TextDisabled("No RDF data yet. Compute to populate g(r).");
             }
         }
 

@@ -40,6 +40,32 @@ Inside the Neighbor analysis panel:
 	- When enabled, FK bonds are recomputed automatically after neighbor recomputation events
 		(for example cutoff changes or frame changes).
 
+## Radial distribution function (RDF)
+
+Inside the Radial distribution function panel:
+
+- Compute RDF:
+	- Computes per-frame $g(r)$ from particle centers.
+	- Produces an overall curve and type-pair curves (for example a-a, a-b, b-b).
+- Auto:
+	- When enabled, RDF recomputes automatically when frame/data/settings change.
+	- Auto does not depend on camera motion or stationary camera detection.
+- Bins:
+	- Sets histogram resolution for $r$.
+- Max radius (0=auto):
+	- `0` uses half of the shortest periodic box extent (active dimensions only).
+	- If no periodic extent is available, a non-periodic fallback is used and shown in status text.
+- Visible particles only:
+	- Restricts RDF to currently visible particles.
+- Species included in RDF:
+	- Toggles which particle types are included in both the overall curve and pair curves.
+
+Normalization details:
+
+- 2D trajectories use ring-shell normalization ($2\pi r\Delta r$).
+- 3D trajectories use spherical-shell normalization ($4\pi r^2\Delta r$).
+- Periodic boundaries are handled with minimum-image wrapping on periodic axes.
+
 ## Interaction basics
 
 - Left drag: rotate view

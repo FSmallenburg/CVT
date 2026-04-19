@@ -1316,6 +1316,7 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
             }
 
             const bool hadLowResInteractionRender = state->structureFactorInteractionLowResActive;
+            const bool hadRdfLowResInteractionRender = state->rdfInteractionLowResActive;
             state->leftMouseDown = false;
             state->leftDragActive = false;
             state->leftTranslateMode = false;
@@ -1340,6 +1341,17 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
             {
                 state->structureFactorPendingCompute = true;
             }
+
+            if (hadRdfLowResInteractionRender)
+            {
+                state->rdfInteractionLowResActive = false;
+                if (state->rdfPanelOpen && state->rdfAuto && state->rdfNeedsFullResolutionRefine)
+                {
+                    markRdfDirty(*state);
+                    state->rdfNeedsFullResolutionRefine = false;
+                    state->rdfPendingCompute = true;
+                }
+            }
         }
     }
     else if (button == GLFW_MOUSE_BUTTON_RIGHT)
@@ -1357,6 +1369,7 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
         else if (action == GLFW_RELEASE)
         {
             const bool hadLowResInteractionRender = state->structureFactorInteractionLowResActive;
+            const bool hadRdfLowResInteractionRender = state->rdfInteractionLowResActive;
             state->rightMouseDown = false;
             if (hadLowResInteractionRender)
             {
@@ -1378,6 +1391,17 @@ static void glfw_mouseButtonCallback(GLFWwindow *window, int button, int action,
                             == StructureFactorUpdateMode::UpdateWhenStationary)
             {
                 state->structureFactorPendingCompute = true;
+            }
+
+            if (hadRdfLowResInteractionRender)
+            {
+                state->rdfInteractionLowResActive = false;
+                if (state->rdfPanelOpen && state->rdfAuto && state->rdfNeedsFullResolutionRefine)
+                {
+                    markRdfDirty(*state);
+                    state->rdfNeedsFullResolutionRefine = false;
+                    state->rdfPendingCompute = true;
+                }
             }
         }
     }
@@ -1555,6 +1579,18 @@ static bool openTrajectoryFile(const std::string &path,
             : StructureFactorUpdateMode::UpdateWhenStationary;
     viewerState.structureFactorBatchState = {};
     viewerState.structureFactorPendingCompute = false;
+    viewerState.rdfDirty = true;
+    viewerState.rdfPendingCompute = false;
+    viewerState.rdfInteractionLowResActive = false;
+    viewerState.rdfNeedsFullResolutionRefine = false;
+    viewerState.rdfStatusText.clear();
+    viewerState.rdfBinCenters.clear();
+    viewerState.rdfValues.clear();
+    viewerState.rdfPairCurves.clear();
+    viewerState.rdfSampleParticleCount = 0u;
+    viewerState.rdfComputedRadius = 0.0f;
+    viewerState.rdfBinWidth = 0.0f;
+    viewerState.rdfBatchState = {};
     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
     viewerState.fileOpenStatusMessage.clear();
     cvt::log::info() << "Opened trajectory file: " << loadedPath << std::endl;
@@ -1632,6 +1668,9 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         viewerState.structureFactorPendingCompute =
             viewerState.structureFactorPanelOpen
             && structureFactorAllowsAutomaticUpdates(viewerState.structureFactorUpdateMode);
+        viewerState.rdfInteractionLowResActive = false;
+        viewerState.rdfNeedsFullResolutionRefine = false;
+        viewerState.rdfPendingCompute = viewerState.rdfPanelOpen && viewerState.rdfAuto;
         return;
     }
 
@@ -1665,6 +1704,16 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         viewerState.pendingFindNeighbors = true;
     }
+    if (viewerState.rdfNeedsFullResolutionRefine && !viewerState.rdfInteractionLowResActive)
+    {
+        markRdfDirty(viewerState);
+        viewerState.rdfNeedsFullResolutionRefine = false;
+    }
+
+    if (viewerState.rdfAuto && viewerState.rdfDirty)
+    {
+        viewerState.rdfPendingCompute = true;
+    }
 
     processPendingFileOpenAction(viewerState, particleSystem, layout,
                                  particleFileType, simulationBox,
@@ -1688,6 +1737,18 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         updateStructureFactorPreview(viewerState, simulationBox,
                                      particleSystem, structureFactorResources, loadShader);
+    }
+
+    if (!viewerState.rdfPanelOpen)
+    {
+        viewerState.rdfPendingCompute = false;
+        viewerState.rdfInteractionLowResActive = false;
+        viewerState.rdfNeedsFullResolutionRefine = false;
+        viewerState.rdfBatchState = {};
+    }
+    else if (viewerState.rdfPendingCompute)
+    {
+        computeRadialDistributionFunction(viewerState, simulationBox, particleSystem);
     }
 
     if (viewerState.pendingDescribeSelection)
