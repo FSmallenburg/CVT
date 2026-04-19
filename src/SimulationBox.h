@@ -38,6 +38,9 @@ class SimulationBox
     Shape shape() const;
     /// Returns the render radius (only meaningful for Spherical boxes).
     float renderRadius() const;
+    /// Returns the box measure for the requested dimensionality:
+    /// area in 2D, volume in 3D.
+    double measure(bool isTwoDimensional) const;
     /// Returns true if the given axis (0 = X, 1 = Y, 2 = Z) is periodic.
     bool isPeriodic(size_t axis) const;
 

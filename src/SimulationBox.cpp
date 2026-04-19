@@ -103,6 +103,22 @@ float SimulationBox::renderRadius() const
     return m_renderRadius;
 }
 
+double SimulationBox::measure(bool isTwoDimensional) const
+{
+    if (m_shape == Shape::Spherical)
+    {
+        const double radius = static_cast<double>(m_renderRadius);
+        return isTwoDimensional
+                   ? (double(bx::kPi) * radius * radius)
+                   : ((4.0 / 3.0) * double(bx::kPi) * radius * radius * radius);
+    }
+
+    const bx::Vec3 boxSize = size();
+    return isTwoDimensional
+               ? (double(boxSize.x) * double(boxSize.y))
+               : (double(boxSize.x) * double(boxSize.y) * double(boxSize.z));
+}
+
 bool SimulationBox::isPeriodic(size_t axis) const
 {
     return axis < m_periodic.size() ? m_periodic[axis] : false;

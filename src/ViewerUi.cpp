@@ -42,25 +42,7 @@ double computePackingFraction(const ParticleSystem &particleSystem,
     const bool is2D = (dimensionality == Dimensionality::TwoDimensional);
 
     // ---- box measure (volume or area) --------------------------------
-    double boxMeasure = 0.0;
-    if (simulationBox.shape() == Shape::Spherical)
-    {
-        const double r = static_cast<double>(simulationBox.renderRadius());
-        boxMeasure = (4.0 / 3.0) * bx::kPi * r * r * r;
-    }
-    else
-    {
-        const bx::Vec3 sz = simulationBox.size();
-        if (is2D)
-        {
-            boxMeasure = static_cast<double>(sz.x) * static_cast<double>(sz.y);
-        }
-        else
-        {
-            boxMeasure = static_cast<double>(sz.x) * static_cast<double>(sz.y)
-                         * static_cast<double>(sz.z);
-        }
-    }
+    const double boxMeasure = simulationBox.measure(is2D);
 
     if (boxMeasure <= 0.0)
     {

@@ -1183,20 +1183,7 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
         }
 
         const bx::Vec3 boxSize = simulationBox.size();
-        const bool sphericalBounds = simulationBox.shape() == SimulationBox::Shape::Spherical;
-        if (sphericalBounds)
-        {
-            const double radius = static_cast<double>(simulationBox.renderRadius());
-            batch.measure = isTwoDimensional
-                                ? (double(bx::kPi) * radius * radius)
-                                : ((4.0 / 3.0) * double(bx::kPi) * radius * radius * radius);
-        }
-        else
-        {
-            batch.measure = isTwoDimensional
-                                ? (double(boxSize.x) * double(boxSize.y))
-                                : (double(boxSize.x) * double(boxSize.y) * double(boxSize.z));
-        }
+        batch.measure = simulationBox.measure(isTwoDimensional);
         if (batch.measure <= 1.0e-12)
         {
             failAndClear("RDF unavailable: simulation box measure is zero.");
