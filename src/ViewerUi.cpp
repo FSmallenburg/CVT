@@ -1504,39 +1504,24 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 }
             }
 
+            const bx::Vec3 boxSize = simulationBox.size();
+            const float minExtent =
+                viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional
+                    ? bx::min(boxSize.x, boxSize.y)
+                    : bx::min(boxSize.x, bx::min(boxSize.y, boxSize.z));
+            const float sliderMax = bx::max(0.1f, 0.5f * minExtent);
             const float autoRadius = rdfAutoRadiusFromBox(simulationBox,
                                                           viewerState.fileDimensionality);
-            bool useAutoRadius = viewerState.rdfMaxRadius <= 0.0f;
-            if (ImGui::Checkbox("Auto r_max##RDF", &useAutoRadius))
+            float rdfMaxRadius = viewerState.rdfMaxRadius > 0.0f
+                                     ? viewerState.rdfMaxRadius
+                                     : bx::clamp(autoRadius, 0.1f, sliderMax);
+            if (ImGui::SliderFloat("r_max##RDF", &rdfMaxRadius, 0.1f, sliderMax, "%.3f"))
             {
-                viewerState.rdfMaxRadius = useAutoRadius ? 0.0f : bx::max(autoRadius, 0.1f);
+                viewerState.rdfMaxRadius = rdfMaxRadius;
                 markRdfDirty(viewerState);
                 if (viewerState.rdfAuto)
                 {
                     viewerState.rdfPendingCompute = true;
-                }
-            }
-            if (useAutoRadius)
-            {
-                ImGui::Text("r_max auto: %.3f", autoRadius);
-            }
-            else
-            {
-                const bx::Vec3 boxSize = simulationBox.size();
-                const float minExtent =
-                    viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional
-                        ? bx::min(boxSize.x, boxSize.y)
-                        : bx::min(boxSize.x, bx::min(boxSize.y, boxSize.z));
-                const float sliderMax = bx::max(0.1f, 0.5f * minExtent);
-                float rdfMaxRadius = bx::max(viewerState.rdfMaxRadius, 0.1f);
-                if (ImGui::SliderFloat("r_max##RDF", &rdfMaxRadius, 0.1f, sliderMax, "%.3f"))
-                {
-                    viewerState.rdfMaxRadius = rdfMaxRadius;
-                    markRdfDirty(viewerState);
-                    if (viewerState.rdfAuto)
-                    {
-                        viewerState.rdfPendingCompute = true;
-                    }
                 }
             }
 

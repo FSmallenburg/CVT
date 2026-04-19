@@ -52,9 +52,9 @@ Inside the Radial distribution function panel:
 	- Auto does not depend on camera motion or stationary camera detection.
 - Bins:
 	- Sets histogram resolution for $r$.
-- Max radius (0=auto):
-	- `0` uses half of the shortest periodic box extent (active dimensions only).
-	- If no periodic extent is available, a non-periodic fallback is used and shown in status text.
+- `r_max`:
+	- Set directly with a slider.
+	- The slider upper limit is half of the shortest box extent in the active dimensions.
 - Visible particles only:
 	- Restricts RDF to currently visible particles.
 - Species included in RDF:
