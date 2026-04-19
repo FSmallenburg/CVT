@@ -1,4 +1,5 @@
 #include "ColorPalette.h"
+#include "BxVec3Operators.h"
 #include "PatchPlacement.h"
 #include "TrajectoryReader.h"
 
@@ -222,16 +223,16 @@ bool orthonormalizeRotationMatrix(std::array<float, 9> &matrix)
         return false;
     }
 
-    x = bx::mul(x, 1.0f / xLength);
+    x *= 1.0f / xLength;
 
     // Remove x component from y before normalization (Gram-Schmidt).
-    y = bx::sub(y, bx::mul(x, bx::dot(y, x)));
+    y -= x * bx::dot(y, x);
     const float yOrthoLength = bx::length(y);
     if (yOrthoLength <= 1.0e-6f)
     {
         return false;
     }
-    y = bx::mul(y, 1.0f / yOrthoLength);
+    y *= 1.0f / yOrthoLength;
 
     bx::Vec3 z = bx::cross(x, y);
     const float zLength = bx::length(z);
@@ -239,7 +240,7 @@ bool orthonormalizeRotationMatrix(std::array<float, 9> &matrix)
     {
         return false;
     }
-    z = bx::mul(z, 1.0f / zLength);
+    z *= 1.0f / zLength;
 
     // Recompute y so x,y,z are exactly orthonormal and right-handed.
     y = bx::cross(z, x);

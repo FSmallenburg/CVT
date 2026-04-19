@@ -1,4 +1,5 @@
 #include "VoronoiCellBuilder.h"
+#include "BxVec3Operators.h"
 
 #include <algorithm>
 #include <array>
@@ -23,7 +24,7 @@ float lengthSq(const bx::Vec3 &v)
 
 bool nearlyEqual(const bx::Vec3 &a, const bx::Vec3 &b, float epsilon)
 {
-    return lengthSq(bx::sub(a, b)) <= epsilon * epsilon;
+    return lengthSq(a - b) <= epsilon * epsilon;
 }
 
 bool solvePlaneIntersection(const Plane &a, const Plane &b, const Plane &c, bx::Vec3 &outPoint)
@@ -35,10 +36,10 @@ bool solvePlaneIntersection(const Plane &a, const Plane &b, const Plane &c, bx::
         return false;
     }
 
-    const bx::Vec3 termA = bx::mul(bxcn, a.offset);
-    const bx::Vec3 termB = bx::mul(bx::cross(c.normal, a.normal), b.offset);
-    const bx::Vec3 termC = bx::mul(bx::cross(a.normal, b.normal), c.offset);
-    outPoint = bx::mul(bx::add(termA, bx::add(termB, termC)), 1.0f / determinant);
+    const bx::Vec3 termA = bxcn * a.offset;
+    const bx::Vec3 termB = bx::cross(c.normal, a.normal) * b.offset;
+    const bx::Vec3 termC = bx::cross(a.normal, b.normal) * c.offset;
+    outPoint = (termA + termB + termC) / determinant;
     return true;
 }
 
@@ -64,7 +65,7 @@ bx::Vec3 pickPerpendicular(const bx::Vec3 &normal)
     {
         return {0.0f, 0.0f, 1.0f};
     }
-    return bx::mul(tangent, 1.0f / len);
+    return tangent * (1.0f / len);
 }
 
 void appendTriangle(const bx::Vec3 &a,
@@ -183,16 +184,16 @@ bool buildVoronoiCellMesh(const std::vector<bx::Vec3> &sites,
         bx::Vec3 centroid{0.0f, 0.0f, 0.0f};
         for (size_t vertexIndex : faceVertexIndices)
         {
-            centroid = bx::add(centroid, uniqueVertices[vertexIndex]);
+            centroid += uniqueVertices[vertexIndex];
         }
-        centroid = bx::mul(centroid, 1.0f / static_cast<float>(faceVertexIndices.size()));
+        centroid *= 1.0f / static_cast<float>(faceVertexIndices.size());
 
         const float normalLength = bx::length(plane.normal);
         if (normalLength <= kEpsilon)
         {
             continue;
         }
-        const bx::Vec3 faceNormal = bx::mul(plane.normal, 1.0f / normalLength);
+        const bx::Vec3 faceNormal = plane.normal * (1.0f / normalLength);
         const bx::Vec3 tangentU = pickPerpendicular(faceNormal);
         const bx::Vec3 tangentV = bx::cross(faceNormal, tangentU);
 
@@ -206,7 +207,7 @@ bool buildVoronoiCellMesh(const std::vector<bx::Vec3> &sites,
         sorted.reserve(faceVertexIndices.size());
         for (size_t vertexIndex : faceVertexIndices)
         {
-            const bx::Vec3 relative = bx::sub(uniqueVertices[vertexIndex], centroid);
+            const bx::Vec3 relative = uniqueVertices[vertexIndex] - centroid;
             const float x = bx::dot(relative, tangentU);
             const float y = bx::dot(relative, tangentV);
             sorted.push_back({vertexIndex, std::atan2(y, x)});
@@ -223,7 +224,7 @@ bool buildVoronoiCellMesh(const std::vector<bx::Vec3> &sites,
         {
             const bx::Vec3 &current = uniqueVertices[sorted[idx].vertexIndex];
             const bx::Vec3 &next = uniqueVertices[sorted[(idx + 1u) % sorted.size()].vertexIndex];
-            areaVector = bx::add(areaVector, bx::cross(current, next));
+            areaVector += bx::cross(current, next);
         }
         const double faceArea = 0.5 * std::abs(static_cast<double>(bx::dot(faceNormal, areaVector)));
         const double faceDistance = std::abs(static_cast<double>(plane.offset)

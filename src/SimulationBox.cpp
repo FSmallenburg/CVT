@@ -1,4 +1,5 @@
 #include "SimulationBox.h"
+#include "BxVec3Operators.h"
 
 namespace
 {
@@ -61,8 +62,8 @@ void SimulationBox::setSphericalBounds(const bx::Vec3 &center, float boundsRadiu
                                        float renderRadius)
 {
     const bx::Vec3 halfExtent{boundsRadius, boundsRadius, boundsRadius};
-    m_minBounds = {center.x - halfExtent.x, center.y - halfExtent.y, center.z - halfExtent.z};
-    m_maxBounds = {center.x + halfExtent.x, center.y + halfExtent.y, center.z + halfExtent.z};
+    m_minBounds = center - halfExtent;
+    m_maxBounds = center + halfExtent;
     m_shape = Shape::Spherical;
     m_renderRadius = renderRadius;
 }
@@ -84,20 +85,12 @@ const bx::Vec3 &SimulationBox::maxBounds() const
 
 bx::Vec3 SimulationBox::size() const
 {
-    return {
-        m_maxBounds.x - m_minBounds.x,
-        m_maxBounds.y - m_minBounds.y,
-        m_maxBounds.z - m_minBounds.z,
-    };
+    return m_maxBounds - m_minBounds;
 }
 
 bx::Vec3 SimulationBox::center() const
 {
-    return {
-        0.5f * (m_minBounds.x + m_maxBounds.x),
-        0.5f * (m_minBounds.y + m_maxBounds.y),
-        0.5f * (m_minBounds.z + m_maxBounds.z),
-    };
+    return 0.5f * (m_minBounds + m_maxBounds);
 }
 
 SimulationBox::Shape SimulationBox::shape() const

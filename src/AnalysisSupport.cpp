@@ -1,4 +1,5 @@
 #include "AnalysisSupport.h"
+#include "BxVec3Operators.h"
 #include "Log.h"
 
 #include <algorithm>
@@ -402,25 +403,6 @@ bool usesPeriodicNeighborGrid(const ViewerState &viewerState,
     }
 
     return true;
-}
-
-float wrapNeighborDelta(float delta, float extent)
-{
-    if (extent <= 0.0f)
-    {
-        return delta;
-    }
-
-    const float halfExtent = 0.5f * extent;
-    while (delta > halfExtent)
-    {
-        delta -= extent;
-    }
-    while (delta < -halfExtent)
-    {
-        delta += extent;
-    }
-    return delta;
 }
 
 void addNeighborRelation(std::vector<NearestNeighborData> &neighbors,
@@ -1013,12 +995,7 @@ void findNearestNeighbors(const ViewerState &viewerState,
                 };
                 if (periodicGrid)
                 {
-                    displacement.x = wrapNeighborDelta(displacement.x, extent.x);
-                    displacement.y = wrapNeighborDelta(displacement.y, extent.y);
-                    if (isThreeDimensional)
-                    {
-                        displacement.z = wrapNeighborDelta(displacement.z, extent.z);
-                    }
+                    displacement = simulationBox.nearestImage(displacement);
                 }
 
                 const float cutoffDistance = viewerState.neighborCutoffFactor
@@ -1036,7 +1013,7 @@ void findNearestNeighbors(const ViewerState &viewerState,
                                     distance);
                 addNeighborRelation(neighborLists[neighborIndex],
                                     static_cast<uint32_t>(particleIndex),
-                                    bx::mul(displacement, -1.0f),
+                                    -displacement,
                                     distance);
             }
         }
@@ -1290,7 +1267,6 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
     }
 
     const std::vector<Particle> &particles = particleSystem.particles();
-    const bx::Vec3 boxSize = simulationBox.size();
     const bool sphericalBounds = simulationBox.shape() == SimulationBox::Shape::Spherical;
 
     uint64_t processedThisStep = 0u;
@@ -1307,26 +1283,15 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
             ++processedThisStep;
             ++batch.processedPairChecks;
 
-            bx::Vec3 displacement = {
-                particleJ.position.x - particleI.position.x,
-                particleJ.position.y - particleI.position.y,
-                isTwoDimensional ? 0.0f : (particleJ.position.z - particleI.position.z),
-            };
+            bx::Vec3 displacement = particleJ.position - particleI.position;
+            if (isTwoDimensional)
+            {
+                displacement.z = 0.0f;
+            }
 
             if (!sphericalBounds)
             {
-                if (simulationBox.isPeriodic(0))
-                {
-                    displacement.x = wrapNeighborDelta(displacement.x, boxSize.x);
-                }
-                if (simulationBox.isPeriodic(1))
-                {
-                    displacement.y = wrapNeighborDelta(displacement.y, boxSize.y);
-                }
-                if (!isTwoDimensional && simulationBox.isPeriodic(2))
-                {
-                    displacement.z = wrapNeighborDelta(displacement.z, boxSize.z);
-                }
+                displacement = simulationBox.nearestImage(displacement);
             }
 
             const float distance = isTwoDimensional

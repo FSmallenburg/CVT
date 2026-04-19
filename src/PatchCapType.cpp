@@ -1,4 +1,5 @@
 #include "PatchCapType.h"
+#include "BxVec3Operators.h"
 
 #include <bx/math.h>
 
@@ -18,7 +19,7 @@ void buildRigidTransformFromDirection(const Particle &particle, float *outTransf
         return;
     }
 
-    const bx::Vec3 zAxis = bx::mul(particle.direction, 1.0f / directionLength);
+    const bx::Vec3 zAxis = particle.direction * (1.0f / directionLength);
     const bx::Vec3 referenceAxis = std::abs(zAxis.z) < 0.999f
                                        ? bx::Vec3{0.0f, 0.0f, 1.0f}
                                        : bx::Vec3{0.0f, 1.0f, 0.0f};

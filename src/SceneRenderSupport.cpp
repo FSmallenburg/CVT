@@ -1,5 +1,7 @@
 #include "SceneRenderSupport.h"
 
+#include "BxVec3Operators.h"
+
 #include "ArrowType.h"
 #include "ColorPalette.h"
 #include "CubeType.h"
@@ -330,9 +332,7 @@ void rebuildBondRenderSystems(const ParticleSystem &particleSystem,
     bondRenderSystems.nodeSystem->clear();
 
     const auto displayedPositionFor = [&](const bx::Vec3 &rawPosition) {
-        bx::Vec3 displayedPosition = {rawPosition.x + positionOffset.x,
-                                      rawPosition.y + positionOffset.y,
-                                      rawPosition.z + positionOffset.z};
+        bx::Vec3 displayedPosition = rawPosition + positionOffset;
         if (wrapToPeriodicBox)
         {
             simulationBox.wrapPosition(displayedPosition);
@@ -371,14 +371,10 @@ void rebuildBondRenderSystems(const ParticleSystem &particleSystem,
                 continue;
             }
 
-            bx::Vec3 displacement = {
-                bondTarget->position.x - particle.position.x,
-                bondTarget->position.y - particle.position.y,
-                bondTarget->position.z - particle.position.z,
-            };
+            bx::Vec3 displacement = bondTarget->position - particle.position;
             displacement = simulationBox.nearestImage(displacement);
 
-            const bx::Vec3 halfDisplacement = bx::mul(displacement, 0.5f);
+            const bx::Vec3 halfDisplacement = displacement * 0.5f;
             const float cylinderLength = bx::length(halfDisplacement);
             if (cylinderLength <= 1.0e-6f)
             {
@@ -387,11 +383,7 @@ void rebuildBondRenderSystems(const ParticleSystem &particleSystem,
 
             Particle cylinderParticle;
             cylinderParticle.id = particle.id;
-            cylinderParticle.position = {
-                displayedSourcePosition.x + 0.25f * displacement.x,
-                displayedSourcePosition.y + 0.25f * displacement.y,
-                displayedSourcePosition.z + 0.25f * displacement.z,
-            };
+            cylinderParticle.position = displayedSourcePosition + (0.25f * displacement);
             cylinderParticle.direction = halfDisplacement;
             cylinderParticle.baseColor = particle.baseColor;
             cylinderParticle.color = particle.color;
@@ -446,9 +438,7 @@ void rebuildNearestNeighborRenderSystems(const ParticleSystem &particleSystem,
     neighborRenderSystems.nodeSystem->clear();
 
     const auto displayedPositionFor = [&](const bx::Vec3 &rawPosition) {
-        bx::Vec3 displayedPosition = {rawPosition.x + positionOffset.x,
-                                      rawPosition.y + positionOffset.y,
-                                      rawPosition.z + positionOffset.z};
+        bx::Vec3 displayedPosition = rawPosition + positionOffset;
         if (wrapToPeriodicBox)
         {
             simulationBox.wrapPosition(displayedPosition);
@@ -493,7 +483,7 @@ void rebuildNearestNeighborRenderSystems(const ParticleSystem &particleSystem,
                 continue;
             }
 
-            const bx::Vec3 halfDisplacement = bx::mul(neighbor.displacement, 0.5f);
+            const bx::Vec3 halfDisplacement = neighbor.displacement * 0.5f;
             const float cylinderLength = bx::length(halfDisplacement);
             if (cylinderLength <= 1.0e-6f)
             {
@@ -502,11 +492,7 @@ void rebuildNearestNeighborRenderSystems(const ParticleSystem &particleSystem,
 
             Particle cylinderParticle;
             cylinderParticle.id = particle.id;
-            cylinderParticle.position = {
-                displayedSourcePosition.x + 0.5f * halfDisplacement.x,
-                displayedSourcePosition.y + 0.5f * halfDisplacement.y,
-                displayedSourcePosition.z + 0.5f * halfDisplacement.z,
-            };
+            cylinderParticle.position = displayedSourcePosition + (0.5f * halfDisplacement);
             cylinderParticle.direction = halfDisplacement;
             cylinderParticle.baseColor = particle.baseColor;
             cylinderParticle.color = particle.color;
@@ -683,13 +669,13 @@ void rebuildBondDiagramSystems(const ParticleSystem &particleSystem,
                 continue;
             }
 
-            direction = bx::mul(direction, 1.0f / directionLength);
+            direction *= 1.0f / directionLength;
             const std::array<float, 4> bondColor =
                 bondDiagramColorForParticles(sourceParticle, targetParticle);
 
             Particle forwardMarker;
             forwardMarker.id = markerId++;
-            forwardMarker.position = bx::mul(direction, kBondDiagramMarkerRadius);
+            forwardMarker.position = direction * kBondDiagramMarkerRadius;
             forwardMarker.baseColor = bondColor;
             forwardMarker.color = forwardMarker.baseColor;
             forwardMarker.visible = true;
@@ -698,7 +684,7 @@ void rebuildBondDiagramSystems(const ParticleSystem &particleSystem,
 
             Particle reverseMarker;
             reverseMarker.id = markerId++;
-            reverseMarker.position = bx::mul(direction, -kBondDiagramMarkerRadius);
+            reverseMarker.position = direction * -kBondDiagramMarkerRadius;
             reverseMarker.baseColor = bondColor;
             reverseMarker.color = reverseMarker.baseColor;
             reverseMarker.visible = true;
