@@ -2,6 +2,7 @@
 
 #include "BondOrderScatter.h"
 #include "ImGuiBgfx.h"
+#include "Log.h"
 
 #include "imgui.h"
 #include <implot.h>
@@ -632,7 +633,8 @@ size_t countVisibleParticles(const ParticleSystem &particleSystem)
 
 void printVisibleParticleCount(const ParticleSystem &particleSystem)
 {
-    std::cout << "Visible particles: " << countVisibleParticles(particleSystem) << std::endl;
+    cvt::log::info() << "Visible particles: " << countVisibleParticles(particleSystem)
+                     << std::endl;
 }
 
 uint16_t computeUiPanelWidth(uint16_t windowWidth, bool showUi)

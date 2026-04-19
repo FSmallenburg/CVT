@@ -6,6 +6,7 @@
 #include "CubeType.h"
 #include "CylinderType.h"
 #include "ImGuiBgfx.h"
+#include "Log.h"
 #include "Mesh.h"
 #include "OctahedronType.h"
 #include "PatchCapType.h"
@@ -56,6 +57,19 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+
+static bool openTrajectoryFile(const std::string &path,
+                               ViewerState &viewerState,
+                               const bgfx::VertexLayout &layout,
+                               uint16_t sphereStacks, uint16_t sphereSlices,
+                               std::unique_ptr<TrajectoryReader> &trajectoryReader,
+                               ParticleSystem &particleSystem,
+                               TrajectoryReader::FileType &particleFileType,
+                               SimulationBox &simulationBox,
+                               StructureFactorResources &structureFactorResources,
+                               std::string &loadedPath,
+                               size_t &currentFrame,
+                               size_t &totalFrames);
 
 namespace
 {
@@ -254,21 +268,21 @@ bool initializeBgfxRenderer(bgfx::Init &init)
             != (supportedRenderers + supportedRendererCount);
         if (!rendererSupported)
         {
-            std::cout << "bgfx renderer backend unavailable: "
-                      << bgfx::getRendererName(rendererType) << std::endl;
+            cvt::log::warn() << "bgfx renderer backend unavailable: "
+                             << bgfx::getRendererName(rendererType) << std::endl;
             continue;
         }
 
         init.type = rendererType;
         if (bgfx::init(init))
         {
-            std::cout << "Using bgfx renderer backend: "
-                      << bgfx::getRendererName(bgfx::getRendererType()) << std::endl;
+            cvt::log::info() << "Using bgfx renderer backend: "
+                             << bgfx::getRendererName(bgfx::getRendererType()) << std::endl;
             return true;
         }
 
-        std::cerr << "Failed to initialize bgfx renderer backend: "
-                  << bgfx::getRendererName(rendererType) << std::endl;
+        cvt::log::error() << "Failed to initialize bgfx renderer backend: "
+                          << bgfx::getRendererName(rendererType) << std::endl;
     }
 
     return false;
@@ -283,17 +297,17 @@ bgfx::ShaderHandle loadShader(const char *path)
     std::ifstream file(shaderPath, std::ios::binary);
     if (!file)
     {
-        std::cerr << "Failed to open shader: " << path;
+        cvt::log::error() << "Failed to open shader: " << path;
         if (!s_resourceSearchRoots.empty())
         {
-            std::cerr << " (searched";
+            cvt::log::error() << " (searched";
             for (const fs::path &root : s_resourceSearchRoots)
             {
-                std::cerr << ' ' << (root / path).string();
+                cvt::log::error() << ' ' << (root / path).string();
             }
-            std::cerr << ')';
+            cvt::log::error() << ')';
         }
-        std::cerr << std::endl;
+        cvt::log::error() << std::endl;
         return BGFX_INVALID_HANDLE;
     }
     file.seekg(0, std::ios::end);
@@ -494,12 +508,12 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
     std::vector<uint32_t> sortedIds(selectedIds.begin(), selectedIds.end());
     std::sort(sortedIds.begin(), sortedIds.end());
 
-    std::cout << "Selected particle IDs:";
+    cvt::log::info() << "Selected particle IDs:";
     for (uint32_t particleId : sortedIds)
     {
-        std::cout << ' ' << displayParticleId(particleId);
+        cvt::log::info() << ' ' << displayParticleId(particleId);
     }
-    std::cout << std::endl;
+    cvt::log::info() << std::endl;
 
     if (sortedIds.size() != 2u)
     {
@@ -510,8 +524,8 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
     const Particle *secondParticle = findParticleById(particleSystem, sortedIds[1]);
     if (firstParticle == nullptr || secondParticle == nullptr)
     {
-        std::cout << "Could not resolve both selected particle IDs in the current frame."
-                  << std::endl;
+        cvt::log::error() << "Could not resolve both selected particle IDs in the current frame."
+                          << std::endl;
         return;
     }
 
@@ -524,13 +538,13 @@ void printSelectedParticles(const ParticleSystem &particleSystem,
 
     const float centerDistance = bx::length(displacement);
     const float radiusSum = particleRadius(*firstParticle) + particleRadius(*secondParticle);
-    std::cout << std::fixed << std::setprecision(6)
-              << "Center distance(" << displayParticleId(sortedIds[0]) << ", "
-              << displayParticleId(sortedIds[1])
-              << "): " << centerDistance << '\n'
-              << "Radius sum(" << displayParticleId(sortedIds[0]) << ", "
-              << displayParticleId(sortedIds[1])
-              << "): " << radiusSum << std::endl;
+    cvt::log::info() << std::fixed << std::setprecision(6)
+                     << "Center distance(" << displayParticleId(sortedIds[0]) << ", "
+                     << displayParticleId(sortedIds[1])
+                     << "): " << centerDistance << '\n'
+                     << "Radius sum(" << displayParticleId(sortedIds[0]) << ", "
+                     << displayParticleId(sortedIds[1])
+                     << "): " << radiusSum << std::endl;
 }
 
 void removeFrankKasperUnbondedVisibilityFilter(ViewerState &viewerState)
@@ -613,6 +627,266 @@ bool applyFrankKasperVisibilityModeIfActive(ViewerState &viewerState,
     return true;
 }
 
+void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
+                                                 ParticleSystem &particleSystem,
+                                                 const SimulationBox &simulationBox)
+{
+    if (viewerState.pendingFindNeighbors)
+    {
+        const bool wasFrankKasperViewModeEnabled = viewerState.frankKasperViewModeEnabled;
+        resetFrankKasperState(viewerState, false);
+        findNearestNeighbors(viewerState, simulationBox, particleSystem);
+        viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
+        markNearestNeighborRenderSystemsDirty(viewerState);
+        markBondDiagramGeometryDirty(viewerState);
+        if (viewerState.neighborAnalysisValid)
+        {
+            computeAnalysisResults(viewerState, particleSystem);
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
+        else
+        {
+            particleSystem.clearAnalysisResults();
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
+        viewerState.pendingFindNeighbors = false;
+        viewerState.pendingRefreshAnalysisResults = false;
+        if (viewerState.neighborAnalysisValid
+            && viewerState.frankKasperAutoRecalculate
+            && viewerState.frankKasperViewActivatedOnce)
+        {
+            viewerState.frankKasperViewModeEnabled = wasFrankKasperViewModeEnabled;
+            viewerState.pendingRecalculateFrankKasperBonds = true;
+        }
+        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                      viewerState);
+        if (visibilityChanged)
+        {
+            markVisibilityDependentHelperSystemsDirty(viewerState);
+        }
+        markPickBufferDirty(viewerState);
+    }
+
+    if (viewerState.pendingRefreshAnalysisResults)
+    {
+        if (viewerState.neighborAnalysisValid)
+        {
+            computeAnalysisResults(viewerState, particleSystem);
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+            markPickBufferDirty(viewerState);
+        }
+        else
+        {
+            particleSystem.clearAnalysisResults();
+            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+            {
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+        }
+        viewerState.pendingRefreshAnalysisResults = false;
+        markPickBufferDirty(viewerState);
+    }
+
+    if (viewerState.pendingToggleFrankKasperUnbondedVisibility)
+    {
+        if (viewerState.frankKasperViewActivatedOnce)
+        {
+            if (applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem))
+            {
+                const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                              viewerState);
+                if (visibilityChanged)
+                {
+                    markVisibilityDependentHelperSystemsDirty(viewerState);
+                }
+                markPickBufferDirty(viewerState);
+            }
+        }
+        viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
+    }
+
+    if (viewerState.pendingRecalculateFrankKasperBonds)
+    {
+        if (!viewerState.neighborAnalysisValid)
+        {
+            viewerState.pendingFindNeighbors = true;
+        }
+        else
+        {
+            calculateFrankKasperBonds(particleSystem, particleSystem);
+            viewerState.frankKasperBondsCached = true;
+
+            if (applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem))
+            {
+                const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                              viewerState);
+                if (visibilityChanged)
+                {
+                    markVisibilityDependentHelperSystemsDirty(viewerState);
+                }
+
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+
+            markBondLikeHelperSystemsDirty(viewerState);
+            markPickBufferDirty(viewerState);
+            viewerState.pendingRecalculateFrankKasperBonds = false;
+        }
+    }
+
+    if (viewerState.pendingActivateFrankKasperView)
+    {
+        if (!viewerState.neighborAnalysisValid)
+        {
+            viewerState.pendingFindNeighbors = true;
+        }
+        else
+        {
+            if (!viewerState.frankKasperBondsCached)
+            {
+                calculateFrankKasperBonds(particleSystem, particleSystem);
+                viewerState.frankKasperBondsCached = true;
+            }
+
+            viewerState.bondModeEnabled = true;
+            viewerState.mobilityModeEnabled = false;
+            viewerState.nearestNeighborModeEnabled = false;
+            viewerState.colorMode = ColorMode::BondCount;
+            viewerState.analysisColorMode = AnalysisColorMode::Disabled;
+            viewerState.frankKasperViewModeEnabled = true;
+            viewerState.frankKasperViewActivatedOnce = true;
+            viewerState.frankKasperAutoRecalculate = true;
+
+            applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem);
+
+            const bool visibilityChanged =
+                applyParticleVisibilityFilters(particleSystem, viewerState);
+            if (visibilityChanged)
+            {
+                markVisibilityDependentHelperSystemsDirty(viewerState);
+            }
+
+            viewerState.pendingActivateFrankKasperView = false;
+
+            markColorDependentHelperSystemsDirty(viewerState);
+            markBondLikeHelperSystemsDirty(viewerState);
+            markPickBufferDirty(viewerState);
+        }
+    }
+}
+
+void processPendingFileOpenAction(ViewerState &viewerState,
+                                  ParticleSystem &particleSystem,
+                                  const bgfx::VertexLayout &layout,
+                                  TrajectoryReader::FileType &particleFileType,
+                                  SimulationBox &simulationBox,
+                                  std::unique_ptr<TrajectoryReader> &trajectoryReader,
+                                  StructureFactorResources &structureFactorResources,
+                                  std::string &loadedPath,
+                                  size_t &currentFrame,
+                                  size_t &totalFrames,
+                                  uint16_t sphereStacks,
+                                  uint16_t sphereSlices)
+{
+    if (!viewerState.pendingOpenDroppedFile)
+    {
+        return;
+    }
+
+    if (!viewerState.pendingOpenPath.empty())
+    {
+        openTrajectoryFile(viewerState.pendingOpenPath, viewerState, layout,
+                           sphereStacks, sphereSlices, trajectoryReader,
+                           particleSystem, particleFileType, simulationBox,
+                           structureFactorResources, loadedPath,
+                           currentFrame, totalFrames);
+    }
+    viewerState.pendingOpenPath.clear();
+    viewerState.pendingOpenDroppedFile = false;
+}
+
+void processSelectionAndVisibilityPendingActions(ViewerState &viewerState,
+                                                 ParticleSystem &particleSystem,
+                                                 const SimulationBox &simulationBox,
+                                                 TrajectoryReader::FileType particleFileType,
+                                                 float particleSizeScale)
+{
+    if (viewerState.pendingHideSelected)
+    {
+        const bool hiddenChanged = hideSelectedParticles(particleSystem,
+                                                         viewerState.selectedIds,
+                                                         viewerState.hiddenIds);
+        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                      viewerState);
+        if (hiddenChanged || visibilityChanged)
+        {
+            markVisibilityDependentHelperSystemsDirty(viewerState);
+            markPickBufferDirty(viewerState);
+        }
+        viewerState.pendingHideSelected = false;
+        viewerState.lastPickedId = 0;
+        viewerState.pendingPickRequest = false;
+    }
+
+    if (viewerState.pendingRevealAll)
+    {
+        const bool hiddenChanged = revealAllParticles(particleSystem, viewerState.hiddenIds);
+        viewerState.frankKasperAutoHiddenIds.clear();
+        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                      viewerState);
+        if (hiddenChanged || visibilityChanged)
+        {
+            markVisibilityDependentHelperSystemsDirty(viewerState);
+            markPickBufferDirty(viewerState);
+        }
+        viewerState.pendingRevealAll = false;
+        viewerState.pendingPickRequest = false;
+    }
+
+    if (viewerState.pendingOverlapCheck)
+    {
+        if (isSphereLikeFileType(particleFileType))
+        {
+            viewerState.selectedIds.clear();
+            findOverlappingSphereParticles(particleSystem, simulationBox,
+                                           particleSizeScale,
+                                           viewerState.selectedIds);
+            markPickBufferDirty(viewerState);
+        }
+        viewerState.pendingOverlapCheck = false;
+    }
+
+    if (viewerState.pendingApplyParticleTypeVisibility)
+    {
+        applyParticleVisibilityFilters(particleSystem, viewerState);
+        markVisibilityDependentHelperSystemsDirty(viewerState);
+        markPickBufferDirty(viewerState);
+        viewerState.pendingApplyParticleTypeVisibility = false;
+    }
+
+    if (viewerState.pendingInvertSelected)
+    {
+        invertSelection(particleSystem, viewerState.selectedIds);
+        viewerState.pendingInvertSelected = false;
+    }
+
+    if (viewerState.pendingSelectBonded)
+    {
+        selectBondedNeighbors(particleSystem, viewerState.selectedIds);
+        viewerState.pendingSelectBonded = false;
+        markPickBufferDirty(viewerState);
+    }
+}
+
 } // namespace
 
 static ViewerState *getViewerState(GLFWwindow *window)
@@ -634,7 +908,7 @@ static void glfw_mouseCallback(GLFWwindow *window, double xpos, double ypos)
 
 static void glfw_errorCallback(int error, const char *description)
 {
-    fprintf(stderr, "GLFW error %d: %s\n", error, description);
+    cvt::log::errorf("GLFW error %d: %s\n", error, description);
 }
 
 static void glfw_charCallback(GLFWwindow *window, unsigned int codePoint)
@@ -1189,7 +1463,7 @@ static void handleWindowResize(GLFWwindow *window, int &width, int &height,
     if (!createPickResources(pickResources, viewerState.renderViewportWidth,
                              viewerState.renderViewportHeight))
     {
-        std::cerr << "GPU picking disabled after resize: "
+        cvt::log::error() << "GPU picking disabled after resize: "
                   << pickResources.disableReason << std::endl;
     }
 }
@@ -1211,7 +1485,7 @@ static bool openTrajectoryFile(const std::string &path,
     if (!openedTrajectory->isOpen())
     {
         viewerState.fileOpenStatusMessage = openedTrajectory->error();
-        std::cerr << viewerState.fileOpenStatusMessage << std::endl;
+        cvt::log::error() << viewerState.fileOpenStatusMessage << std::endl;
         return false;
     }
 
@@ -1226,7 +1500,7 @@ static bool openTrajectoryFile(const std::string &path,
     {
         viewerState.fileOpenStatusMessage = "Failed to open trajectory file: " + path
                                             + " (" + exception.what() + ")";
-        std::cerr << viewerState.fileOpenStatusMessage << std::endl;
+        cvt::log::error() << viewerState.fileOpenStatusMessage << std::endl;
         return false;
     }
 
@@ -1234,12 +1508,12 @@ static bool openTrajectoryFile(const std::string &path,
     SimulationBox loadedSimulationBox = simulationBox;
     if (!openedTrajectory->loadFrame(0, loadedParticleSystem, loadedSimulationBox))
     {
-        std::cerr << "Failed to load frame 0 from trajectory file: " << path;
+        cvt::log::error() << "Failed to load frame 0 from trajectory file: " << path;
         if (!openedTrajectory->error().empty())
         {
-            std::cerr << "\n" << openedTrajectory->error();
+            cvt::log::error() << "\n" << openedTrajectory->error();
         }
-        std::cerr << std::endl;
+        cvt::log::error() << std::endl;
         viewerState.fileOpenStatusMessage = "Failed to open trajectory file: " + path;
         return false;
     }
@@ -1283,7 +1557,7 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.structureFactorPendingCompute = false;
     snapshotCurrentParticlePositions(particleSystem, viewerState, false);
     viewerState.fileOpenStatusMessage.clear();
-    std::cout << "Opened trajectory file: " << loadedPath << std::endl;
+    cvt::log::info() << "Opened trajectory file: " << loadedPath << std::endl;
     return true;
 }
 
@@ -1361,13 +1635,13 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         return;
     }
 
-    std::cerr << "Failed to load frame " << requestedFrame
-              << " from trajectory file: " << loadedPath;
+    cvt::log::error() << "Failed to load frame " << requestedFrame
+                      << " from trajectory file: " << loadedPath;
     if (trajectoryReader != nullptr && !trajectoryReader->error().empty())
     {
-        std::cerr << "\n" << trajectoryReader->error();
+        cvt::log::error() << "\n" << trajectoryReader->error();
     }
-    std::cerr << std::endl;
+    cvt::log::error() << std::endl;
 }
 
 static void processPendingActions(ViewerState &viewerState, ParticleSystem &particleSystem,
@@ -1392,236 +1666,18 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         viewerState.pendingFindNeighbors = true;
     }
 
-    if (viewerState.pendingOpenDroppedFile)
-    {
-        if (!viewerState.pendingOpenPath.empty())
-        {
-            openTrajectoryFile(viewerState.pendingOpenPath, viewerState, layout,
-                               sphereStacks, sphereSlices, trajectoryReader,
-                               particleSystem, particleFileType, simulationBox,
-                               structureFactorResources, loadedPath,
-                               currentFrame, totalFrames);
-        }
-        viewerState.pendingOpenPath.clear();
-        viewerState.pendingOpenDroppedFile = false;
-    }
+    processPendingFileOpenAction(viewerState, particleSystem, layout,
+                                 particleFileType, simulationBox,
+                                 trajectoryReader, structureFactorResources,
+                                 loadedPath, currentFrame, totalFrames,
+                                 sphereStacks, sphereSlices);
 
-    if (viewerState.pendingHideSelected)
-    {
-        const bool hiddenChanged = hideSelectedParticles(particleSystem,
-                                                         viewerState.selectedIds,
-                                                         viewerState.hiddenIds);
-        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
-                                                                      viewerState);
-        if (hiddenChanged || visibilityChanged)
-        {
-            markVisibilityDependentHelperSystemsDirty(viewerState);
-            markPickBufferDirty(viewerState);
-        }
-        viewerState.pendingHideSelected = false;
-        viewerState.lastPickedId = 0;
-        viewerState.pendingPickRequest = false;
-    }
+    processSelectionAndVisibilityPendingActions(viewerState, particleSystem,
+                                                simulationBox, particleFileType,
+                                                particleSizeScale);
 
-    if (viewerState.pendingRevealAll)
-    {
-        const bool hiddenChanged = revealAllParticles(particleSystem, viewerState.hiddenIds);
-        viewerState.frankKasperAutoHiddenIds.clear();
-        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
-                                                                      viewerState);
-        if (hiddenChanged || visibilityChanged)
-        {
-            markVisibilityDependentHelperSystemsDirty(viewerState);
-            markPickBufferDirty(viewerState);
-        }
-        viewerState.pendingRevealAll = false;
-        viewerState.pendingPickRequest = false;
-    }
-
-    if (viewerState.pendingOverlapCheck)
-    {
-        if (isSphereLikeFileType(particleFileType))
-        {
-            viewerState.selectedIds.clear();
-            findOverlappingSphereParticles(particleSystem, simulationBox,
-                                           particleSizeScale,
-                                           viewerState.selectedIds);
-            markPickBufferDirty(viewerState);
-        }
-        viewerState.pendingOverlapCheck = false;
-    }
-
-    if (viewerState.pendingApplyParticleTypeVisibility)
-    {
-        applyParticleVisibilityFilters(particleSystem, viewerState);
-        markVisibilityDependentHelperSystemsDirty(viewerState);
-        markPickBufferDirty(viewerState);
-        viewerState.pendingApplyParticleTypeVisibility = false;
-    }
-
-    if (viewerState.pendingInvertSelected)
-    {
-        invertSelection(particleSystem, viewerState.selectedIds);
-        viewerState.pendingInvertSelected = false;
-    }
-
-    if (viewerState.pendingSelectBonded)
-    {
-        selectBondedNeighbors(particleSystem, viewerState.selectedIds);
-        viewerState.pendingSelectBonded = false;
-        markPickBufferDirty(viewerState);
-    }
-
-    if (viewerState.pendingFindNeighbors)
-    {
-        const bool wasFrankKasperViewModeEnabled = viewerState.frankKasperViewModeEnabled;
-        resetFrankKasperState(viewerState, false);
-        findNearestNeighbors(viewerState, simulationBox, particleSystem);
-        viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
-        markNearestNeighborRenderSystemsDirty(viewerState);
-        markBondDiagramGeometryDirty(viewerState);
-        if (viewerState.neighborAnalysisValid)
-        {
-            computeAnalysisResults(viewerState, particleSystem);
-            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
-            {
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-        }
-        else
-        {
-            particleSystem.clearAnalysisResults();
-            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
-            {
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-        }
-        viewerState.pendingFindNeighbors = false;
-        viewerState.pendingRefreshAnalysisResults = false;
-        if (viewerState.neighborAnalysisValid
-            && viewerState.frankKasperAutoRecalculate
-            && viewerState.frankKasperViewActivatedOnce)
-        {
-            viewerState.frankKasperViewModeEnabled = wasFrankKasperViewModeEnabled;
-            viewerState.pendingRecalculateFrankKasperBonds = true;
-        }
-        const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
-                                                                      viewerState);
-        if (visibilityChanged)
-        {
-            markVisibilityDependentHelperSystemsDirty(viewerState);
-        }
-        markPickBufferDirty(viewerState);
-    }
-
-    if (viewerState.pendingRefreshAnalysisResults)
-    {
-        if (viewerState.neighborAnalysisValid)
-        {
-            computeAnalysisResults(viewerState, particleSystem);
-            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
-            {
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-            markPickBufferDirty(viewerState);
-        }
-        else
-        {
-            particleSystem.clearAnalysisResults();
-            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
-            {
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-        }
-        viewerState.pendingRefreshAnalysisResults = false;
-        markPickBufferDirty(viewerState);
-    }
-
-    if (viewerState.pendingToggleFrankKasperUnbondedVisibility)
-    {
-        if (viewerState.frankKasperViewActivatedOnce)
-        {
-            if (applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem))
-            {
-                const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
-                                                                              viewerState);
-                if (visibilityChanged)
-                {
-                    markVisibilityDependentHelperSystemsDirty(viewerState);
-                }
-                markPickBufferDirty(viewerState);
-            }
-        }
-        viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
-    }
-
-    if (viewerState.pendingRecalculateFrankKasperBonds)
-    {
-        if (!viewerState.neighborAnalysisValid)
-        {
-            viewerState.pendingFindNeighbors = true;
-        }
-        else
-        {
-            calculateFrankKasperBonds(particleSystem, particleSystem);
-            viewerState.frankKasperBondsCached = true;
-
-            if (applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem))
-            {
-                const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
-                                                                              viewerState);
-                if (visibilityChanged)
-                {
-                    markVisibilityDependentHelperSystemsDirty(viewerState);
-                }
-
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-
-            markBondLikeHelperSystemsDirty(viewerState);
-            markPickBufferDirty(viewerState);
-            viewerState.pendingRecalculateFrankKasperBonds = false;
-        }
-    }
-
-    if (viewerState.pendingActivateFrankKasperView)
-    {
-        if (!viewerState.neighborAnalysisValid)
-        {
-            viewerState.pendingFindNeighbors = true;
-        }
-        else
-        {
-            if (!viewerState.frankKasperBondsCached)
-            {
-                calculateFrankKasperBonds(particleSystem, particleSystem);
-                viewerState.frankKasperBondsCached = true;
-            }
-
-            applyFrankKasperVisibilityModeIfActive(viewerState, particleSystem);
-
-            const bool visibilityChanged =
-                applyParticleVisibilityFilters(particleSystem, viewerState);
-            if (visibilityChanged)
-            {
-                markVisibilityDependentHelperSystemsDirty(viewerState);
-            }
-
-            viewerState.bondModeEnabled = true;
-            viewerState.mobilityModeEnabled = false;
-            viewerState.nearestNeighborModeEnabled = false;
-            viewerState.colorMode = ColorMode::BondCount;
-            viewerState.analysisColorMode = AnalysisColorMode::Disabled;
-            viewerState.frankKasperViewModeEnabled = true;
-            viewerState.frankKasperViewActivatedOnce = true;
-            viewerState.frankKasperAutoRecalculate = true;
-            viewerState.pendingActivateFrankKasperView = false;
-
-            markColorDependentHelperSystemsDirty(viewerState);
-            markBondLikeHelperSystemsDirty(viewerState);
-            markPickBufferDirty(viewerState);
-        }
-    }
+    processAnalysisAndFrankKasperPendingActions(viewerState, particleSystem,
+                                                simulationBox);
 
     if (!viewerState.structureFactorPanelOpen)
     {
@@ -1754,9 +1810,9 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         markPickBufferDirty(viewerState);
         if (!hasValidParticleMeshes(particleSystem))
         {
-            std::cerr << "Failed to rebuild " << particleTypeName(particleFileType)
-                      << " mesh for resolution "
-                      << sphereStacks << "x" << sphereSlices << std::endl;
+            cvt::log::error() << "Failed to rebuild " << particleTypeName(particleFileType)
+                              << " mesh for resolution "
+                              << sphereStacks << "x" << sphereSlices << std::endl;
             exitCode = 1;
         }
     }
@@ -2137,7 +2193,7 @@ int main(int argc, char **argv)
         {
             viewerState.fileOpenStatusMessage =
                 "Drop a trajectory file into the window to open it.";
-            std::cout << viewerState.fileOpenStatusMessage << std::endl;
+            cvt::log::info() << viewerState.fileOpenStatusMessage << std::endl;
         }
 
         bgfx::setViewClear(kMainView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
@@ -2151,7 +2207,7 @@ int main(int argc, char **argv)
         imGuiGuard.initialized = uiAvailable;
         if (!uiAvailable)
         {
-            std::cerr << "Dear ImGui UI unavailable; continuing without UI." << std::endl;
+            cvt::log::error() << "Dear ImGui UI unavailable; continuing without UI." << std::endl;
         }
 
         viewerState.uiPanelWidth =
@@ -2181,28 +2237,28 @@ int main(int argc, char **argv)
         if (!createPickResources(pickResources, viewerState.renderViewportWidth,
                                  viewerState.renderViewportHeight))
         {
-            std::cerr << "GPU picking disabled: " << pickResources.disableReason << std::endl;
+            cvt::log::error() << "GPU picking disabled: " << pickResources.disableReason << std::endl;
         }
         if (!createBondDiagramResources(bondDiagramResources, kBondDiagramPreviewSize,
                                         kBondDiagramPreviewSize))
         {
-            std::cerr << "Bond diagram preview unavailable: "
-                      << bondDiagramResources.disableReason << std::endl;
+            cvt::log::error() << "Bond diagram preview unavailable: "
+                              << bondDiagramResources.disableReason << std::endl;
         }
 
         if (exitCode == 0
             && (!hasValidParticleMeshes(particleSystem)
                 || !bgfx::isValid(gpuResources.mainProgram)))
         {
-            std::cerr << "INVALID BGFX RESOURCE: particleMeshes="
-                      << hasValidParticleMeshes(particleSystem)
-                      << " program=" << bgfx::isValid(gpuResources.mainProgram)
-                      << std::endl;
+            cvt::log::error() << "INVALID BGFX RESOURCE: particleMeshes="
+                              << hasValidParticleMeshes(particleSystem)
+                              << " program=" << bgfx::isValid(gpuResources.mainProgram)
+                              << std::endl;
             exitCode = 1;
         }
         if (exitCode == 0 && !bgfx::isValid(gpuResources.lineProgram))
         {
-            std::cerr << "Wireframe box shaders unavailable" << std::endl;
+            cvt::log::error() << "Wireframe box shaders unavailable" << std::endl;
             exitCode = 1;
         }
         if (exitCode == 0 && !bgfx::isValid(gpuResources.pickProgram))

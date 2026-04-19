@@ -1,4 +1,5 @@
 #include "ViewerSupport.h"
+#include "Log.h"
 
 #include <algorithm>
 #include <cctype>
@@ -292,7 +293,7 @@ bool alignViewToSelectedParticles(ViewerState &state,
 {
     if (state.selectedIds.size() != 2u)
     {
-        std::cout << "Align view requires exactly two selected particles." << std::endl;
+        cvt::log::info() << "Align view requires exactly two selected particles." << std::endl;
         return false;
     }
 
@@ -303,7 +304,7 @@ bool alignViewToSelectedParticles(ViewerState &state,
     const Particle *secondParticle = findParticleById(particleSystem, sortedIds[1]);
     if (firstParticle == nullptr || secondParticle == nullptr)
     {
-        std::cout << "Could not resolve both selected particle IDs in the current frame."
+        cvt::log::error() << "Could not resolve both selected particle IDs in the current frame."
                   << std::endl;
         return false;
     }
@@ -321,8 +322,8 @@ bool alignViewToSelectedParticles(ViewerState &state,
     const float displacementLength = bx::length(displacement);
     if (!(displacementLength > kAlignViewEpsilon))
     {
-        std::cout << "Selected particles occupy the same position; view alignment skipped."
-                  << std::endl;
+        cvt::log::info() << "Selected particles occupy the same position; view alignment skipped."
+                 << std::endl;
         return false;
     }
 

@@ -2,6 +2,8 @@
 
 #include "ParticleType.h"
 
+/// ParticleType for cubic (.cub) particles. Renders each particle as an
+/// axis-aligned cube; the cube half-extent is driven by sizeParams[0].
 class CubeType final : public ParticleType
 {
   public:

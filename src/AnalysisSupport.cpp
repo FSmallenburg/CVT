@@ -1,4 +1,5 @@
 #include "AnalysisSupport.h"
+#include "Log.h"
 
 #include <algorithm>
 #include <array>
@@ -738,16 +739,16 @@ void printSelectedBondOrderParameters(const ViewerState &viewerState,
 {
     if (viewerState.selectedIds.empty())
     {
-        std::cout << "No particles are currently selected for bond-order output."
-                  << std::endl;
+        cvt::log::info() << "No particles are currently selected for bond-order output."
+                 << std::endl;
         return;
     }
 
     const uint8_t selectedOrder = clampedBondOrientationalOrder(viewerState);
     if (!particleSystem.hasAnalysisResults(selectedOrder))
     {
-        std::cout << "Bond-order analysis is not available yet. Compute neighbors first."
-                  << std::endl;
+        cvt::log::info() << "Bond-order analysis is not available yet. Compute neighbors first."
+                 << std::endl;
         return;
     }
 
@@ -757,17 +758,17 @@ void printSelectedBondOrderParameters(const ViewerState &viewerState,
         viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
     bool foundSelectedParticle = false;
 
-    std::cout << std::fixed << std::setprecision(6)
-              << "Bond-order values for selected particles";
+    cvt::log::info() << std::fixed << std::setprecision(6)
+                     << "Bond-order values for selected particles";
     if (isTwoDimensional)
     {
-        std::cout << " (symmetry = " << unsigned(selectedOrder) << ')';
+        cvt::log::info() << " (symmetry = " << unsigned(selectedOrder) << ')';
     }
     else
     {
-        std::cout << " (l = " << unsigned(selectedOrder) << ')';
+        cvt::log::info() << " (l = " << unsigned(selectedOrder) << ')';
     }
-    std::cout << ':' << std::endl;
+    cvt::log::info() << ':' << std::endl;
 
     for (size_t particleIndex = 0u; particleIndex < particles.size(); ++particleIndex)
     {
@@ -781,29 +782,29 @@ void printSelectedBondOrderParameters(const ViewerState &viewerState,
         foundSelectedParticle = true;
         const ParticleAnalysisData &analysis = analysisResults[particleIndex];
         const uint32_t displayParticleId = particle.id > 0u ? (particle.id - 1u) : 0u;
-        std::cout << "  Particle " << displayParticleId
-                  << ": nearest neighbors=" << analysis.neighborCount;
+        cvt::log::info() << "  Particle " << displayParticleId
+                         << ": nearest neighbors=" << analysis.neighborCount;
         if (isTwoDimensional)
         {
-            std::cout << ", |psi_" << unsigned(selectedOrder) << "|="
-                      << analysis.bondOrientationalMagnitude
-                      << ", phase=" << analysis.bondOrientationalPhase;
+            cvt::log::info() << ", |psi_" << unsigned(selectedOrder) << "|="
+                             << analysis.bondOrientationalMagnitude
+                             << ", phase=" << analysis.bondOrientationalPhase;
         }
         else
         {
             const size_t orderIndex = steinhardtArrayIndex(selectedOrder);
-            std::cout << ", |q_" << unsigned(selectedOrder) << "|="
-                      << analysis.steinhardtQValues[orderIndex]
-                      << ", |qbar_" << unsigned(selectedOrder) << "|="
-                      << analysis.steinhardtQBarValues[orderIndex];
+            cvt::log::info() << ", |q_" << unsigned(selectedOrder) << "|="
+                             << analysis.steinhardtQValues[orderIndex]
+                             << ", |qbar_" << unsigned(selectedOrder) << "|="
+                             << analysis.steinhardtQBarValues[orderIndex];
         }
-        std::cout << std::endl;
+        cvt::log::info() << std::endl;
     }
 
     if (!foundSelectedParticle)
     {
-        std::cout << "No selected particle IDs were found in the current frame."
-                  << std::endl;
+        cvt::log::info() << "No selected particle IDs were found in the current frame."
+                         << std::endl;
     }
 }
 

@@ -1,4 +1,5 @@
 #include "ScreenshotSupport.h"
+#include "Log.h"
 
 #include <bimg/bimg.h>
 #include <bx/allocator.h>
@@ -34,10 +35,10 @@ std::tm localTime(std::time_t timeValue)
 void ScreenshotCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal::Enum code,
                                const char *message)
 {
-    std::fprintf(stderr, "bgfx fatal %u at %s:%u: %s\n", static_cast<unsigned>(code),
-                 filePath != nullptr ? filePath : "<unknown>", static_cast<unsigned>(line),
-                 message != nullptr ? message : "<no message>");
-    std::fflush(stderr);
+    cvt::log::errorf("bgfx fatal %u at %s:%u: %s\n", static_cast<unsigned>(code),
+                     filePath != nullptr ? filePath : "<unknown>",
+                     static_cast<unsigned>(line),
+                     message != nullptr ? message : "<no message>");
     if (code != bgfx::Fatal::DebugCheck)
     {
         std::abort();
@@ -47,10 +48,9 @@ void ScreenshotCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal:
 void ScreenshotCallback::traceVargs(const char *filePath, uint16_t line, const char *format,
                                     va_list argList)
 {
-    std::fprintf(stderr, "bgfx trace %s:%u: ", filePath != nullptr ? filePath : "<unknown>",
-                 static_cast<unsigned>(line));
-    std::vfprintf(stderr, format, argList);
-    std::fflush(stderr);
+    cvt::log::errorf("bgfx trace %s:%u: ", filePath != nullptr ? filePath : "<unknown>",
+                     static_cast<unsigned>(line));
+    cvt::log::verrorf(format, argList);
 }
 
 void ScreenshotCallback::profilerBegin(const char *, uint32_t, const char *, uint16_t)
@@ -111,28 +111,25 @@ void ScreenshotCallback::screenShot(const char *filePath, uint32_t width, uint32
             if (!writeScreenshot(filePath, viewportWidth, height, croppedPitch, format,
                                  croppedData.data(), yflip))
             {
-                std::fprintf(stderr, "Failed to write screenshot: %s\n",
-                             filePath != nullptr ? filePath : "<unknown>");
-                std::fflush(stderr);
+                cvt::log::errorf("Failed to write screenshot: %s\n",
+                                 filePath != nullptr ? filePath : "<unknown>");
                 return;
             }
 
-            std::printf("Saved snapshot: %s\n", filePath != nullptr ? filePath : "<unknown>");
-            std::fflush(stdout);
+            cvt::log::infof("Saved snapshot: %s\n",
+                            filePath != nullptr ? filePath : "<unknown>");
             return;
         }
     }
 
     if (!writeScreenshot(filePath, width, height, pitch, format, data, yflip))
     {
-        std::fprintf(stderr, "Failed to write screenshot: %s\n",
-                     filePath != nullptr ? filePath : "<unknown>");
-        std::fflush(stderr);
+        cvt::log::errorf("Failed to write screenshot: %s\n",
+                         filePath != nullptr ? filePath : "<unknown>");
         return;
     }
 
-    std::printf("Saved snapshot: %s\n", filePath != nullptr ? filePath : "<unknown>");
-    std::fflush(stdout);
+    cvt::log::infof("Saved snapshot: %s\n", filePath != nullptr ? filePath : "<unknown>");
 }
 
 void ScreenshotCallback::captureBegin(uint32_t, uint32_t, uint32_t, bgfx::TextureFormat::Enum,

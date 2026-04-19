@@ -15,17 +15,19 @@
 #include <unordered_set>
 #include <vector>
 
+/// Controls how particle colors are assigned each frame.
 enum class ColorMode : uint16_t
 {
-    FileDefault = 0,
-    PaletteCycle,
-    Uniform,
-    Orientation,
-    BondCount,
-    ParticleSize,
+    FileDefault = 0,  ///< Use the color specified in the trajectory file.
+    PaletteCycle,     ///< Assign colors by cycling through the species palette.
+    Uniform,          ///< Single color for all particles (optionally orientation-tinted).
+    Orientation,      ///< Color encodes the particle's orientation vector.
+    BondCount,        ///< Color encodes the number of nearest neighbors.
+    ParticleSize,     ///< Color encodes particle size relative to mean ± σ.
     Count,
 };
 
+/// Selects which quantity is mapped to color in neighbor-analysis mode.
 enum class AnalysisColorMode : uint8_t
 {
     Disabled = 0,
@@ -36,6 +38,7 @@ enum class AnalysisColorMode : uint8_t
     BondOrientationalQBarLMagnitude,
 };
 
+/// Selects the axes used for the 2-D bond-order scatter plot.
 enum class BondOrderScatterMode : uint8_t
 {
     RawAxesQ = 0,
@@ -44,11 +47,12 @@ enum class BondOrderScatterMode : uint8_t
     PrincipalComponentsQBar,
 };
 
+/// Controls when the structure-factor image is recomputed.
 enum class StructureFactorUpdateMode : uint8_t
 {
-    UpdateWhenStationary = 0,
-    UpdateAlways,
-    ManualOnly,
+    UpdateWhenStationary = 0, ///< Recompute once the camera/playback is idle.
+    UpdateAlways,             ///< Recompute every rendered frame.
+    ManualOnly,               ///< Only recompute when the user explicitly requests it.
 };
 
 struct ParticleSizeColorStats
@@ -127,6 +131,7 @@ struct ViewerState
     bool rightMouseDown = false;
     float sceneRotation[16];
     bx::Vec3 particleTranslation{0.0f, 0.0f, 0.0f};
+    // Frame/file navigation actions queued by UI/input callbacks.
     int pendingFrameStep = 0;
     int pendingFrameIndex = -1;
     bool jumpToFirstFrame = false;
@@ -146,6 +151,7 @@ struct ViewerState
     bool autoFindNeighbors = false;
     bool neighborAnalysisValid = false;
     bool neighborAnalysisPanelOpen = false;
+    // Neighbor-analysis and FK actions.
     bool pendingFindNeighbors = false;
     bool pendingRefreshAnalysisResults = false;
     bool frankKasperBondsCached = false;
@@ -166,6 +172,7 @@ struct ViewerState
     std::unordered_set<uint32_t> selectedIds;
     std::unordered_set<uint32_t> hiddenIds;
     std::unordered_set<uint32_t> frankKasperAutoHiddenIds;
+    // Selection/visibility actions.
     bool pendingHideSelected = false;
     bool pendingRevealAll = false;
     bool pendingOverlapCheck = false;
@@ -181,6 +188,7 @@ struct ViewerState
     bool pendingDecreaseSphereResolution = false;
     bool cutPlaneEnabled = false;
     float cutPlaneSceneZ = 0.0f;
+    // Camera/cut-plane and picking actions.
     bool pendingEnableCutPlane = false;
     bool pendingDisableCutPlane = false;
     int pendingCutPlaneStep = 0;
@@ -307,55 +315,124 @@ struct StructureFactorResources
 };
 
 float computeCutPlaneStep(const SimulationBox &simulationBox);
+/// Clamps a raw mouse/window coordinate in [0, extent) to a uint16_t pick coordinate.
 uint16_t clampPickCoordinate(double value, int extent);
+/// Converts a window Y coordinate (origin top-left) to a pick-buffer Y coordinate
+/// (origin bottom-left) by flipping relative to @p height.
 uint16_t mapWindowYToPickY(uint16_t windowY, uint16_t height);
+/// Decodes a particle ID from a 4-byte pick-buffer pixel, respecting @p colorFormat byte order.
 uint32_t decodeParticleId(const uint8_t *pixel, bgfx::TextureFormat::Enum colorFormat);
+
+/// Marks every helper render system (patches, bonds, neighbor lines, polygons,
+/// mobility, …) as dirty so they are rebuilt on the next active frame.
 void markAllHelperSystemsDirty(ViewerState &state);
+/// Marks systems that depend on particle visibility (hidden/revealed particles).
 void markVisibilityDependentHelperSystemsDirty(ViewerState &state);
+/// Marks systems that depend on per-particle color (e.g. bond-order scatter plot).
 void markColorDependentHelperSystemsDirty(ViewerState &state);
+/// Marks bond-like systems (patch bonds, nearest-neighbor overlay) dirty.
 void markBondLikeHelperSystemsDirty(ViewerState &state);
+/// Marks the mobility-mode render system dirty.
 void markMobilitySystemDirty(ViewerState &state);
+/// Marks the nearest-neighbor line render system dirty.
 void markNearestNeighborRenderSystemsDirty(ViewerState &state);
+/// Marks the bond-diagram geometry dirty (forces a full mesh rebuild).
 void markBondDiagramGeometryDirty(ViewerState &state);
+/// Marks the bond-diagram view dirty (forces a re-render without a full rebuild).
 void markBondDiagramViewDirty(ViewerState &state);
+/// Marks the bond-order scatter-plot data cache invalid.
 void markBondOrderScatterDataDirty(ViewerState &state);
+/// Marks the structure-factor image dirty so it is recomputed.
 void markStructureFactorDirty(ViewerState &state);
+/// Returns true when @p mode allows the structure factor to update while the
+/// simulation is playing (i.e. not ManualOnly).
 bool structureFactorAllowsAutomaticUpdates(StructureFactorUpdateMode mode);
+/// Returns true when @p mode allows the structure factor to update on camera
+/// interaction (relevant for UpdateWhenStationary).
 bool structureFactorAllowsInteractionUpdates(StructureFactorUpdateMode mode);
+/// Marks the pick buffer dirty so it is re-rendered before the next pick read-back.
 void markPickBufferDirty(ViewerState &state);
+/// Returns true if the pick buffer has been rendered and its revision is current.
 bool hasValidPickBuffer(const ViewerState &state);
+/// Returns the number of ColorMode values that are available for the current
+/// file type and dimensionality stored in @p state.
 size_t availableColorModeCount(const ViewerState &state);
+/// Clamps state.colorMode to the available count so it is never out of range.
 void clampColorModeToAvailable(ViewerState &state);
+
+/// Moves all particles in @p selectedIds to the hidden set and marks them
+/// invisible. Returns true if at least one particle was hidden.
 bool hideSelectedParticles(ParticleSystem &particleSystem,
                            std::unordered_set<uint32_t> &selectedIds,
                            std::unordered_set<uint32_t> &hiddenIds);
+/// Toggles selection membership for all visible particles: previously
+/// unselected particles become selected and vice versa.
 void invertSelection(ParticleSystem &particleSystem,
                      std::unordered_set<uint32_t> &selectedIds);
+/// Translates and recenters the scene so that the centroid of the selected
+/// particles is at the camera focus. Returns false when nothing is selected.
 bool alignViewToSelectedParticles(ViewerState &state,
                                   const ParticleSystem &particleSystem,
                                   const SimulationBox &simulationBox);
+/// Makes all previously hidden particles visible again and clears @p hiddenIds.
+/// Returns true if any particles were revealed.
 bool revealAllParticles(ParticleSystem &particleSystem,
                         std::unordered_set<uint32_t> &hiddenIds);
+/// Applies the @p hiddenIds set to @p particleSystem by marking those particles
+/// invisible. Used after loading a new frame to restore the previous hide state.
 bool applyHiddenParticles(ParticleSystem &particleSystem,
                           const std::unordered_set<uint32_t> &hiddenIds);
+/// Converts a single-character particle-type label (e.g. 'A', 'B') to a
+/// zero-based palette index.
 uint8_t particleTypeIndex(char label);
+/// Returns true if the particle type identified by @p typeLabel is currently
+/// set to visible in @p state.
 bool isParticleTypeVisible(const ViewerState &state, char typeLabel);
+/// Updates state.maxSeenParticleTypeIndex from the type labels present in @p particleSystem.
 void noteEncounteredParticleTypes(ViewerState &state, const ParticleSystem &particleSystem);
+/// Applies per-type visibility flags and the @p hiddenIds set to @p particleSystem.
+/// Returns true if the visible set changed.
 bool applyParticleVisibilityFilters(ParticleSystem &particleSystem,
                                     const ViewerState &state);
+
+/// Reads the pick-buffer pixel at the pending pick coordinates, decodes the
+/// particle ID, stores it in state.lastPickedId, and clears the request.
 void resolvePendingPickRequest(ViewerState &state, const PickResources &pickResources);
+
+/// Releases all bgfx handles held by @p pickResources and resets their values.
 void destroyPickResources(PickResources &pickResources);
+/// Allocates colour, depth, and read-back textures plus a frame buffer for
+/// off-screen particle picking at resolution @p width × @p height.
+/// Returns false if creation fails (sets pickResources.disableReason).
 bool createPickResources(PickResources &pickResources, uint16_t width, uint16_t height);
+
+/// Releases all bgfx handles held by @p bondDiagramResources.
 void destroyBondDiagramResources(BondDiagramResources &bondDiagramResources);
+/// Creates the off-screen frame buffer used to render the bond-order diagram.
 bool createBondDiagramResources(BondDiagramResources &bondDiagramResources,
                                 uint16_t width, uint16_t height);
+
+/// Releases all bgfx handles held by @p structureFactorResources.
 void destroyStructureFactorResources(StructureFactorResources &structureFactorResources);
+/// Creates (or recreates) the render targets used for structure-factor rendering at
+/// resolution @p width × @p height. Returns false on failure.
 bool createStructureFactorRenderTarget(StructureFactorResources &structureFactorResources,
                                        uint16_t width, uint16_t height);
+/// Uploads new RGBA-8 pixel data to the structure-factor display texture,
+/// resizing it if the dimensions changed. Returns false on failure.
 bool updateStructureFactorTexture(StructureFactorResources &structureFactorResources,
                                   uint16_t width, uint16_t height,
                                   const std::vector<uint8_t> &rgba8Pixels);
+
+/// Returns a reasonable initial camera-to-scene distance for @p simulationBox,
+/// large enough that the whole box is visible.
 float computeInitialCameraDistance(const SimulationBox &simulationBox);
+/// Returns a suitable far-plane distance given the initial camera distance and
+/// the box size, with a generous margin.
 float computeInitialFarPlane(float cameraDistance, const SimulationBox &simulationBox);
+/// Returns an orthographic half-height that fits the simulation box into the
+/// viewport at the given @p aspectRatio.
 float computeInitialOrthoHalfHeight(const SimulationBox &simulationBox, float aspectRatio);
+/// Applies incremental Euler-angle rotations (@p angleX, @p angleY, @p angleZ
+/// in radians) to state.sceneRotation.
 void applySceneRotation(ViewerState &state, float angleX, float angleY, float angleZ);

@@ -1,4 +1,5 @@
 #include "StructureFactor.h"
+#include "Log.h"
 #include "ViewerSupport.h"
 
 #include <algorithm>
@@ -773,11 +774,11 @@ void logStructureFactorRenderUpdate(StructureFactorResources &structureFactorRes
         return;
     }
 
-    std::cout << "Structure factor: CPU fallback"
-              << (lowResDuringInteraction ? " lower-resolution during interaction" : " render")
-              << " at " << renderSize << "x" << renderSize
-              << " using " << structureFactorResources.particleCount << " particles"
-              << " (GPU path unavailable: " << gpuError << ")." << std::endl;
+    cvt::log::info() << "Structure factor: CPU fallback"
+                     << (lowResDuringInteraction ? " lower-resolution during interaction" : " render")
+                     << " at " << renderSize << "x" << renderSize
+                     << " using " << structureFactorResources.particleCount << " particles"
+                     << " (GPU path unavailable: " << gpuError << ")." << std::endl;
 }
 
 int structureFactorModeLimitForKTimesSigma(float maxKTimesSigma, float boxLength)

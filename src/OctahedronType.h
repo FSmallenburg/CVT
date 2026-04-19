@@ -2,6 +2,8 @@
 
 #include "ParticleType.h"
 
+/// ParticleType for octahedral particles. Renders each particle as a regular
+/// octahedron; size is driven by sizeParams[0].
 class OctahedronType final : public ParticleType
 {
   public:
