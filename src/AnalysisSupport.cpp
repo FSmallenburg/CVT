@@ -11,7 +11,9 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -929,7 +931,7 @@ void findNearestNeighbors(const ViewerState &viewerState,
     {
         const Particle &particle = particles[particleIndex];
         const NeighborCellAddress sourceCell = particleCells[particleIndex];
-        std::vector<int> uniqueNeighborCells;
+        std::unordered_set<int> uniqueNeighborCells;
         uniqueNeighborCells.reserve(isThreeDimensional ? 27u : 9u);
         for (int offsetZ = (isThreeDimensional ? -1 : 0);
              offsetZ <= (isThreeDimensional ? 1 : 0); ++offsetZ)
@@ -964,13 +966,7 @@ void findNearestNeighbors(const ViewerState &viewerState,
 
                     const int flattenedNeighborCell =
                         flattenCell(neighborCellX, neighborCellY, neighborCellZ);
-                    if (std::find(uniqueNeighborCells.begin(), uniqueNeighborCells.end(),
-                                  flattenedNeighborCell)
-                        != uniqueNeighborCells.end())
-                    {
-                        continue;
-                    }
-                    uniqueNeighborCells.push_back(flattenedNeighborCell);
+                    uniqueNeighborCells.insert(flattenedNeighborCell);
                 }
             }
         }
@@ -1241,6 +1237,44 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
         batch.usedNonPeriodicFallback = usedNonPeriodicFallback;
         batch.pairCounts.assign(batch.binCount, 0.0);
         batch.pairCountsByType.clear();
+        
+        // Pre-compute shell measures for all bins (2D and 3D)
+        batch.shellMeasures.resize(batch.binCount);
+        for (size_t binIndex = 0u; binIndex < batch.binCount; ++binIndex)
+        {
+            const double radiusCenter = (static_cast<double>(binIndex) + 0.5)
+                                        * static_cast<double>(batch.binWidth);
+            batch.shellMeasures[binIndex] = isTwoDimensional
+                                                ? (2.0 * double(bx::kPi) * radiusCenter
+                                                   * static_cast<double>(batch.binWidth))
+                                                : (4.0 * double(bx::kPi) * radiusCenter * radiusCenter
+                                                   * static_cast<double>(batch.binWidth));
+        }
+        
+        // Pre-allocate type-pair counters using active species only.
+        // This avoids an O(sampleCount^2) scan during panel open.
+        std::array<uint8_t, kParticlePaletteColorCount> activeTypes{};
+        size_t activeTypeCount = 0u;
+        for (uint8_t typeIndex = 0u; typeIndex < kParticlePaletteColorCount; ++typeIndex)
+        {
+            if (batch.typeCounts[typeIndex] > 0u)
+            {
+                activeTypes[activeTypeCount++] = typeIndex;
+            }
+        }
+
+        batch.pairCountsByType.reserve(activeTypeCount * (activeTypeCount + 1u) / 2u);
+        for (size_t i = 0u; i < activeTypeCount; ++i)
+        {
+            for (size_t j = i; j < activeTypeCount; ++j)
+            {
+                const uint8_t typeMin = activeTypes[i];
+                const uint8_t typeMax = activeTypes[j];
+                const uint16_t pairKey = static_cast<uint16_t>((typeMin << 8u) | typeMax);
+                batch.pairCountsByType[pairKey].assign(batch.binCount, 0.0);
+            }
+        }
+        
         batch.nextI = 0u;
         batch.nextJ = 1u;
         batch.processedPairChecks = 0u;
@@ -1281,26 +1315,23 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
                 displacement = simulationBox.nearestImage(displacement);
             }
 
-            const float distance = isTwoDimensional
-                                       ? std::sqrt(displacement.x * displacement.x
-                                                   + displacement.y * displacement.y)
-                                       : bx::length(displacement);
+            // Consistent distance calculation using bx::length
+            const float distance = bx::length(displacement);
             if (distance > 1.0e-6f && distance < batch.maxRadius)
             {
-                const size_t binIndex = bx::min<size_t>(
-                    static_cast<size_t>(distance / batch.binWidth),
-                    static_cast<size_t>(batch.binCount - 1u));
-                batch.pairCounts[binIndex] += 1.0;
+                const size_t binIndex = static_cast<size_t>(distance / batch.binWidth);
+                const size_t clampedBinIndex = binIndex < batch.binCount ? binIndex : (batch.binCount - 1u);
+                batch.pairCounts[clampedBinIndex] += 1.0;
 
                 const uint8_t typeMin = bx::min(typeI, typeJ);
                 const uint8_t typeMax = bx::max(typeI, typeJ);
                 const uint16_t pairKey = static_cast<uint16_t>((typeMin << 8u) | typeMax);
-                auto &counts = batch.pairCountsByType[pairKey];
-                if (counts.empty())
+                // Type-pair vectors are pre-allocated, no need to check/initialize
+                auto it = batch.pairCountsByType.find(pairKey);
+                if (it != batch.pairCountsByType.end())
                 {
-                    counts.assign(batch.binCount, 0.0);
+                    it->second[clampedBinIndex] += 1.0;
                 }
-                counts[binIndex] += 1.0;
             }
 
             ++batch.nextJ;
@@ -1326,11 +1357,7 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
         {
             const double radiusCenter = (static_cast<double>(binIndex) + 0.5)
                                         * static_cast<double>(batch.binWidth);
-            const double shellMeasure = isTwoDimensional
-                                            ? (2.0 * double(bx::kPi) * radiusCenter
-                                               * static_cast<double>(batch.binWidth))
-                                            : (4.0 * double(bx::kPi) * radiusCenter * radiusCenter
-                                               * static_cast<double>(batch.binWidth));
+            const double shellMeasure = batch.shellMeasures[binIndex];  // Use pre-computed
             viewerState.rdfBinCenters[binIndex] = static_cast<float>(radiusCenter);
 
             if (shellMeasure <= 0.0)
@@ -1367,14 +1394,7 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
 
             for (size_t binIndex = 0u; binIndex < batch.binCount; ++binIndex)
             {
-                const double radiusCenter = (static_cast<double>(binIndex) + 0.5)
-                                            * static_cast<double>(batch.binWidth);
-                const double shellMeasure = isTwoDimensional
-                                                ? (2.0 * double(bx::kPi) * radiusCenter
-                                                   * static_cast<double>(batch.binWidth))
-                                                : (4.0 * double(bx::kPi) * radiusCenter
-                                                   * radiusCenter
-                                                   * static_cast<double>(batch.binWidth));
+                const double shellMeasure = batch.shellMeasures[binIndex];  // Use pre-computed
                 if (shellMeasure <= 0.0)
                 {
                     continue;
@@ -1425,11 +1445,12 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
 
     if (!finished)
     {
-        viewerState.rdfStatusText =
-            "RDF batching: " + std::to_string(batch.processedPairChecks)
-            + "/" + std::to_string(batch.totalPairChecks)
-            + " pairs (latest step " + std::to_string(stepMilliseconds)
-            + " ms, showing progressive estimate).";
+        std::ostringstream statusStr;
+        statusStr << "RDF batching: " << batch.processedPairChecks
+                  << "/" << batch.totalPairChecks
+                  << " pairs (latest step " << stepMilliseconds
+                  << " ms, showing progressive estimate).";
+        viewerState.rdfStatusText = statusStr.str();
         viewerState.rdfPendingCompute = true;
         viewerState.rdfDirty = true;
         return;
@@ -1437,10 +1458,11 @@ void computeRadialDistributionFunction(ViewerState &viewerState,
 
     if (batch.lowResMode)
     {
-        viewerState.rdfStatusText =
-            "Computed low-resolution interaction preview ("
-            + std::to_string(batch.processedPairChecks)
-            + " pairs). Full-resolution recompute will run after interaction.";
+        std::ostringstream statusStr;
+        statusStr << "Computed low-resolution interaction preview ("
+                  << batch.processedPairChecks
+                  << " pairs). Full-resolution recompute will run after interaction.";
+        viewerState.rdfStatusText = statusStr.str();
         viewerState.rdfNeedsFullResolutionRefine = true;
     }
     else

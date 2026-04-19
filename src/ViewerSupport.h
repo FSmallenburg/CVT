@@ -118,6 +118,7 @@ struct RdfBatchState
     std::array<size_t, kParticlePaletteColorCount> typeCounts{};
     std::vector<size_t> sampleIndices;
     std::vector<double> pairCounts;
+    std::vector<double> shellMeasures;  // Pre-computed shell measures for each bin
     std::unordered_map<uint16_t, std::vector<double>> pairCountsByType;
     size_t nextI = 0u;
     size_t nextJ = 1u;
