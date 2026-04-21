@@ -47,13 +47,13 @@ struct ParticleAnalysisData
     float bondOrientationalMagnitude = 0.0f;
     /// arg(q_l) for the configured bond-orientational order l.
     float bondOrientationalPhase = 0.0f;
-    /// |q_lm| for l = 0 … 6 (indices match the l value).
-    std::array<float, 7u> bondOrientationalMagnitudes{};
-    std::array<float, 7u> bondOrientationalPhases{};
-    /// Steinhardt Q_l for l = 0 … 6 (local order parameter).
-    std::array<float, 7u> steinhardtQValues{};
-    /// Steinhardt Q̄_l for l = 0 … 6 (coarse-grained / averaged order parameter).
-    std::array<float, 7u> steinhardtQBarValues{};
+    /// |q_lm|/|psi_l| for l = 2 … 12 (indices store l - 2).
+    std::array<float, 11u> bondOrientationalMagnitudes{};
+    std::array<float, 11u> bondOrientationalPhases{};
+    /// Steinhardt Q_l for l = 2 … 12 (local order parameter).
+    std::array<float, 11u> steinhardtQValues{};
+    /// Steinhardt Q̄_l for l = 2 … 12 (coarse-grained / averaged order parameter).
+    std::array<float, 11u> steinhardtQBarValues{};
 };
 
 /// Owns a collection of particles of a single type, together with optional

@@ -225,8 +225,8 @@ struct SizeDistributionData
 constexpr std::array<const char *, 5> kBondOrientationalOrderLabels2D = {
     "2", "3", "4", "5", "6",
 };
-constexpr std::array<const char *, 7> kBondOrientationalOrderLabels3D = {
-    "2", "3", "4", "5", "6", "7", "8",
+constexpr std::array<const char *, 11> kBondOrientationalOrderLabels3D = {
+    "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
 };
 
 void drawBondOrderScatterPanel(ViewerState &viewerState,
@@ -1064,7 +1064,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 isTwoDimensional ? uses2DBondOrientationalColor
                                  : uses3DBondOrientationalColor;
             const uint8_t minimumBondOrientationalOrder = 2u;
-            const uint8_t maximumBondOrientationalOrder = isTwoDimensional ? 6u : 8u;
+            const uint8_t maximumBondOrientationalOrder = isTwoDimensional ? 6u : 12u;
             ImGui::BeginDisabled(!viewerState.neighborAnalysisValid
                                  || !usesBondOrientationalColor);
             int symmetryOrderIndex =
@@ -1120,6 +1120,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
             ImGui::EndDisabled();
 
+            ImGui::Indent();
             drawBondOrderScatterPanel(viewerState, particleSystem,
                                       isTwoDimensional,
                                       minimumBondOrientationalOrder,
@@ -1152,7 +1153,8 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     viewerState.bondDiagramPointScale = bondDiagramPointScale;
                     markBondDiagramGeometryDirty(viewerState);
                 }
-            }         
+            }
+            ImGui::Unindent();
         }           
 
         ImGui::Spacing();

@@ -169,7 +169,7 @@ BondOrderScatterData buildBondOrderScatterData(
         return data;
     }
 
-    const uint8_t maximumBondOrder = isTwoDimensional ? 6u : 8u;
+    const uint8_t maximumBondOrder = isTwoDimensional ? 6u : 12u;
     const size_t featureCount = size_t(maximumBondOrder - kMinBondOrder + 1u);
     std::vector<double> means(featureCount, 0.0);
     std::vector<double> centeredFeatures(particleCount * featureCount, 0.0);
@@ -331,8 +331,8 @@ std::string bondOrderPcaSourceLabel(bool isTwoDimensional,
     }
 
     return useAveragedValues
-               ? "PCA is computed from the |qbar_l| values for l = 2..8."
-               : "PCA is computed from the |q_l| values for l = 2..8.";
+               ? "PCA is computed from the |qbar_l| values for l = 2..12."
+               : "PCA is computed from the |q_l| values for l = 2..12.";
 }
 
 BondOrderScatterData &getBondOrderScatterData(const ParticleSystem &particleSystem,

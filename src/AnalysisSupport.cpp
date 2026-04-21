@@ -217,10 +217,12 @@ std::array<float, 4> resolveParticleColor(const Particle &particle,
 
 constexpr uint8_t kMinBondOrientationalOrder = 2u;
 constexpr uint8_t kMaxBondOrientationalOrder2D = 6u;
-constexpr uint8_t kMaxBondOrientationalOrder3D = 8u;
+constexpr uint8_t kMaxBondOrientationalOrder3D = 12u;
 constexpr size_t kSteinhardtOrderCount =
     size_t(kMaxBondOrientationalOrder3D - kMinBondOrientationalOrder + 1u);
-constexpr size_t kStoredSteinhardtComponentCount = 42u;
+constexpr size_t kStoredSteinhardtComponentCount =
+    size_t((kMaxBondOrientationalOrder3D + 1u) * (kMaxBondOrientationalOrder3D + 2u) / 2u
+           - 3u);
 constexpr float kBondOrientationalVectorEpsilon = 1.0e-6f;
 
 using BondOrderComplex = std::complex<float>;
