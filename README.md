@@ -2,6 +2,8 @@
 
 CVT is a bgfx/GLFW-based viewer for colloid and particle trajectory files. This is still somewhat experimental, but feel free to try it out. A set of sample configuration files are given in the TestInputFiles folder.
 
+DISCLAIMER: Please not that any analysis provided by this tool is intended for quick exploration, and to more easily understand any structure you see in the visualized snapshots. Analysis outputs are not intended for direct publication. If you see something interesting, please run your own version of the analysis to make sure results are fully correct. 
+
 
 ## Quick start
 
@@ -20,7 +22,7 @@ Then build CVT using the preset for your platform:
 
 Note that the first build may take some time.
 
-You can use `compileshaders.sh` to compile the shaders, but in principle this should happen during the cmake build.
+You can use `compileshaders.sh` to recompile the shaders, but in principle this should happen during the cmake build.
 
 ## Documentation
 
@@ -100,12 +102,6 @@ cmake --build build-release
 ./build-release/cvt TestInputFiles/polydisperse.osph
 ```
 
-### Notes
-
-- The current Linux path uses the **OpenGL** renderer.
-- If CMake reports `GLFW 3 not found`, make sure `glfw3.pc` is visible to `pkg-config`.
-
----
 
 ## Windows build notes
 
@@ -119,22 +115,11 @@ pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake \
   mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf mingw-w64-x86_64-glfw
 ```
 
-### Compile shaders
-
-From PowerShell, the known working invocation is:
-
-```powershell
-C:\msys64\usr\bin\sh.exe ./compileshaders.sh
-```
-
 ### Configure and build
 
 Use the included presets:
 
 ```powershell
-cmake --preset mingw-debug
-cmake --build --preset build-mingw-debug
-
 cmake --preset mingw-release
 cmake --build --preset build-mingw-release
 ```
@@ -144,11 +129,6 @@ cmake --build --preset build-mingw-release
 ```powershell
 .\build-release\cvt.exe TestInputFiles\polydisperse.osph
 ```
-
-### Notes
-
-- The current Windows preference order is **OpenGL**, then **Direct3D11**.
-- bgfx is compiled automatically as part of the CMake build; no separate bgfx build step is needed.
 
 ---
 
@@ -163,22 +143,11 @@ xcode-select --install
 brew install cmake ninja pkg-config glfw
 ```
 
-### Compile shaders
-
-On macOS, `compileshaders.sh` builds both **GLSL** and **Metal** shader outputs by default:
-
-```bash
-./compileshaders.sh
-```
-
 ### Configure and build
 
 A dedicated macOS preset is included:
 
 ```bash
-cmake --preset macos-debug
-cmake --build --preset build-macos-debug
-
 cmake --preset macos-release
 cmake --build --preset build-macos-release
 ```
@@ -208,19 +177,13 @@ cmake --build build-mac-release
 ./build-mac-release/cvt TestInputFiles/polydisperse.osph
 ```
 
-### Notes
-
-- The current macOS preference order is **Metal**, then **OpenGL**.
-- If you package the app as a `.app`, CVT will also search under `Contents/Resources` for runtime assets.
-- Be careful not to mix `arm64` and `x86_64` bgfx builds.
-
 ---
 
 ## Common issues
 
 ### Shaders fail to load at runtime
 
-Re-run:
+Try recompiling the shaders:
 
 ```bash
 ./compileshaders.sh

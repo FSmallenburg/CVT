@@ -110,6 +110,7 @@ std::vector<double> dominantEigenvector(const std::vector<double> &matrix,
 BondOrderScatterData buildBondOrderScatterData(
     const ParticleSystem &particleSystem,
     const std::array<bool, kParticlePaletteColorCount> &enabledSpecies,
+    const std::unordered_set<uint32_t> &selectedIds,
     bool isTwoDimensional,
     BondOrderScatterMode scatterMode,
     uint8_t xOrder,
@@ -154,11 +155,16 @@ BondOrderScatterData buildBondOrderScatterData(
             data.yValues.push_back(
                 bondOrderComponentValue(analysis, isTwoDimensional, useAveragedValues,
                                         yOrderIndex));
+            std::array<float, 4> pointColor = particle.color;
+            if (selectedIds.contains(particle.id))
+            {
+                pointColor = highlightColor(pointColor);
+            }
             data.pointColors.push_back(
-                ImGui::ColorConvertFloat4ToU32(ImVec4(particle.baseColor[0],
-                                                      particle.baseColor[1],
-                                                      particle.baseColor[2],
-                                                      particle.baseColor[3])));
+                ImGui::ColorConvertFloat4ToU32(ImVec4(pointColor[0],
+                                                      pointColor[1],
+                                                      pointColor[2],
+                                                      pointColor[3])));
             data.particleIds.push_back(particle.id);
         }
         return data;
@@ -255,18 +261,36 @@ BondOrderScatterData buildBondOrderScatterData(
         const Particle &particle = particles[particleIndex];
         data.xValues.push_back(float(projectedX));
         data.yValues.push_back(float(projectedY));
+        std::array<float, 4> pointColor = particle.color;
+        if (selectedIds.contains(particle.id))
+        {
+            pointColor = highlightColor(pointColor);
+        }
         data.pointColors.push_back(
-            ImGui::ColorConvertFloat4ToU32(ImVec4(particle.baseColor[0],
-                                                  particle.baseColor[1],
-                                                  particle.baseColor[2],
-                                                  particle.baseColor[3])));
+            ImGui::ColorConvertFloat4ToU32(ImVec4(pointColor[0],
+                                                  pointColor[1],
+                                                  pointColor[2],
+                                                  pointColor[3])));
         data.particleIds.push_back(particle.id);
     }
 
     return data;
 }
 
-bool cacheMatches(const BondOrderScatterCache &cache, const ViewerState &viewerState)
+uint64_t selectedIdSetHash(const std::unordered_set<uint32_t> &selectedIds)
+{
+    uint64_t hash = 1469598103934665603ull;
+    for (uint32_t id : selectedIds)
+    {
+        const uint64_t mixed = uint64_t(id) * 1099511628211ull;
+        hash ^= mixed + 0x9e3779b97f4a7c15ull + (hash << 6u) + (hash >> 2u);
+    }
+    return hash;
+}
+
+bool cacheMatches(const BondOrderScatterCache &cache,
+                 const ViewerState &viewerState,
+                 uint64_t selectionHash)
 {
     return cache.valid
            && cache.mode == viewerState.bondOrderScatterMode
@@ -274,6 +298,8 @@ bool cacheMatches(const BondOrderScatterCache &cache, const ViewerState &viewerS
            && cache.xOrder == viewerState.bondOrderScatterXAxisOrder
            && cache.yOrder == viewerState.bondOrderScatterYAxisOrder
            && cache.dataRevision == viewerState.bondOrderScatterDataRevision
+           && cache.selectedIdsHash == selectionHash
+           && cache.selectedIdsCount == viewerState.selectedIds.size()
            && cache.enabledSpecies == viewerState.bondOrderScatterTypeEnabled;
 }
 
@@ -339,10 +365,12 @@ BondOrderScatterData &getBondOrderScatterData(const ParticleSystem &particleSyst
                                               ViewerState &viewerState)
 {
     BondOrderScatterCache &cache = viewerState.bondOrderScatterCache;
-    if (!cacheMatches(cache, viewerState))
+    const uint64_t selectionHash = selectedIdSetHash(viewerState.selectedIds);
+    if (!cacheMatches(cache, viewerState, selectionHash))
     {
         cache.data = buildBondOrderScatterData(particleSystem,
                                                viewerState.bondOrderScatterTypeEnabled,
+                                               viewerState.selectedIds,
                                                viewerState.fileDimensionality
                                                    == TrajectoryReader::Dimensionality::TwoDimensional,
                                                viewerState.bondOrderScatterMode,
@@ -354,6 +382,8 @@ BondOrderScatterData &getBondOrderScatterData(const ParticleSystem &particleSyst
         cache.xOrder = viewerState.bondOrderScatterXAxisOrder;
         cache.yOrder = viewerState.bondOrderScatterYAxisOrder;
         cache.dataRevision = viewerState.bondOrderScatterDataRevision;
+        cache.selectedIdsHash = selectionHash;
+        cache.selectedIdsCount = viewerState.selectedIds.size();
         cache.enabledSpecies = viewerState.bondOrderScatterTypeEnabled;
     }
 

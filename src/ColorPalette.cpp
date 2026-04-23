@@ -48,3 +48,8 @@ std::array<float, 4> colorFromPaletteIndex(size_t index)
 {
     return kParticlePalette[index % kParticlePaletteColorCount];
 }
+
+std::array<float, 4> highlightColor(const std::array<float, 4> &color)
+{
+    return {1.0f - color[0], 1.0f - color[1], 1.0f - color[2], color[3]};
+}

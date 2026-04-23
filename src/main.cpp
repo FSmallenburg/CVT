@@ -556,6 +556,15 @@ void removeFrankKasperUnbondedVisibilityFilter(ViewerState &viewerState)
     viewerState.frankKasperAutoHiddenIds.clear();
 }
 
+void removeTwelveCoordinatedAntiparallelVisibilityFilter(ViewerState &viewerState)
+{
+    for (uint32_t particleId : viewerState.twelveCoordinatedAntiparallelAutoHiddenIds)
+    {
+        viewerState.hiddenIds.erase(particleId);
+    }
+    viewerState.twelveCoordinatedAntiparallelAutoHiddenIds.clear();
+}
+
 void applyFrankKasperUnbondedVisibilityFilter(ViewerState &viewerState,
                                               const ParticleSystem &particleSystem)
 {
@@ -592,16 +601,119 @@ void applyFrankKasperUnbondedVisibilityFilter(ViewerState &viewerState,
     }
 }
 
+void applyTwelveCoordinatedAntiparallelVisibilityFilter(ViewerState &viewerState,
+                                                        const ParticleSystem &particleSystem,
+                                                        const SimulationBox &simulationBox)
+{
+    removeTwelveCoordinatedAntiparallelVisibilityFilter(viewerState);
+
+    if (!viewerState.hideNonTwelveCoordinatedAntiparallel
+        || !viewerState.twelveCoordinatedBondViewModeEnabled
+        || !particleSystem.hasPatchyMetadata())
+    {
+        return;
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<PatchyParticleData> &patchMetadata = particleSystem.patchyMetadata();
+
+    for (size_t particleIndex = 0u;
+         particleIndex < particles.size() && particleIndex < patchMetadata.size();
+         ++particleIndex)
+    {
+        const PatchyParticleData &patchData = patchMetadata[particleIndex];
+        if (patchData.bondIds.size() < 2u)
+        {
+            const uint32_t particleId = particles[particleIndex].id;
+            if (!viewerState.hiddenIds.contains(particleId))
+            {
+                viewerState.hiddenIds.insert(particleId);
+                viewerState.twelveCoordinatedAntiparallelAutoHiddenIds.insert(particleId);
+            }
+            continue;
+        }
+
+        std::vector<bx::Vec3> bondDirections;
+        bondDirections.reserve(patchData.bondIds.size());
+        for (const int32_t bondId : patchData.bondIds)
+        {
+            if (bondId < 0)
+            {
+                continue;
+            }
+
+            const size_t neighborIndex = static_cast<size_t>(bondId);
+            if (neighborIndex >= particles.size())
+            {
+                continue;
+            }
+
+            bx::Vec3 displacement = {
+                particles[neighborIndex].position.x - particles[particleIndex].position.x,
+                particles[neighborIndex].position.y - particles[particleIndex].position.y,
+                particles[neighborIndex].position.z - particles[particleIndex].position.z,
+            };
+            displacement = simulationBox.nearestImage(displacement);
+
+            const float length = bx::length(displacement);
+            if (length <= 1.0e-6f)
+            {
+                continue;
+            }
+
+            const float inverseLength = 1.0f / length;
+            bondDirections.push_back({
+                displacement.x * inverseLength,
+                displacement.y * inverseLength,
+                displacement.z * inverseLength,
+            });
+        }
+
+        bool hasAntiparallelPair = false;
+        for (size_t firstIndex = 0u; firstIndex < bondDirections.size(); ++firstIndex)
+        {
+            for (size_t secondIndex = firstIndex + 1u;
+                 secondIndex < bondDirections.size();
+                 ++secondIndex)
+            {
+                if (bx::dot(bondDirections[firstIndex], bondDirections[secondIndex]) < -0.9f)
+                {
+                    hasAntiparallelPair = true;
+                    break;
+                }
+            }
+
+            if (hasAntiparallelPair)
+            {
+                break;
+            }
+        }
+
+        if (!hasAntiparallelPair)
+        {
+            const uint32_t particleId = particles[particleIndex].id;
+            if (!viewerState.hiddenIds.contains(particleId))
+            {
+                viewerState.hiddenIds.insert(particleId);
+                viewerState.twelveCoordinatedAntiparallelAutoHiddenIds.insert(particleId);
+            }
+        }
+    }
+}
+
 void resetFrankKasperState(ViewerState &viewerState, bool resetActivationState)
 {
     removeFrankKasperUnbondedVisibilityFilter(viewerState);
+    removeTwelveCoordinatedAntiparallelVisibilityFilter(viewerState);
     viewerState.frankKasperBondsCached = false;
     viewerState.frankKasperViewModeEnabled = false;
     viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
+    viewerState.pendingToggleTwelveCoordinatedAntiparallelVisibility = false;
     viewerState.pendingRecalculateFrankKasperBonds = false;
     if (resetActivationState)
     {
         viewerState.hideNonFrankKasperUnbonded = true;
+        viewerState.hideNonTwelveCoordinatedAntiparallel = false;
         viewerState.frankKasperAutoRecalculate = true;
         viewerState.frankKasperViewActivatedOnce = false;
     }
@@ -615,6 +727,8 @@ bool applyFrankKasperVisibilityModeIfActive(ViewerState &viewerState,
         return false;
     }
 
+    removeTwelveCoordinatedAntiparallelVisibilityFilter(viewerState);
+
     if (viewerState.hideNonFrankKasperUnbonded)
     {
         applyFrankKasperUnbondedVisibilityFilter(viewerState, particleSystem);
@@ -627,6 +741,31 @@ bool applyFrankKasperVisibilityModeIfActive(ViewerState &viewerState,
     return true;
 }
 
+bool applyTwelveCoordinatedVisibilityModeIfActive(ViewerState &viewerState,
+                                                  const ParticleSystem &particleSystem,
+                                                  const SimulationBox &simulationBox)
+{
+    if (!viewerState.twelveCoordinatedBondViewModeEnabled)
+    {
+        return false;
+    }
+
+    removeFrankKasperUnbondedVisibilityFilter(viewerState);
+
+    if (viewerState.hideNonTwelveCoordinatedAntiparallel)
+    {
+        applyTwelveCoordinatedAntiparallelVisibilityFilter(viewerState,
+                                                           particleSystem,
+                                                           simulationBox);
+    }
+    else
+    {
+        removeTwelveCoordinatedAntiparallelVisibilityFilter(viewerState);
+    }
+
+    return true;
+}
+
 void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
                                                  ParticleSystem &particleSystem,
                                                  const SimulationBox &simulationBox)
@@ -634,7 +773,10 @@ void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
     if (viewerState.pendingFindNeighbors)
     {
         const bool wasFrankKasperViewModeEnabled = viewerState.frankKasperViewModeEnabled;
+        const bool wasTwelveCoordinatedBondViewModeEnabled =
+            viewerState.twelveCoordinatedBondViewModeEnabled;
         resetFrankKasperState(viewerState, false);
+        viewerState.twelveCoordinatedBondViewModeEnabled = false;
         findNearestNeighbors(viewerState, simulationBox, particleSystem);
         viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
         markNearestNeighborRenderSystemsDirty(viewerState);
@@ -663,6 +805,10 @@ void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
         {
             viewerState.frankKasperViewModeEnabled = wasFrankKasperViewModeEnabled;
             viewerState.pendingRecalculateFrankKasperBonds = true;
+        }
+        if (viewerState.neighborAnalysisValid && wasTwelveCoordinatedBondViewModeEnabled)
+        {
+            viewerState.pendingActivateTwelveCoordinatedBondView = true;
         }
         const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
                                                                       viewerState);
@@ -714,6 +860,23 @@ void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
         viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
     }
 
+    if (viewerState.pendingToggleTwelveCoordinatedAntiparallelVisibility)
+    {
+        if (applyTwelveCoordinatedVisibilityModeIfActive(viewerState,
+                                                         particleSystem,
+                                                         simulationBox))
+        {
+            const bool visibilityChanged = applyParticleVisibilityFilters(particleSystem,
+                                                                          viewerState);
+            if (visibilityChanged)
+            {
+                markVisibilityDependentHelperSystemsDirty(viewerState);
+            }
+            markPickBufferDirty(viewerState);
+        }
+        viewerState.pendingToggleTwelveCoordinatedAntiparallelVisibility = false;
+    }
+
     if (viewerState.pendingRecalculateFrankKasperBonds)
     {
         if (!viewerState.neighborAnalysisValid)
@@ -763,6 +926,7 @@ void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
             viewerState.colorMode = ColorMode::BondCount;
             viewerState.analysisColorMode = AnalysisColorMode::Disabled;
             viewerState.frankKasperViewModeEnabled = true;
+            viewerState.twelveCoordinatedBondViewModeEnabled = false;
             viewerState.frankKasperViewActivatedOnce = true;
             viewerState.frankKasperAutoRecalculate = true;
 
@@ -776,6 +940,44 @@ void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
             }
 
             viewerState.pendingActivateFrankKasperView = false;
+
+            markColorDependentHelperSystemsDirty(viewerState);
+            markBondLikeHelperSystemsDirty(viewerState);
+            markPickBufferDirty(viewerState);
+        }
+    }
+
+    if (viewerState.pendingActivateTwelveCoordinatedBondView)
+    {
+        if (!viewerState.neighborAnalysisValid)
+        {
+            viewerState.pendingFindNeighbors = true;
+        }
+        else
+        {
+            calculateTwelveCoordinatedNeighborBonds(particleSystem, particleSystem);
+
+            viewerState.bondModeEnabled = true;
+            viewerState.mobilityModeEnabled = false;
+            viewerState.nearestNeighborModeEnabled = false;
+            viewerState.colorMode = ColorMode::BondCount;
+            viewerState.analysisColorMode = AnalysisColorMode::Disabled;
+            viewerState.twelveCoordinatedBondViewModeEnabled = true;
+            viewerState.frankKasperViewModeEnabled = false;
+
+            removeFrankKasperUnbondedVisibilityFilter(viewerState);
+            applyTwelveCoordinatedVisibilityModeIfActive(viewerState,
+                                                         particleSystem,
+                                                         simulationBox);
+
+            const bool visibilityChanged =
+                applyParticleVisibilityFilters(particleSystem, viewerState);
+            if (visibilityChanged)
+            {
+                markVisibilityDependentHelperSystemsDirty(viewerState);
+            }
+
+            viewerState.pendingActivateTwelveCoordinatedBondView = false;
 
             markColorDependentHelperSystemsDirty(viewerState);
             markBondLikeHelperSystemsDirty(viewerState);

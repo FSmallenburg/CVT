@@ -801,6 +801,8 @@ void invalidateNeighborAnalysis(ViewerState &viewerState, ParticleSystem &partic
     viewerState.neighborAnalysisValid = false;
     viewerState.frankKasperBondsCached = false;
     viewerState.frankKasperViewModeEnabled = false;
+    viewerState.twelveCoordinatedBondViewModeEnabled = false;
+    viewerState.pendingActivateTwelveCoordinatedBondView = false;
     viewerState.pendingToggleFrankKasperUnbondedVisibility = false;
     viewerState.pendingRecalculateFrankKasperBonds = false;
     particleSystem.clearNeighborAnalysis();
@@ -1100,6 +1102,79 @@ void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
                 patchyMetadata[neighborIndex].bondIds.push_back(reverseBondId);
                 ++bondCountPerParticle[neighborIndex];
             }
+        }
+    }
+}
+
+void calculateTwelveCoordinatedNeighborBonds(const ParticleSystem &particleSystem,
+                                             ParticleSystem &targetParticleSystem)
+{
+    if (!particleSystem.hasNeighborAnalysis())
+    {
+        return;
+    }
+
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const size_t particleCount = particles.size();
+
+    targetParticleSystem.clearPatchyMetadata();
+    for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+    {
+        PatchyParticleData patchData{};
+        targetParticleSystem.addPatchyMetadata(patchData);
+    }
+
+    std::vector<PatchyParticleData> &patchyMetadata = targetParticleSystem.patchyMetadata();
+
+    std::vector<std::unordered_set<uint32_t>> neighborSets(particleCount);
+    for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+    {
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            neighborSets[particleIndex].insert(neighbor.neighborIndex);
+        }
+    }
+
+    constexpr size_t kTargetCoordination = 12u;
+    constexpr uint32_t kRequiredSharedNeighbors = 5u;
+    for (size_t particleIndex = 0u; particleIndex < neighborLists.size(); ++particleIndex)
+    {
+        if (neighborLists[particleIndex].size() != kTargetCoordination)
+        {
+            continue;
+        }
+
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            const uint32_t neighborIndex = neighbor.neighborIndex;
+            if (neighborIndex <= particleIndex || neighborIndex >= neighborLists.size())
+            {
+                continue;
+            }
+
+            if (neighborLists[neighborIndex].size() != kTargetCoordination)
+            {
+                continue;
+            }
+
+            uint32_t commonNeighborCount = 0u;
+            for (uint32_t commonNeighborIndex : neighborSets[particleIndex])
+            {
+                if (neighborSets[neighborIndex].contains(commonNeighborIndex))
+                {
+                    ++commonNeighborCount;
+                }
+            }
+
+            if (commonNeighborCount != kRequiredSharedNeighbors)
+            {
+                continue;
+            }
+
+            patchyMetadata[particleIndex].bondIds.push_back(static_cast<int32_t>(neighborIndex));
+            patchyMetadata[neighborIndex].bondIds.push_back(static_cast<int32_t>(particleIndex));
         }
     }
 }

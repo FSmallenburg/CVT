@@ -1,5 +1,7 @@
 #include "ParticleSystem.h"
 
+#include "ColorPalette.h"
+
 #include <bx/math.h>
 
 #include <cstring>
@@ -33,11 +35,6 @@ std::array<float, 4> encodeParticleIdColor(uint32_t particleId)
             float((particleId >> 16) & 0xffu) / 255.0f,
             float((particleId >> 8) & 0xffu) / 255.0f,
             float((particleId >> 0) & 0xffu) / 255.0f};
-}
-
-std::array<float, 4> highlightColor(const std::array<float, 4> &color)
-{
-    return {1.0f - color[0], 1.0f - color[1], 1.0f - color[2], color[3]};
 }
 
 bx::Vec3 transformPoint(const float *transform, const bx::Vec3 &point)

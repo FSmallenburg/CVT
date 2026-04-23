@@ -86,6 +86,8 @@ struct BondOrderScatterCache
     uint8_t xOrder = 4u;
     uint8_t yOrder = 6u;
     uint32_t dataRevision = 0u;
+    uint64_t selectedIdsHash = 0u;
+    size_t selectedIdsCount = 0u;
     std::array<bool, kParticlePaletteColorCount> enabledSpecies{};
     BondOrderScatterData data;
 };
@@ -222,10 +224,14 @@ struct ViewerState
     bool frankKasperViewModeEnabled = false;
     bool frankKasperViewActivatedOnce = false;
     bool hideNonFrankKasperUnbonded = true;
+    bool hideNonTwelveCoordinatedAntiparallel = false;
     bool frankKasperAutoRecalculate = true;
     bool pendingActivateFrankKasperView = false;
+    bool pendingActivateTwelveCoordinatedBondView = false;
     bool pendingToggleFrankKasperUnbondedVisibility = false;
+    bool pendingToggleTwelveCoordinatedAntiparallelVisibility = false;
     bool pendingRecalculateFrankKasperBonds = false;
+    bool twelveCoordinatedBondViewModeEnabled = false;
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     std::array<bool, kParticlePaletteColorCount> bondOrderScatterTypeEnabled{};
@@ -236,6 +242,7 @@ struct ViewerState
     std::unordered_set<uint32_t> selectedIds;
     std::unordered_set<uint32_t> hiddenIds;
     std::unordered_set<uint32_t> frankKasperAutoHiddenIds;
+    std::unordered_set<uint32_t> twelveCoordinatedAntiparallelAutoHiddenIds;
     // Selection/visibility actions.
     bool pendingHideSelected = false;
     bool pendingRevealAll = false;

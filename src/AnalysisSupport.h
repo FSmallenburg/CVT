@@ -59,6 +59,12 @@ void findNearestNeighbors(const ViewerState &viewerState,
 void calculateFrankKasperBonds(const ParticleSystem &particleSystem,
                                ParticleSystem &targetParticleSystem);
 
+/// Computes bond assignments between neighboring pairs where both particles
+/// have exactly 12 nearest neighbors and the pair shares exactly 5 common
+/// neighbors, then stores the result on @p targetParticleSystem.
+void calculateTwelveCoordinatedNeighborBonds(const ParticleSystem &particleSystem,
+                                             ParticleSystem &targetParticleSystem);
+
 /// Computes per-frame radial distribution function g(r) from particle centers
 /// using the current RDF settings in @p viewerState and writes results back to
 /// @p viewerState (overall curve + type-pair curves).

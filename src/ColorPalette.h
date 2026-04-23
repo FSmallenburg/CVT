@@ -13,3 +13,6 @@ std::array<float, 4> colorFromLetter(char letter);
 /// Returns the RGBA color at zero-based palette @p index
 /// (0 = 'A', 1 = 'B', …, 25 = 'Z').
 std::array<float, 4> colorFromPaletteIndex(size_t index);
+
+/// Returns the selection/highlight variant of @p color.
+std::array<float, 4> highlightColor(const std::array<float, 4> &color);

@@ -1646,31 +1646,6 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
             ImGui::EndDisabled();
 
-            if (ImGui::Button("Switch to FK view mode"))
-            {
-                viewerState.pendingActivateFrankKasperView = true;
-                if (!viewerState.neighborAnalysisValid)
-                {
-                    viewerState.pendingFindNeighbors = true;
-                }
-            }
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!viewerState.frankKasperViewActivatedOnce);
-            if (ImGui::Checkbox("Hide unbonded (!12 neighbors)",
-                                &viewerState.hideNonFrankKasperUnbonded))
-            {
-                viewerState.pendingToggleFrankKasperUnbondedVisibility = true;
-            }
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!viewerState.frankKasperViewActivatedOnce);
-            if (ImGui::Checkbox("Auto-recalculate FK", &viewerState.frankKasperAutoRecalculate)
-                && viewerState.frankKasperAutoRecalculate)
-            {
-                viewerState.pendingRecalculateFrankKasperBonds = true;
-            }
-            ImGui::EndDisabled();
-
             ImGui::Indent();
             drawBondOrderScatterPanel(viewerState, particleSystem,
                                       isTwoDimensional,
@@ -1709,8 +1684,53 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     markBondDiagramGeometryDirty(viewerState);
                 }
             }
-            ImGui::Unindent();
+
+            if (ImGui::CollapsingHeader("Frank-Kasper bonds"))
+            {
+                if (ImGui::Button("Switch to FK view mode"))
+                {
+                    viewerState.pendingActivateFrankKasperView = true;
+                    if (!viewerState.neighborAnalysisValid)
+                    {
+                        viewerState.pendingFindNeighbors = true;
+                    }
+                }
+                ImGui::SameLine();
+                ImGui::BeginDisabled(!viewerState.frankKasperViewActivatedOnce);
+                if (ImGui::Checkbox("Hide unbonded (!12 neighbors)",
+                                    &viewerState.hideNonFrankKasperUnbonded))
+                {
+                    viewerState.pendingToggleFrankKasperUnbondedVisibility = true;
+                }
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                ImGui::BeginDisabled(!viewerState.frankKasperViewActivatedOnce);
+                if (ImGui::Checkbox("Auto-recalculate FK", &viewerState.frankKasperAutoRecalculate)
+                    && viewerState.frankKasperAutoRecalculate)
+                {
+                    viewerState.pendingRecalculateFrankKasperBonds = true;
+                }
+                ImGui::EndDisabled();
+
+                if (ImGui::Button("Show bonds: joint icosahedra"))
+                {
+                    viewerState.pendingActivateTwelveCoordinatedBondView = true;
+                    if (!viewerState.neighborAnalysisValid)
+                    {
+                        viewerState.pendingFindNeighbors = true;
+                    }
+                }
+
+                ImGui::BeginDisabled(!viewerState.twelveCoordinatedBondViewModeEnabled);
+                if (ImGui::Checkbox("Only show particles with antiparallel bond pair (dot < -0.9)",
+                                    &viewerState.hideNonTwelveCoordinatedAntiparallel))
+                {
+                    viewerState.pendingToggleTwelveCoordinatedAntiparallelVisibility = true;
+                }
+                ImGui::EndDisabled();
+            }
         }           
+        ImGui::Unindent();
 
         ImGui::Spacing();
         viewerState.structureFactorPanelOpen = ImGui::CollapsingHeader("Structure factor");
