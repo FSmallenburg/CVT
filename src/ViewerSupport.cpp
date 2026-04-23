@@ -143,6 +143,7 @@ void markBondDiagramViewDirty(ViewerState &state)
 void markBondOrderScatterDataDirty(ViewerState &state)
 {
     state.bondOrderScatterCache.valid = false;
+    state.bondOrderBasedBondHistogramCache.valid = false;
     ++state.bondOrderScatterDataRevision;
     if (state.bondOrderScatterDataRevision == 0u)
     {

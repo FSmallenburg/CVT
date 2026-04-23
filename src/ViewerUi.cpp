@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -221,6 +222,556 @@ struct SizeDistributionData
     float maxBinCount = 0.0f;
     float binWidth = 0.0f;
 };
+
+struct BondOrderBasedBondHistogramData
+{
+    size_t pairCount = 0u;
+    float meanValue = 0.0f;
+    float standardDeviation = 0.0f;
+    std::vector<float> binCenters;
+    std::vector<float> binCounts;
+    std::vector<BondOrderBasedBondPair> pairs;
+};
+
+using BondOrderComplex = std::complex<float>;
+
+double associatedLegendrePolynomial(int l, int m, double x)
+{
+    x = std::clamp(x, -1.0, 1.0);
+
+    double pmm = 1.0;
+    if (m > 0)
+    {
+        const double sinTheta = std::sqrt(std::max(0.0, 1.0 - x * x));
+        double factor = 1.0;
+        for (int order = 1; order <= m; ++order)
+        {
+            pmm *= -factor * sinTheta;
+            factor += 2.0;
+        }
+    }
+
+    if (l == m)
+    {
+        return pmm;
+    }
+
+    double pmmp1 = x * double(2 * m + 1) * pmm;
+    if (l == m + 1)
+    {
+        return pmmp1;
+    }
+
+    for (int order = m + 2; order <= l; ++order)
+    {
+        const double pll = (double(2 * order - 1) * x * pmmp1
+                            - double(order + m - 1) * pmm)
+                           / double(order - m);
+        pmm = pmmp1;
+        pmmp1 = pll;
+    }
+
+    return pmmp1;
+}
+
+double sphericalHarmonicNormalization(int l, int m)
+{
+    double factorialRatio = 1.0;
+    for (int value = l - m + 1; value <= l + m; ++value)
+    {
+        factorialRatio /= double(value);
+    }
+
+    return std::sqrt(((2.0 * double(l)) + 1.0) * factorialRatio
+                     / (4.0 * double(bx::kPi)));
+}
+
+BondOrderComplex sphericalHarmonicComponent(int l, int m, double cosTheta, double phi)
+{
+    const double amplitude = sphericalHarmonicNormalization(l, m)
+                             * associatedLegendrePolynomial(l, m, cosTheta);
+    const double phase = double(m) * phi;
+    return {
+        float(amplitude * std::cos(phase)),
+        float(amplitude * std::sin(phase)),
+    };
+}
+
+BondOrderBasedBondHistogramData buildBondOrderBasedBondHistogramData(
+    const ParticleSystem &particleSystem,
+    uint8_t order,
+    bool useAveragedValues,
+    uint16_t binCount)
+{
+    BondOrderBasedBondHistogramData data;
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    if (neighborLists.empty())
+    {
+        return data;
+    }
+
+    const size_t particleCount = neighborLists.size();
+    const size_t componentsPerParticle = size_t(order) + 1u;
+    std::vector<BondOrderComplex> qlmByParticle(particleCount * componentsPerParticle,
+                                                BondOrderComplex(0.0f, 0.0f));
+    std::vector<BondOrderComplex> effectiveQlmByParticle;
+    effectiveQlmByParticle.resize(particleCount * componentsPerParticle,
+                                  BondOrderComplex(0.0f, 0.0f));
+    std::vector<double> normSquaredByParticle(particleCount, 0.0);
+
+    constexpr float kBondOrientationalVectorEpsilon = 1.0e-6f;
+    for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+    {
+        const std::vector<NearestNeighborData> &neighbors = neighborLists[particleIndex];
+        if (neighbors.empty())
+        {
+            continue;
+        }
+
+        BondOrderComplex *particleQlm =
+            qlmByParticle.data() + particleIndex * componentsPerParticle;
+        for (const NearestNeighborData &neighbor : neighbors)
+        {
+            const float displacementLength = bx::length(neighbor.displacement);
+            if (displacementLength <= kBondOrientationalVectorEpsilon)
+            {
+                continue;
+            }
+
+            const double inverseDisplacementLength = 1.0 / double(displacementLength);
+            const double cosTheta = std::clamp(double(neighbor.displacement.z)
+                                                   * inverseDisplacementLength,
+                                               -1.0,
+                                               1.0);
+            const double phi = std::atan2(double(neighbor.displacement.y),
+                                          double(neighbor.displacement.x));
+            for (uint8_t m = 0u; m <= order; ++m)
+            {
+                particleQlm[m] += sphericalHarmonicComponent(int(order), int(m), cosTheta, phi);
+            }
+        }
+
+        const float invNeighborCount = 1.0f / float(neighbors.size());
+        for (uint8_t m = 0u; m <= order; ++m)
+        {
+            particleQlm[m] *= invNeighborCount;
+        }
+
+        BondOrderComplex *effectiveQlm =
+            effectiveQlmByParticle.data() + particleIndex * componentsPerParticle;
+        for (uint8_t m = 0u; m <= order; ++m)
+        {
+            effectiveQlm[m] = particleQlm[m];
+        }
+    }
+
+    if (useAveragedValues)
+    {
+        for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+        {
+            BondOrderComplex *effectiveQlm =
+                effectiveQlmByParticle.data() + particleIndex * componentsPerParticle;
+            size_t averageCount = 1u;
+            for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+            {
+                const size_t neighborIndex = size_t(neighbor.neighborIndex);
+                if (neighborIndex >= particleCount)
+                {
+                    continue;
+                }
+                const BondOrderComplex *neighborQlm =
+                    qlmByParticle.data() + neighborIndex * componentsPerParticle;
+                for (uint8_t m = 0u; m <= order; ++m)
+                {
+                    effectiveQlm[m] += neighborQlm[m];
+                }
+                ++averageCount;
+            }
+
+            const float inverseCount = 1.0f / float(averageCount);
+            for (uint8_t m = 0u; m <= order; ++m)
+            {
+                effectiveQlm[m] *= inverseCount;
+            }
+        }
+    }
+
+    for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+    {
+        const BondOrderComplex *effectiveQlm =
+            effectiveQlmByParticle.data() + particleIndex * componentsPerParticle;
+        double normSquared = double(std::norm(effectiveQlm[0]));
+        for (uint8_t m = 1u; m <= order; ++m)
+        {
+            normSquared += 2.0 * double(std::norm(effectiveQlm[m]));
+        }
+        normSquaredByParticle[particleIndex] = normSquared;
+    }
+
+    std::vector<float> bondOrderDotValues;
+    constexpr double kNormSquaredEpsilon = 1.0e-14;
+    for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+    {
+        if (normSquaredByParticle[particleIndex] <= kNormSquaredEpsilon)
+        {
+            continue;
+        }
+
+        const BondOrderComplex *particleQlm =
+            effectiveQlmByParticle.data() + particleIndex * componentsPerParticle;
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            const size_t neighborIndex = size_t(neighbor.neighborIndex);
+            if (neighborIndex >= particleCount || neighborIndex <= particleIndex)
+            {
+                continue;
+            }
+            if (normSquaredByParticle[neighborIndex] <= kNormSquaredEpsilon)
+            {
+                continue;
+            }
+
+            const BondOrderComplex *neighborQlm =
+                effectiveQlmByParticle.data() + neighborIndex * componentsPerParticle;
+            BondOrderComplex dotValue = particleQlm[0] * std::conj(neighborQlm[0]);
+            for (uint8_t m = 1u; m <= order; ++m)
+            {
+                dotValue += 2.0f * particleQlm[m] * std::conj(neighborQlm[m]);
+            }
+
+            const double normProduct =
+                std::sqrt(normSquaredByParticle[particleIndex] * normSquaredByParticle[neighborIndex]);
+            if (normProduct <= kNormSquaredEpsilon)
+            {
+                continue;
+            }
+
+            const float normalizedDot = std::clamp(float(dotValue.real() / normProduct),
+                                                   -1.0f,
+                                                   1.0f);
+            bondOrderDotValues.push_back(normalizedDot);
+            data.pairs.push_back(BondOrderBasedBondPair{
+                .firstIndex = static_cast<uint32_t>(particleIndex),
+                .secondIndex = static_cast<uint32_t>(neighborIndex),
+                .value = normalizedDot,
+            });
+        }
+    }
+
+    data.pairCount = bondOrderDotValues.size();
+    if (data.pairCount == 0u)
+    {
+        return data;
+    }
+
+    double sum = 0.0;
+    for (float value : bondOrderDotValues)
+    {
+        sum += double(value);
+    }
+    data.meanValue = float(sum / double(data.pairCount));
+
+    double squaredDiffSum = 0.0;
+    for (float value : bondOrderDotValues)
+    {
+        const double delta = double(value) - double(data.meanValue);
+        squaredDiffSum += delta * delta;
+    }
+    data.standardDeviation = float(std::sqrt(squaredDiffSum / double(data.pairCount)));
+
+    const uint16_t clampedBinCount = std::clamp<uint16_t>(binCount, 8u, 256u);
+    data.binCenters.assign(clampedBinCount, 0.0f);
+    data.binCounts.assign(clampedBinCount, 0.0f);
+    const float binWidth = 2.0f / float(clampedBinCount);
+    for (uint16_t binIndex = 0u; binIndex < clampedBinCount; ++binIndex)
+    {
+        data.binCenters[binIndex] = -1.0f + (float(binIndex) + 0.5f) * binWidth;
+    }
+
+    for (float value : bondOrderDotValues)
+    {
+        int binIndex = int((value + 1.0f) / binWidth);
+        binIndex = std::clamp(binIndex, 0, int(clampedBinCount) - 1);
+        data.binCounts[size_t(binIndex)] += 1.0f;
+    }
+
+    return data;
+}
+
+void applyBondOrderBasedBondsFromSelectedRange(ViewerState &viewerState,
+                                               ParticleSystem &particleSystem,
+                                               float rangeMin,
+                                               float rangeMax)
+{
+    const BondOrderBasedBondHistogramCache &cache =
+        viewerState.bondOrderBasedBondHistogramCache;
+    const std::vector<Particle> &particles = particleSystem.particles();
+    if (particles.empty())
+    {
+        return;
+    }
+
+    particleSystem.clearPatchyMetadata();
+    for (size_t index = 0u; index < particles.size(); ++index)
+    {
+        particleSystem.addPatchyMetadata(PatchyParticleData{});
+    }
+
+    std::vector<PatchyParticleData> &patchMetadata = particleSystem.patchyMetadata();
+    for (const BondOrderBasedBondPair &pair : cache.pairs)
+    {
+        if (pair.firstIndex >= patchMetadata.size() || pair.secondIndex >= patchMetadata.size())
+        {
+            continue;
+        }
+        if (pair.value < rangeMin || pair.value > rangeMax)
+        {
+            continue;
+        }
+
+        patchMetadata[pair.firstIndex].bondIds.push_back(static_cast<int32_t>(pair.secondIndex));
+        patchMetadata[pair.secondIndex].bondIds.push_back(static_cast<int32_t>(pair.firstIndex));
+    }
+
+    viewerState.bondModeEnabled = true;
+    viewerState.nearestNeighborModeEnabled = false;
+    viewerState.mobilityModeEnabled = false;
+    viewerState.frankKasperViewModeEnabled = false;
+    viewerState.frankKasperBondsCached = false;
+    markBondLikeHelperSystemsDirty(viewerState);
+    markBondDiagramGeometryDirty(viewerState);
+    markPickBufferDirty(viewerState);
+}
+
+void drawBondOrderBasedBondsPanel(ViewerState &viewerState,
+                                  ParticleSystem &particleSystem,
+                                  bool isTwoDimensional)
+{
+    if (!viewerState.neighborAnalysisValid
+        || !ImGui::CollapsingHeader("Bond-order-based bonds"))
+    {
+        return;
+    }
+
+    if (isTwoDimensional)
+    {
+        ImGui::TextDisabled("This panel is available for 3D bond-order analysis only.");
+        return;
+    }
+
+    if (!particleSystem.hasNeighborAnalysis())
+    {
+        ImGui::TextDisabled("Neighbor analysis data are not available yet.");
+        return;
+    }
+
+    int histogramBinCount = int(viewerState.bondOrderBasedBondHistogramBinCount);
+    if (ImGui::SliderInt("Histogram bins##BondOrderBasedBonds", &histogramBinCount, 16, 128))
+    {
+        viewerState.bondOrderBasedBondHistogramBinCount =
+            static_cast<uint16_t>(std::clamp(histogramBinCount, 16, 128));
+        viewerState.bondOrderBasedBondHistogramCache.valid = false;
+    }
+
+    bool useAveragedValues = viewerState.bondOrderBasedBondUseAveragedValues;
+    if (ImGui::Checkbox("Use averaged qbar_lm", &useAveragedValues))
+    {
+        viewerState.bondOrderBasedBondUseAveragedValues = useAveragedValues;
+        viewerState.bondOrderBasedBondHistogramCache.valid = false;
+    }
+
+    constexpr uint8_t kMinimumBondOrientationalOrder = 2u;
+    constexpr uint8_t kMaximumBondOrientationalOrder = 12u;
+    static const char *kBondOrderLabels3D[] = {
+        "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
+    };
+
+    int selectedOrderIndex = int(std::clamp<uint8_t>(viewerState.bondOrderBasedBondOrder,
+                                                      kMinimumBondOrientationalOrder,
+                                                      kMaximumBondOrientationalOrder)
+                                 - kMinimumBondOrientationalOrder);
+    if (ImGui::Combo("Spherical-harmonic degree l##BondOrderBasedBonds",
+                     &selectedOrderIndex,
+                     kBondOrderLabels3D,
+                     IM_ARRAYSIZE(kBondOrderLabels3D)))
+    {
+        viewerState.bondOrderBasedBondOrder =
+            static_cast<uint8_t>(selectedOrderIndex + kMinimumBondOrientationalOrder);
+        viewerState.bondOrderBasedBondHistogramCache.valid = false;
+    }
+    const uint8_t selectedOrder = viewerState.bondOrderBasedBondOrder;
+
+    BondOrderBasedBondHistogramCache &cache = viewerState.bondOrderBasedBondHistogramCache;
+    const bool cacheMatches = cache.valid
+                              && cache.dataRevision == viewerState.bondOrderScatterDataRevision
+                              && cache.dimensionality == viewerState.fileDimensionality
+                              && cache.order == selectedOrder
+                              && cache.useAveragedValues
+                                     == viewerState.bondOrderBasedBondUseAveragedValues
+                              && cache.binCenters.size()
+                                     == size_t(viewerState.bondOrderBasedBondHistogramBinCount);
+    if (!cacheMatches)
+    {
+        const BondOrderBasedBondHistogramData histogramData =
+            buildBondOrderBasedBondHistogramData(particleSystem,
+                                                selectedOrder,
+                                                viewerState.bondOrderBasedBondUseAveragedValues,
+                                                viewerState.bondOrderBasedBondHistogramBinCount);
+        cache.valid = true;
+        cache.dataRevision = viewerState.bondOrderScatterDataRevision;
+        cache.dimensionality = viewerState.fileDimensionality;
+        cache.order = selectedOrder;
+        cache.useAveragedValues = viewerState.bondOrderBasedBondUseAveragedValues;
+        cache.pairCount = histogramData.pairCount;
+        cache.meanValue = histogramData.meanValue;
+        cache.standardDeviation = histogramData.standardDeviation;
+        cache.binCenters = histogramData.binCenters;
+        cache.binCounts = histogramData.binCounts;
+        cache.pairs = histogramData.pairs;
+    }
+
+    ImGui::Text("Using l = %u", unsigned(selectedOrder));
+    ImGui::TextDisabled("Histogram of normalized dot products over neighbor pairs");
+    ImGui::TextDisabled(viewerState.bondOrderBasedBondUseAveragedValues
+                            ? "qhatbar_lm(i) * qhatbar_lm(j)"
+                            : "qhat_lm(i) * qhat_lm(j)");
+
+    if (cache.pairCount == 0u || cache.binCenters.empty())
+    {
+        ImGui::TextDisabled("No valid neighbor pairs found for the selected order.");
+        return;
+    }
+
+    BondOrderBasedBondInteractionState &interaction =
+        viewerState.bondOrderBasedBondInteraction;
+
+    ImGui::Text("Neighbor pairs: %zu", cache.pairCount);
+    ImGui::Text("Mean: %.5f | SD: %.5f", cache.meanValue, cache.standardDeviation);
+
+    const float plotWidth = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+    const double binWidth = 2.0 / double(cache.binCenters.size());
+    if (ImPlot::GetCurrentContext() != nullptr
+        && ImPlot::BeginPlot("##BondOrderBasedBondsHistogram",
+                             ImVec2(plotWidth, 180.0f),
+                             ImPlotFlags_NoLegend))
+    {
+        ImPlot::SetupAxes(viewerState.bondOrderBasedBondUseAveragedValues
+                              ? "qhatbar_lm(i) * qhatbar_lm(j)"
+                              : "qhat_lm(i) * qhat_lm(j)",
+                          "Count",
+                          ImPlotAxisFlags_AutoFit,
+                          ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxisLimits(ImAxis_X1, -1.0, 1.0, ImGuiCond_Always);
+        ImPlot::PlotBars("Count",
+                         cache.binCenters.data(),
+                         cache.binCounts.data(),
+                         static_cast<int>(cache.binCounts.size()),
+                         binWidth * 0.95);
+
+        const ImVec2 plotPos = ImPlot::GetPlotPos();
+        const ImVec2 plotSize = ImPlot::GetPlotSize();
+        const float plotMinX = plotPos.x;
+        const float plotMaxX = plotPos.x + plotSize.x;
+        const float plotMinY = plotPos.y;
+        const float plotMaxY = plotPos.y + plotSize.y;
+        const auto clampPlotX = [&](float value) {
+            return std::clamp(value, plotMinX, plotMaxX);
+        };
+
+        if (interaction.hasSelectedRange)
+        {
+            const ImPlotPoint minPoint = ImPlotPoint(double(interaction.selectedMin), 0.0);
+            const ImPlotPoint maxPoint = ImPlotPoint(double(interaction.selectedMax), 0.0);
+            const ImVec2 minPixel = ImPlot::PlotToPixels(minPoint);
+            const ImVec2 maxPixel = ImPlot::PlotToPixels(maxPoint);
+            const float leftX = clampPlotX(std::min(minPixel.x, maxPixel.x));
+            const float rightX = clampPlotX(std::max(minPixel.x, maxPixel.x));
+            ImDrawList *drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(ImVec2(leftX, plotMinY),
+                                    ImVec2(rightX, plotMaxY),
+                                    IM_COL32(80, 160, 255, 50));
+            drawList->AddRect(ImVec2(leftX, plotMinY),
+                              ImVec2(rightX, plotMaxY),
+                              IM_COL32(80, 160, 255, 220));
+        }
+
+        if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            interaction.dragActive = true;
+            interaction.dragStartX = clampPlotX(ImGui::GetIO().MousePos.x);
+        }
+
+        if (interaction.dragActive)
+        {
+            const float dragCurrentX = clampPlotX(ImGui::GetIO().MousePos.x);
+            const float minPixelX = std::min(interaction.dragStartX, dragCurrentX);
+            const float maxPixelX = std::max(interaction.dragStartX, dragCurrentX);
+            const float dragDistance = maxPixelX - minPixelX;
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                if (dragDistance > 3.0f)
+                {
+                    ImDrawList *drawList = ImGui::GetWindowDrawList();
+                    drawList->AddRectFilled(ImVec2(minPixelX, plotMinY),
+                                            ImVec2(maxPixelX, plotMaxY),
+                                            IM_COL32(80, 160, 255, 40));
+                    drawList->AddRect(ImVec2(minPixelX, plotMinY),
+                                      ImVec2(maxPixelX, plotMaxY),
+                                      IM_COL32(80, 160, 255, 220));
+                }
+            }
+            else
+            {
+                if (dragDistance > 3.0f)
+                {
+                    const ImPlotPoint minPoint =
+                        ImPlot::PixelsToPlot(ImVec2(minPixelX, plotPos.y));
+                    const ImPlotPoint maxPoint =
+                        ImPlot::PixelsToPlot(ImVec2(maxPixelX, plotPos.y));
+                    interaction.selectedMin = std::clamp(float(minPoint.x), -1.0f, 1.0f);
+                    interaction.selectedMax = std::clamp(float(maxPoint.x), -1.0f, 1.0f);
+                    interaction.hasSelectedRange = true;
+                    applyBondOrderBasedBondsFromSelectedRange(viewerState,
+                                                              particleSystem,
+                                                              interaction.selectedMin,
+                                                              interaction.selectedMax);
+                }
+                interaction.dragActive = false;
+            }
+        }
+
+        ImPlot::EndPlot();
+    }
+    else
+    {
+        float maxBinCount = 0.0f;
+        for (float binValue : cache.binCounts)
+        {
+            maxBinCount = bx::max(maxBinCount, binValue);
+        }
+        std::string overlayText = std::to_string(cache.pairCount) + " pairs";
+        ImGui::PlotHistogram("##BondOrderBasedBondsHistogramFallback",
+                             cache.binCounts.data(),
+                             static_cast<int>(cache.binCounts.size()),
+                             0,
+                             overlayText.c_str(),
+                             0.0f,
+                             bx::max(1.0f, maxBinCount),
+                             ImVec2(plotWidth, 160.0f));
+    }
+
+    if (interaction.hasSelectedRange)
+    {
+        ImGui::Text("Selected range: [%.4f, %.4f]", interaction.selectedMin,
+                    interaction.selectedMax);
+        if (ImGui::Button("Clear selection##BondOrderBasedBondsRange"))
+        {
+            interaction.hasSelectedRange = false;
+        }
+    }
+    ImGui::TextDisabled("Left-drag horizontally in the plot to create bonds from that x-range.");
+}
 
 constexpr std::array<const char *, 5> kBondOrientationalOrderLabels2D = {
     "2", "3", "4", "5", "6",
@@ -1126,6 +1677,10 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                       minimumBondOrientationalOrder,
                                       maximumBondOrientationalOrder,
                                       markPickDirty);
+
+            drawBondOrderBasedBondsPanel(viewerState,
+                                         particleSystem,
+                                         isTwoDimensional);
 
             if (viewerState.neighborAnalysisValid
                 && ImGui::CollapsingHeader("Bond diagram"))

@@ -97,6 +97,38 @@ struct BondOrderScatterInteractionState
     float dragStartY = 0.0f;
 };
 
+struct BondOrderBasedBondPair
+{
+    uint32_t firstIndex = 0u;
+    uint32_t secondIndex = 0u;
+    float value = 0.0f;
+};
+
+struct BondOrderBasedBondInteractionState
+{
+    bool dragActive = false;
+    float dragStartX = 0.0f;
+    bool hasSelectedRange = false;
+    float selectedMin = -1.0f;
+    float selectedMax = 1.0f;
+};
+
+struct BondOrderBasedBondHistogramCache
+{
+    bool valid = false;
+    TrajectoryReader::Dimensionality dimensionality =
+        TrajectoryReader::Dimensionality::ThreeDimensional;
+    uint8_t order = 6u;
+    bool useAveragedValues = false;
+    uint32_t dataRevision = 0u;
+    size_t pairCount = 0u;
+    float meanValue = 0.0f;
+    float standardDeviation = 0.0f;
+    std::vector<float> binCenters;
+    std::vector<float> binCounts;
+    std::vector<BondOrderBasedBondPair> pairs;
+};
+
 struct RdfPairCurve
 {
     uint8_t typeIndexA = 0u;
@@ -241,11 +273,16 @@ struct ViewerState
     ParticleColorStatsCache particleColorStatsCache{};
     ParticleColorStatsCache mobilityColorStatsCache{};
     uint8_t bondOrientationalOrder = 6u;
+    uint8_t bondOrderBasedBondOrder = 6u;
+    bool bondOrderBasedBondUseAveragedValues = false;
     uint8_t bondOrderScatterXAxisOrder = 4u;
     uint8_t bondOrderScatterYAxisOrder = 6u;
     uint32_t bondOrderScatterDataRevision = 1u;
     BondOrderScatterInteractionState bondOrderScatterInteraction{};
     BondOrderScatterCache bondOrderScatterCache{};
+    uint16_t bondOrderBasedBondHistogramBinCount = 64u;
+    BondOrderBasedBondInteractionState bondOrderBasedBondInteraction{};
+    BondOrderBasedBondHistogramCache bondOrderBasedBondHistogramCache{};
     bool mobilityModeEnabled = false;
     bool bondModeEnabled = false;
     bool bondDiagramGeometryDirty = true;
