@@ -2333,10 +2333,26 @@ int main(int argc, char **argv)
 
         uint32_t lastSubmittedFrame = 0;
         double lastUiFrameTime = glfwGetTime();
+        double lastBackgroundRenderTime = glfwGetTime();
+        constexpr double kBackgroundEventWaitSeconds = 0.10;
+        constexpr double kBackgroundFrameIntervalSeconds = 0.10;
 
         while (exitCode == 0 && !glfwWindowShouldClose(window.get()))
         {
-            glfwPollEvents();
+            const bool windowFocused =
+                glfwGetWindowAttrib(window.get(), GLFW_FOCUSED) == GLFW_TRUE;
+            const bool windowIconified =
+                glfwGetWindowAttrib(window.get(), GLFW_ICONIFIED) == GLFW_TRUE;
+            const bool backgroundMode = windowIconified || !windowFocused;
+
+            if (backgroundMode)
+            {
+                glfwWaitEventsTimeout(kBackgroundEventWaitSeconds);
+            }
+            else
+            {
+                glfwPollEvents();
+            }
 
             if (pickResources.enabled && viewerState.pendingPickReadback
                 && lastSubmittedFrame >= viewerState.pendingReadbackFrame)
@@ -2360,6 +2376,27 @@ int main(int argc, char **argv)
                                   sphereStacks, sphereSlices,
                                   cutPlaneStep, cutPlaneMinSceneZ,
                                   cutPlaneMaxSceneZ, exitCode);
+
+            bool shouldRenderFrame = true;
+            if (backgroundMode)
+            {
+                const double now = glfwGetTime();
+                const bool backgroundFrameDue =
+                    (now - lastBackgroundRenderTime) >= kBackgroundFrameIntervalSeconds;
+                const bool requiresImmediateFrame = viewerState.pendingPickReadback
+                                                    || viewerState.pendingPickRequest
+                                                    || viewerState.pendingScreenshotRequest;
+                shouldRenderFrame = backgroundFrameDue || requiresImmediateFrame;
+                if (shouldRenderFrame)
+                {
+                    lastBackgroundRenderTime = now;
+                }
+            }
+
+            if (!shouldRenderFrame)
+            {
+                continue;
+            }
 
             float view[16];
             float proj[16];
@@ -2460,7 +2497,8 @@ int main(int argc, char **argv)
             const bool shouldRefreshPickBuffer =
                 pickResources.enabled && bgfx::isValid(gpuResources.pickProgram)
                 && !viewerState.pendingPickReadback && !hasValidPickBuffer(viewerState)
-                && !viewerState.leftMouseDown && !viewerState.rightMouseDown;
+                && !viewerState.leftMouseDown && !viewerState.rightMouseDown
+                && !backgroundMode;
             if (shouldRefreshPickBuffer)
             {
                 bgfx::setViewRect(kPickView, 0, 0, pickResources.width, pickResources.height);
