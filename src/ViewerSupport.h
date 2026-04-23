@@ -259,10 +259,15 @@ struct ViewerState
     bool pendingDecreaseSphereResolution = false;
     bool cutPlaneEnabled = false;
     float cutPlaneSceneZ = 0.0f;
+    bool sphericalCutEnabled = false;
+    float sphericalCutRadius = 0.0f;
     // Camera/cut-plane and picking actions.
     bool pendingEnableCutPlane = false;
     bool pendingDisableCutPlane = false;
+    bool pendingEnableSphericalCut = false;
+    bool pendingDisableSphericalCut = false;
     int pendingCutPlaneStep = 0;
+    int pendingSphericalCutStep = 0;
     bool pendingPickRequest = false;
     uint16_t pendingPickX = 0;
     uint16_t pendingPickY = 0;
@@ -415,6 +420,8 @@ struct StructureFactorResources
 };
 
 float computeCutPlaneStep(const SimulationBox &simulationBox);
+float computeSphericalCutMaxRadius(const SimulationBox &simulationBox,
+                                   TrajectoryReader::Dimensionality dimensionality);
 /// Clamps a raw mouse/window coordinate in [0, extent) to a uint16_t pick coordinate.
 uint16_t clampPickCoordinate(double value, int extent);
 /// Converts a window Y coordinate (origin top-left) to a pick-buffer Y coordinate

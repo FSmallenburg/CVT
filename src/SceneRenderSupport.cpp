@@ -248,7 +248,9 @@ void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::View
                               bool wrapToPeriodicBox,
                               const std::unordered_set<uint32_t> *selectedParticleIds,
                               bool usePickColors, bool cutPlaneEnabled,
-                              float cutPlaneSceneZ)
+                                                            float cutPlaneSceneZ,
+                                                            bool sphericalCutEnabled,
+                                                            float sphericalCutRadius)
 {
     if (patchRenderSystems.coneSystem)
     {
@@ -256,7 +258,8 @@ void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::View
                                               positionOffset, particleSizeScale,
                                               simulationBox, wrapToPeriodicBox,
                                               selectedParticleIds, nullptr, usePickColors,
-                                              cutPlaneEnabled, cutPlaneSceneZ);
+                                                                                            cutPlaneEnabled, cutPlaneSceneZ,
+                                                                                            sphericalCutEnabled, sphericalCutRadius);
     }
 
     for (PatchCapSystem &capSystem : patchRenderSystems.capSystems)
@@ -265,7 +268,8 @@ void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::View
                                  positionOffset, particleSizeScale,
                                  simulationBox, wrapToPeriodicBox,
                                  selectedParticleIds, nullptr, usePickColors,
-                                 cutPlaneEnabled, cutPlaneSceneZ);
+                                                                cutPlaneEnabled, cutPlaneSceneZ,
+                                                                sphericalCutEnabled, sphericalCutRadius);
     }
 }
 
@@ -400,7 +404,9 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
                              uint64_t renderState, float particleSizeScale,
                              const std::unordered_set<uint32_t> *selectedParticleIds,
                              bool usePickColors, bool cutPlaneEnabled,
-                             float cutPlaneSceneZ)
+                             float cutPlaneSceneZ,
+                             bool sphericalCutEnabled,
+                             float sphericalCutRadius)
 {
     const bx::Vec3 zeroOffset{0.0f, 0.0f, 0.0f};
 
@@ -410,7 +416,8 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
                                                  zeroOffset, 1.0f,
                                                  nullptr, false,
                                                  selectedParticleIds, nullptr, usePickColors,
-                                                 cutPlaneEnabled, cutPlaneSceneZ);
+                                                cutPlaneEnabled, cutPlaneSceneZ,
+                                                sphericalCutEnabled, sphericalCutRadius);
     }
     if (bondRenderSystems.nodeSystem)
     {
@@ -418,7 +425,8 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
                                              zeroOffset, particleSizeScale,
                                              nullptr, false,
                                              selectedParticleIds, nullptr, usePickColors,
-                                             cutPlaneEnabled, cutPlaneSceneZ);
+                                            cutPlaneEnabled, cutPlaneSceneZ,
+                                            sphericalCutEnabled, sphericalCutRadius);
     }
 }
 
@@ -601,7 +609,9 @@ void renderPolygonRenderSystems(PolygonRenderSystems &polygonRenderSystems,
                                 bool wrapToPeriodicBox,
                                 const std::unordered_set<uint32_t> *selectedParticleIds,
                                 bool usePickColors, bool cutPlaneEnabled,
-                                float cutPlaneSceneZ)
+                                float cutPlaneSceneZ,
+                                bool sphericalCutEnabled,
+                                float sphericalCutRadius)
 {
     for (PolygonRenderSystem &polygonRenderSystem : polygonRenderSystems.systems)
     {
@@ -609,7 +619,8 @@ void renderPolygonRenderSystems(PolygonRenderSystems &polygonRenderSystems,
                                            positionOffset, particleSizeScale,
                                            simulationBox, wrapToPeriodicBox,
                                            selectedParticleIds, nullptr, usePickColors,
-                                           cutPlaneEnabled, cutPlaneSceneZ);
+                                           cutPlaneEnabled, cutPlaneSceneZ,
+                                           sphericalCutEnabled, sphericalCutRadius);
     }
 }
 
@@ -1012,7 +1023,9 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                 viewerState.particleSizeScale,
                                 selectedParticleIds, usePickColors,
                                 viewerState.cutPlaneEnabled,
-                                viewerState.cutPlaneSceneZ);
+                                viewerState.cutPlaneSceneZ,
+                                viewerState.sphericalCutEnabled,
+                                viewerState.sphericalCutRadius);
         return;
     }
 
@@ -1023,7 +1036,9 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                 viewerState.particleSizeScale,
                                 selectedParticleIds, usePickColors,
                                 viewerState.cutPlaneEnabled,
-                                viewerState.cutPlaneSceneZ);
+                                viewerState.cutPlaneSceneZ,
+                                viewerState.sphericalCutEnabled,
+                                viewerState.sphericalCutRadius);
         return;
     }
 
@@ -1036,7 +1051,9 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                               &simulationBox, viewerState.wrapParticlesToBox,
                               selectedParticleIds, nullptr,
                               usePickColors, viewerState.cutPlaneEnabled,
-                              viewerState.cutPlaneSceneZ);
+                              viewerState.cutPlaneSceneZ,
+                              viewerState.sphericalCutEnabled,
+                              viewerState.sphericalCutRadius);
         return;
     }
 
@@ -1049,7 +1066,9 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                    viewerState.wrapParticlesToBox,
                                    selectedParticleIds, usePickColors,
                                    viewerState.cutPlaneEnabled,
-                                   viewerState.cutPlaneSceneZ);
+                                   viewerState.cutPlaneSceneZ,
+                                   viewerState.sphericalCutEnabled,
+                                   viewerState.sphericalCutRadius);
     }
     else
     {
@@ -1061,7 +1080,9 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                               selectedParticleIds, nullptr,
                               usePickColors,
                               viewerState.cutPlaneEnabled,
-                              viewerState.cutPlaneSceneZ);
+                              viewerState.cutPlaneSceneZ,
+                              viewerState.sphericalCutEnabled,
+                              viewerState.sphericalCutRadius);
     }
 
     if (isPatchyFileType(particleFileType))
@@ -1073,7 +1094,9 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                  viewerState.wrapParticlesToBox,
                                  selectedParticleIds, usePickColors,
                                  viewerState.cutPlaneEnabled,
-                                 viewerState.cutPlaneSceneZ);
+                                viewerState.cutPlaneSceneZ,
+                                viewerState.sphericalCutEnabled,
+                                viewerState.sphericalCutRadius);
     }
 }
 

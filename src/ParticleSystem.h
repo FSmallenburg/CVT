@@ -126,8 +126,10 @@ class ParticleSystem
     /// @param highlightedParticleIds When non-null, particles in this set receive an additional highlight.
     /// @param usePickColors       When true, particles are rendered with unique ID-encoded pick colors
     ///                            instead of their normal colors.
-    /// @param cutPlaneEnabled     Enables the horizontal cut-plane clipping.
-    /// @param cutPlaneSceneZ      World-space Z coordinate of the cut plane.
+        /// @param cutPlaneEnabled     Enables the horizontal cut-plane clipping.
+        /// @param cutPlaneSceneZ      World-space Z coordinate of the cut plane.
+        /// @param sphericalCutEnabled Enables spherical clipping around scene-space origin.
+        /// @param sphericalCutRadius  Radius of the spherical clipping region.
     void render(bgfx::ViewId viewId, bgfx::ProgramHandle program, const float *parentTransform,
           uint64_t renderState, const bx::Vec3 &positionOffset = {0.0f, 0.0f, 0.0f},
           float particleSizeScale = 1.0f,
@@ -136,7 +138,9 @@ class ParticleSystem
           const std::unordered_set<uint32_t> *selectedParticleIds = nullptr,
           const std::unordered_set<uint32_t> *highlightedParticleIds = nullptr,
           bool usePickColors = false, bool cutPlaneEnabled = false,
-          float cutPlaneSceneZ = 0.0f);
+            float cutPlaneSceneZ = 0.0f,
+            bool sphericalCutEnabled = false,
+            float sphericalCutRadius = 0.0f);
 
   private:
     std::unique_ptr<ParticleType> m_particleType;

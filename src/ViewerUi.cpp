@@ -1445,7 +1445,13 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             ImGui::TextDisabled("Hotkeys: 1-8 toggle species, Shift+1-8 solo.");
         }
 
+        const float sphericalCutMaxRadius =
+            computeSphericalCutMaxRadius(simulationBox, viewerState.fileDimensionality);
+
         bool cutPlaneEnabled = viewerState.cutPlaneEnabled;
+        bool sphericalCutEnabled = viewerState.sphericalCutEnabled;
+        viewerState.sphericalCutRadius = std::clamp(viewerState.sphericalCutRadius,
+                                0.0f, sphericalCutMaxRadius);
 
         if (ImGui::Button("Hide selected (h)"))
         {
@@ -1493,6 +1499,27 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 markPickDirty = true;
             }
         }        
+
+        if (ImGui::Checkbox("Enable spherical cut", &sphericalCutEnabled))
+        {
+            viewerState.sphericalCutEnabled = sphericalCutEnabled;
+            if (viewerState.sphericalCutEnabled
+                && viewerState.sphericalCutRadius <= 0.0f)
+            {
+                viewerState.sphericalCutRadius = sphericalCutMaxRadius;
+            }
+            markPickDirty = true;
+        }
+        if (viewerState.sphericalCutEnabled)
+        {
+            float sphericalCutRadius = viewerState.sphericalCutRadius;
+            if (ImGui::SliderFloat("Spherical cut radius", &sphericalCutRadius,
+                                   0.0f, sphericalCutMaxRadius, "%.3f"))
+            {
+                viewerState.sphericalCutRadius = sphericalCutRadius;
+                markPickDirty = true;
+            }
+        }
     }
 
     if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
@@ -2306,10 +2333,14 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 ImGui::TextUnformatted("Species visibility and cut plane");
                 ImGui::BulletText("1-0 (or Numpad 1-0): Toggle species visibility");
                 ImGui::BulletText("Shift+1-0: Show only that species");
-                ImGui::BulletText(".: Step cut plane");
-                ImGui::BulletText(",: Step cut plane (opposite direction)");
+                ImGui::BulletText(".: Step cut plane inward");
+                ImGui::BulletText(",: Step cut plane outward");
+                ImGui::BulletText("Ctrl+.: Step spherical cut inward");
+                ImGui::BulletText("Ctrl+,: Step spherical cut outward");
                 ImGui::BulletText("Shift+.: Enable cut plane");
                 ImGui::BulletText("Shift+,: Disable cut plane");
+                ImGui::BulletText("Ctrl+Shift+.: Enable spherical cut");
+                ImGui::BulletText("Ctrl+Shift+,: Disable spherical cut");
 
                 ImGui::Spacing();
                 ImGui::TextUnformatted("Capture");

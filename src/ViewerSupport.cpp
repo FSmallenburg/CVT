@@ -188,6 +188,19 @@ float computeCutPlaneStep(const SimulationBox &simulationBox)
     return boxSize.z * 0.01f;
 }
 
+float computeSphericalCutMaxRadius(const SimulationBox &simulationBox,
+                                   TrajectoryReader::Dimensionality dimensionality)
+{
+    const bx::Vec3 boxSize = simulationBox.size();
+    float minExtent = bx::min(boxSize.x, boxSize.y);
+    if (dimensionality == TrajectoryReader::Dimensionality::ThreeDimensional)
+    {
+        minExtent = bx::min(minExtent, boxSize.z);
+    }
+
+    return 0.5f * bx::max(minExtent, 0.0f);
+}
+
 uint16_t clampPickCoordinate(double value, int extent)
 {
     if (extent <= 0)

@@ -1437,7 +1437,16 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
         case GLFW_KEY_PERIOD:
             if (action == GLFW_PRESS || action == GLFW_REPEAT)
             {
-                if ((mods & GLFW_MOD_SHIFT) != 0)
+                if ((mods & (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
+                    == (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
+                {
+                    state->pendingEnableSphericalCut = true;
+                }
+                else if ((mods & GLFW_MOD_CONTROL) != 0)
+                {
+                    --state->pendingSphericalCutStep;
+                }
+                else if ((mods & GLFW_MOD_SHIFT) != 0)
                 {
                     state->pendingEnableCutPlane = true;
                 }
@@ -1450,7 +1459,16 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
         case GLFW_KEY_COMMA:
             if (action == GLFW_PRESS || action == GLFW_REPEAT)
             {
-                if ((mods & GLFW_MOD_SHIFT) != 0)
+                if ((mods & (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
+                    == (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
+                {
+                    state->pendingDisableSphericalCut = true;
+                }
+                else if ((mods & GLFW_MOD_CONTROL) != 0)
+                {
+                    ++state->pendingSphericalCutStep;
+                }
+                else if ((mods & GLFW_MOD_SHIFT) != 0)
                 {
                     state->pendingDisableCutPlane = true;
                 }
@@ -1899,6 +1917,9 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
                                   float cutPlaneStep, float cutPlaneMinSceneZ,
                                   float cutPlaneMaxSceneZ, int &exitCode)
 {
+    const float sphericalCutMaxRadius =
+        computeSphericalCutMaxRadius(simulationBox, viewerState.fileDimensionality);
+
     if ((viewerState.autoFindNeighbors
          || (viewerState.frankKasperAutoRecalculate
              && viewerState.frankKasperViewActivatedOnce))
@@ -1999,6 +2020,21 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         markPickBufferDirty(viewerState);
     }
 
+    if (viewerState.pendingEnableSphericalCut)
+    {
+        viewerState.sphericalCutEnabled = true;
+        viewerState.sphericalCutRadius = sphericalCutMaxRadius;
+        viewerState.pendingEnableSphericalCut = false;
+        markPickBufferDirty(viewerState);
+    }
+
+    if (viewerState.pendingDisableSphericalCut)
+    {
+        viewerState.sphericalCutEnabled = false;
+        viewerState.pendingDisableSphericalCut = false;
+        markPickBufferDirty(viewerState);
+    }
+
     if (viewerState.pendingCutPlaneStep != 0)
     {
         if (viewerState.cutPlaneEnabled)
@@ -2011,6 +2047,23 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
         }
         viewerState.pendingCutPlaneStep = 0;
     }
+
+    if (viewerState.pendingSphericalCutStep != 0)
+    {
+        if (viewerState.sphericalCutEnabled)
+        {
+            const float sphericalCutStep = bx::max(1.0e-5f, sphericalCutMaxRadius * 0.01f);
+            viewerState.sphericalCutRadius =
+                std::clamp(viewerState.sphericalCutRadius
+                               + float(viewerState.pendingSphericalCutStep) * sphericalCutStep,
+                           0.0f, sphericalCutMaxRadius);
+            markPickBufferDirty(viewerState);
+        }
+        viewerState.pendingSphericalCutStep = 0;
+    }
+
+    viewerState.sphericalCutRadius = std::clamp(viewerState.sphericalCutRadius,
+                                                0.0f, sphericalCutMaxRadius);
 
     const bool supportsResolutionAdjustment = particleFileType != TrajectoryReader::FileType::Polygon;
     bool changedSphereResolution = false;
@@ -2190,13 +2243,17 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
     const std::string currentColorModeLabel =
         colorModeName(viewerState.colorMode, viewerState);
     bgfx::dbgTextPrintf(0, 6, 0x0f,
-                        "Cut plane: %s  z=%.2f  Color: %s  Size: %.2f  Light: %.2f",
+                        "Cut plane: %s  z=%.2f  Sphere cut: %s r=%.2f",
                         viewerState.cutPlaneEnabled ? "active" : "off",
                         viewerState.cutPlaneSceneZ,
+                        viewerState.sphericalCutEnabled ? "active" : "off",
+                        viewerState.sphericalCutRadius);
+    bgfx::dbgTextPrintf(0, 7, 0x0f,
+                        "Color: %s  Size: %.2f  Light: %.2f",
                         currentColorModeLabel.c_str(),
                         viewerState.particleSizeScale,
                         lightingScaleFromIndex(viewerState.lightingLevelIndex));
-    bgfx::dbgTextPrintf(0, 7, 0x0f, "GPU picking: %s",
+    bgfx::dbgTextPrintf(0, 8, 0x0f, "GPU picking: %s",
                         pickResources.enabled
                             ? (viewerState.pendingPickReadback
                                    ? "updating cache"
@@ -2205,9 +2262,9 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
     if (!loadedPath.empty())
     {
         bgfx::dbgTextPrintf(
-            0, 8, 0x0f,
+            0, 9, 0x0f,
             "Left/Right step frames. Shift+Left jumps first. Shift+Right jumps last.");
-        bgfx::dbgTextPrintf(0, 9, 0x0f, "Loaded %s (frame %d/%d)", loadedPath.c_str(),
+        bgfx::dbgTextPrintf(0, 10, 0x0f, "Loaded %s (frame %d/%d)", loadedPath.c_str(),
                             (int)currentFrame + 1, (int)totalFrames);
     }
 }
