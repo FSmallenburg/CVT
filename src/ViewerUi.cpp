@@ -2292,7 +2292,6 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
         }
 
-        ImGui::Unindent();
     }
 
     ImGui::Spacing();
