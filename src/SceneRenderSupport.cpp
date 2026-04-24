@@ -882,6 +882,38 @@ void selectBondedNeighbors(const ParticleSystem &particleSystem,
     }
 }
 
+void selectNearestNeighbors(const ParticleSystem &particleSystem,
+                            std::unordered_set<uint32_t> &selectedIds)
+{
+    if (!particleSystem.hasNeighborAnalysis() || selectedIds.empty())
+    {
+        return;
+    }
+
+    const std::unordered_set<uint32_t> originalSelection = selectedIds;
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    const size_t particleCount = particles.size();
+    for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+    {
+        if (!originalSelection.contains(particles[particleIndex].id)
+            || particleIndex >= neighborLists.size())
+        {
+            continue;
+        }
+
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            const size_t neighborIndex = static_cast<size_t>(neighbor.neighborIndex);
+            if (neighborIndex < particleCount)
+            {
+                selectedIds.insert(particles[neighborIndex].id);
+            }
+        }
+    }
+}
+
 void rebuildMobilitySystem(const ParticleSystem &particleSystem,
                            ParticleSystem &mobilitySystem,
                            const ViewerState &viewerState,

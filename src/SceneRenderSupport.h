@@ -113,6 +113,11 @@ uint16_t polygonSideCount(const Particle &particle);
 void selectBondedNeighbors(const ParticleSystem &particleSystem,
                            std::unordered_set<uint32_t> &selectedIds);
 
+/// Adds all nearest-neighbor IDs (from neighbor analysis) of selected particles
+/// to @p selectedIds.
+void selectNearestNeighbors(const ParticleSystem &particleSystem,
+                            std::unordered_set<uint32_t> &selectedIds);
+
 /// Rebuilds the arrow-based mobility system from per-particle displacement
 /// vectors (previousRawPositions vs. current positions) stored in @p viewerState.
 void rebuildMobilitySystem(const ParticleSystem &particleSystem,

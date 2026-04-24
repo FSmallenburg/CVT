@@ -1522,12 +1522,24 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         }
     }
 
+    if (viewerState.pendingOpenNeighborAnalysisPanel)
+    {
+        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+    }
     if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::Indent();
         ImGui::TextDisabled("Tools for neighbor metrics, RDF, bond diagrams, and S(k).");
 
+        if (viewerState.pendingOpenNeighborAnalysisPanel)
+        {
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        }
         viewerState.neighborAnalysisPanelOpen = ImGui::CollapsingHeader("Neighbor analysis");
+        if (viewerState.neighborAnalysisPanelOpen)
+        {
+            viewerState.pendingOpenNeighborAnalysisPanel = false;
+        }
         if (viewerState.neighborAnalysisPanelOpen)
         {
             const bool neighborAnalysisPanelJustOpened = !wasNeighborAnalysisPanelOpen;
@@ -2328,6 +2340,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 ImGui::BulletText("V: Print visible particle count");
                 ImGui::BulletText("E: Run overlap check");
                 ImGui::BulletText("Ctrl+B: Select particles bonded to selection");
+                ImGui::BulletText("Ctrl+N: Select nearest neighbors of selection (auto-compute if needed)");
 
                 ImGui::Spacing();
                 ImGui::TextUnformatted("Species visibility and cut plane");

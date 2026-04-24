@@ -219,6 +219,7 @@ struct ViewerState
     bool neighborAnalysisPanelOpen = false;
     // Neighbor-analysis and FK actions.
     bool pendingFindNeighbors = false;
+    bool pendingOpenNeighborAnalysisPanel = false;
     bool pendingRefreshAnalysisResults = false;
     bool frankKasperBondsCached = false;
     bool frankKasperViewModeEnabled = false;
@@ -249,6 +250,7 @@ struct ViewerState
     bool pendingOverlapCheck = false;
     bool pendingInvertSelected = false;
     bool pendingSelectBonded = false;
+    bool pendingSelectNearestNeighbors = false;
     bool pendingDescribeSelection = false;
     bool pendingDescribeSelectedBondOrder = false;
     bool pendingAlignViewToSelection = false;

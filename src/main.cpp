@@ -1087,6 +1087,21 @@ void processSelectionAndVisibilityPendingActions(ViewerState &viewerState,
         viewerState.pendingSelectBonded = false;
         markPickBufferDirty(viewerState);
     }
+
+    if (viewerState.pendingSelectNearestNeighbors)
+    {
+        if (viewerState.neighborAnalysisValid && particleSystem.hasNeighborAnalysis())
+        {
+            selectNearestNeighbors(particleSystem, viewerState.selectedIds);
+            viewerState.pendingSelectNearestNeighbors = false;
+            markPickBufferDirty(viewerState);
+        }
+        else
+        {
+            viewerState.pendingOpenNeighborAnalysisPanel = true;
+            viewerState.pendingFindNeighbors = true;
+        }
+    }
 }
 
 } // namespace
@@ -1390,6 +1405,10 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                     state->mobilityModeEnabled = false;
                 }
                 markPickBufferDirty(*state);
+            }
+            else if (action == GLFW_PRESS && (mods & GLFW_MOD_CONTROL) != 0)
+            {
+                state->pendingSelectNearestNeighbors = true;
             }
             break;
         case GLFW_KEY_S:
