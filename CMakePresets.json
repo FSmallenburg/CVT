@@ -39,7 +39,7 @@
         {
             "name": "mingw-debug",
             "displayName": "MSYS2 MinGW64 Debug",
-            "description": "Configure the project with the MSYS2 MinGW64 toolchain used by the working manual build.",
+            "description": "Configure a Windows MinGW64 debug build using tools available in PATH.",
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
@@ -48,23 +48,13 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build-debug",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_C_COMPILER": "C:/msys64/mingw64/bin/gcc.exe",
-                "CMAKE_CXX_COMPILER": "C:/msys64/mingw64/bin/g++.exe",
-                "CMAKE_MAKE_PROGRAM": "C:/msys64/mingw64/bin/ninja.exe",
-                "CMAKE_PREFIX_PATH": "C:/msys64/mingw64"
-            },
-            "environment": {
-                "PATH": "C:/msys64/usr/bin;C:/msys64/mingw64/bin;$penv{PATH}",
-                "PKG_CONFIG_PATH": "C:/msys64/mingw64/lib/pkgconfig;C:/msys64/mingw64/share/pkgconfig",
-                "PKG_CONFIG_SYSTEM_LIBRARY_PATH": "C:/msys64/mingw64/lib",
-                "PKG_CONFIG_SYSTEM_INCLUDE_PATH": "C:/msys64/mingw64/include"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
             "name": "mingw-release",
             "displayName": "MSYS2 MinGW64 Release",
-            "description": "Configure the project with the MSYS2 MinGW64 toolchain for release builds.",
+            "description": "Configure a Windows MinGW64 release build using tools available in PATH.",
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
@@ -73,17 +63,7 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build-release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_C_COMPILER": "C:/msys64/mingw64/bin/gcc.exe",
-                "CMAKE_CXX_COMPILER": "C:/msys64/mingw64/bin/g++.exe",
-                "CMAKE_MAKE_PROGRAM": "C:/msys64/mingw64/bin/ninja.exe",
-                "CMAKE_PREFIX_PATH": "C:/msys64/mingw64"
-            },
-            "environment": {
-                "PATH": "C:/msys64/usr/bin;C:/msys64/mingw64/bin;$penv{PATH}",
-                "PKG_CONFIG_PATH": "C:/msys64/mingw64/lib/pkgconfig;C:/msys64/mingw64/share/pkgconfig",
-                "PKG_CONFIG_SYSTEM_LIBRARY_PATH": "C:/msys64/mingw64/lib",
-                "PKG_CONFIG_SYSTEM_INCLUDE_PATH": "C:/msys64/mingw64/include"
+                "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {

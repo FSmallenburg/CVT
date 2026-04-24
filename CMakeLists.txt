@@ -120,7 +120,7 @@ option(CVT_BUILD_SHADERS "Compile runtime shaders as part of the build" ON)
 
 if(CVT_BUILD_SHADERS)
     if(WIN32)
-        find_program(CVT_BASH_EXECUTABLE NAMES bash.exe bash HINTS C:/msys64/usr/bin)
+        find_program(CVT_BASH_EXECUTABLE NAMES bash.exe bash)
     else()
         find_program(CVT_BASH_EXECUTABLE NAMES bash sh)
     endif()
