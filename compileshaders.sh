@@ -79,6 +79,13 @@ find_shaderc() {
 
 build_shaderc() {
 	local shaderc_source_root=${BGFX_SHADERC_SOURCE_ROOT:-"${script_dir}/third_party/bgfx.cmake"}
+	local shaderc_cmake_generator=${BGFX_SHADERC_CMAKE_GENERATOR:-}
+	if [[ -z "${shaderc_cmake_generator}" && -n "${CMAKE_GENERATOR:-}" ]]; then
+		shaderc_cmake_generator=${CMAKE_GENERATOR}
+	fi
+	if [[ -z "${shaderc_cmake_generator}" && "${shader_platform}" == "windows" ]] && command -v ninja >/dev/null 2>&1; then
+		shaderc_cmake_generator=Ninja
+	fi
 	local configure_cmd=(
 		cmake
 		-S "${shaderc_source_root}"
@@ -93,6 +100,10 @@ build_shaderc() {
 		-DBGFX_INSTALL=OFF
 		-DBGFX_CUSTOM_TARGETS=OFF
 	)
+
+	if [[ -n "${shaderc_cmake_generator}" ]]; then
+		configure_cmd+=( -G "${shaderc_cmake_generator}" )
+	fi
 
 	echo "shaderc not found; attempting to build shaderc in ${bgfx_shaderc_build_dir}" >&2
 	"${configure_cmd[@]}" >&2
