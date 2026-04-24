@@ -105,6 +105,17 @@ build_shaderc() {
 		configure_cmd+=( -G "${shaderc_cmake_generator}" )
 	fi
 
+	# If a stale cache from a prior (possibly different-generator) run exists, wipe it
+	# so CMake does not reject the new generator and produce a no-op build.
+	if [[ -f "${bgfx_shaderc_build_dir}/CMakeCache.txt" ]]; then
+		local cached_gen
+		cached_gen=$(grep -m1 '^CMAKE_GENERATOR:' "${bgfx_shaderc_build_dir}/CMakeCache.txt" 2>/dev/null | sed 's/.*=//' || true)
+		if [[ -n "${shaderc_cmake_generator}" && "${cached_gen}" != "${shaderc_cmake_generator}" ]]; then
+			echo "Stale build-shaderc cache uses '${cached_gen}', reconfiguring with '${shaderc_cmake_generator}' — wiping ${bgfx_shaderc_build_dir}" >&2
+			rm -rf "${bgfx_shaderc_build_dir}"
+		fi
+	fi
+
 	echo "shaderc not found; attempting to build shaderc in ${bgfx_shaderc_build_dir}" >&2
 	"${configure_cmd[@]}" >&2
 	cmake --build "${bgfx_shaderc_build_dir}" --target shaderc >&2
@@ -125,11 +136,16 @@ build_shaderc() {
 		fi
 	done
 
-	candidate=$(find "${bgfx_shaderc_build_dir}" -type f \( -name shaderc -o -name shadercRelease -o -name shadercDebug -o -name shaderc.exe -o -name shadercRelease.exe -o -name shadercDebug.exe \) 2>/dev/null | head -1 || true)
-	if [[ -n "${candidate}" && -x "${candidate}" ]]; then
-		echo "${candidate}"
-		return 0
-	fi
+	# find may return Windows-style paths on MSYS; convert before testing executability
+	while IFS= read -r candidate; do
+		[[ -z "${candidate}" ]] && continue
+		# Normalise Windows backslash paths to forward slashes for bash
+		candidate="${candidate//\\//}"
+		if [[ -f "${candidate}" ]]; then
+			echo "${candidate}"
+			return 0
+		fi
+	done < <(find "${bgfx_shaderc_build_dir}" -type f \( -name shaderc -o -name shadercRelease -o -name shadercDebug -o -name shaderc.exe -o -name shadercRelease.exe -o -name shadercDebug.exe \) 2>/dev/null || true)
 
 	return 1
 }
