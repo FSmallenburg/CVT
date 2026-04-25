@@ -112,6 +112,25 @@ target_link_libraries(cvt PRIVATE
     implot
 )
 
+install(TARGETS cvt
+    RUNTIME DESTINATION .
+)
+
+install(FILES
+    ${CMAKE_SOURCE_DIR}/cvt.ini
+    DESTINATION .
+)
+
+install(DIRECTORY
+    ${CMAKE_SOURCE_DIR}/shaders
+    DESTINATION .
+)
+
+install(DIRECTORY
+    ${CMAKE_SOURCE_DIR}/TestInputFiles
+    DESTINATION .
+)
+
 if(GLFW_TARGET)
     target_link_libraries(cvt PRIVATE ${GLFW_TARGET})
 endif()

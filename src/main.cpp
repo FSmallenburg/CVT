@@ -76,6 +76,21 @@ namespace
 
 std::vector<fs::path> s_resourceSearchRoots;
 
+SimulationBox makeViewBoundsBox(const SimulationBox &simulationBox,
+                                const TrajectoryReader *trajectoryReader)
+{
+    bx::Vec3 viewBoxSize = simulationBox.size();
+    if (trajectoryReader != nullptr)
+    {
+        const bx::Vec3 maxFrameBoxSize = trajectoryReader->maxFrameBoxSize();
+        viewBoxSize.x = bx::max(viewBoxSize.x, maxFrameBoxSize.x);
+        viewBoxSize.y = bx::max(viewBoxSize.y, maxFrameBoxSize.y);
+        viewBoxSize.z = bx::max(viewBoxSize.z, maxFrameBoxSize.z);
+    }
+
+    return SimulationBox({0.0f, 0.0f, 0.0f}, viewBoxSize);
+}
+
 fs::path fallbackExecutablePath(const char *argv0)
 {
     if (argv0 == nullptr || argv0[0] == '\0')
@@ -2573,12 +2588,12 @@ int main(int argc, char **argv)
 
         const float initialAspectRatio =
             height > 0 ? float(viewerState.renderViewportWidth) / float(height) : 1.0f;
-        float cameraDistance = computeInitialCameraDistance(simulationBox);
+        const SimulationBox initialViewBoundsBox =
+            makeViewBoundsBox(simulationBox, trajectoryReader.get());
+        float cameraDistance = computeInitialCameraDistance(initialViewBoundsBox);
         bx::Vec3 cameraPos = {0.0f, 0.0f, cameraDistance};
         const float orthoBaseHalfHeight =
-            computeInitialOrthoHalfHeight(simulationBox, initialAspectRatio);
-        const float nearPlane = 0.1f;
-        const float farPlane = computeInitialFarPlane(cameraDistance, simulationBox);
+            computeInitialOrthoHalfHeight(initialViewBoundsBox, initialAspectRatio);
         const float cutPlaneStep = computeCutPlaneStep(simulationBox);
         const float cutPlaneMinSceneZ =
             -0.5f * std::sqrt(simulationBox.size().x * simulationBox.size().x
@@ -2702,11 +2717,34 @@ int main(int argc, char **argv)
                               viewerState.renderViewportHeight);
             const float currentAspectRatio =
                 height > 0 ? float(viewerState.renderViewportWidth) / float(height) : 1.0f;
+            const SimulationBox currentViewBoundsBox =
+                makeViewBoundsBox(simulationBox, trajectoryReader.get());
+            const float currentCameraDistance =
+                computeInitialCameraDistance(currentViewBoundsBox);
+            cameraPos = {0.0f, 0.0f, currentCameraDistance};
+            const float orthoBaseHalfHeight =
+                computeInitialOrthoHalfHeight(currentViewBoundsBox, currentAspectRatio);
             const float zoomedHalfHeight = orthoBaseHalfHeight * viewerState.orthoZoom;
             const float zoomedHalfWidth = currentAspectRatio * zoomedHalfHeight;
             updateMouseDrivenInteraction(viewerState, viewerState.renderViewportWidth,
                                          viewerState.renderViewportHeight,
                                          zoomedHalfWidth, zoomedHalfHeight);
+
+            const bx::Vec3 boxSize = currentViewBoundsBox.size();
+            const float halfDiagonal =
+                0.5f * std::sqrt(boxSize.x * boxSize.x + boxSize.y * boxSize.y
+                                 + boxSize.z * boxSize.z);
+            const bx::Vec3 cameraOffset = bx::sub(cameraPos, s_cameraTarget);
+            const float cameraToTarget =
+                std::sqrt(cameraOffset.x * cameraOffset.x
+                          + cameraOffset.y * cameraOffset.y
+                          + cameraOffset.z * cameraOffset.z);
+            const float depthMargin = bx::max(1.0f, halfDiagonal);
+            const float nearPlane =
+                bx::max(0.001f, cameraToTarget - 3.0f * halfDiagonal - depthMargin);
+            const float farPlane =
+                bx::max(nearPlane + 10.0f, cameraToTarget + 3.0f * halfDiagonal + depthMargin);
+
             bx::mtxOrtho(proj, -zoomedHalfWidth, zoomedHalfWidth, -zoomedHalfHeight,
                          zoomedHalfHeight, nearPlane, farPlane, 0.0f,
                          bgfx::getCaps()->homogeneousDepth, bx::Handedness::Right);

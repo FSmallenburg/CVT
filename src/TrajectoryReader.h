@@ -63,6 +63,10 @@ class TrajectoryReader
     /// Voronoi files).
     const std::vector<std::vector<bx::Vec3>> &voronoiPointSets() const;
 
+    /// Returns the largest axis-aligned frame extents discovered while scanning
+    /// the trajectory file.
+    bx::Vec3 maxFrameBoxSize() const;
+
     /// Parses frame @p frameIndex and populates @p particleSystem and
     /// @p simulationBox. Returns false and sets error() on failure.
     bool loadFrame(size_t frameIndex, ParticleSystem &particleSystem,
@@ -77,6 +81,7 @@ class TrajectoryReader
     mutable std::string m_error;
     std::vector<std::streampos> m_frameOffsets;
     std::vector<std::vector<bx::Vec3>> m_voronoiPointSets;
+    bx::Vec3 m_maxFrameBoxSize{0.0f, 0.0f, 0.0f};
     FileType m_fileType = FileType::Sphere;
     Dimensionality m_dimensionality = Dimensionality::ThreeDimensional;
 };

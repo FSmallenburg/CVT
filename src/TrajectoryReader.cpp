@@ -381,6 +381,11 @@ size_t TrajectoryReader::frameCount() const
     return m_frameOffsets.size();
 }
 
+bx::Vec3 TrajectoryReader::maxFrameBoxSize() const
+{
+    return m_maxFrameBoxSize;
+}
+
 TrajectoryReader::FileType TrajectoryReader::fileType() const
 {
     return m_fileType;
@@ -852,6 +857,27 @@ bool TrajectoryReader::scanFrames()
             m_frameOffsets.clear();
             return false;
         }
+
+        SimulationBox frameBox;
+        std::istringstream boxStream(line);
+        float boxX = 0.0f;
+        float boxY = 0.0f;
+        float boxZ = 0.0f;
+        if ((boxStream >> boxX >> boxY >> boxZ))
+        {
+            frameBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, boxZ});
+        }
+        else if (!parseBallBounds(line, frameBox))
+        {
+            m_error = "Invalid box line in trajectory file: " + m_path + " : " + line;
+            m_frameOffsets.clear();
+            return false;
+        }
+
+        const bx::Vec3 frameSize = frameBox.size();
+        m_maxFrameBoxSize.x = bx::max(m_maxFrameBoxSize.x, frameSize.x);
+        m_maxFrameBoxSize.y = bx::max(m_maxFrameBoxSize.y, frameSize.y);
+        m_maxFrameBoxSize.z = bx::max(m_maxFrameBoxSize.z, frameSize.z);
 
         for (size_t particleIndex = 0; particleIndex < particleCount; ++particleIndex)
         {
