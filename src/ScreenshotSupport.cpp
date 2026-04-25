@@ -7,6 +7,8 @@
 #include <bx/file.h>
 
 #include <chrono>
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -28,6 +30,23 @@ std::tm localTime(std::time_t timeValue)
     localtime_r(&timeValue, &result);
 #endif
     return result;
+}
+
+std::string normalizeScreenshotPathKey(const std::string &path)
+{
+    std::string normalized = path;
+    for (char &ch : normalized)
+    {
+        if (ch == '\\')
+        {
+            ch = '/';
+        }
+    }
+#if defined(_WIN32)
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#endif
+    return normalized;
 }
 
 } // namespace
@@ -83,7 +102,7 @@ void ScreenshotCallback::queueViewportCrop(const std::string &filePath, uint32_t
 {
     if (!filePath.empty())
     {
-        pendingViewportCrops[filePath] = viewportWidth;
+        pendingViewportCrops[normalizeScreenshotPathKey(filePath)] = viewportWidth;
     }
 }
 
@@ -92,6 +111,12 @@ void ScreenshotCallback::screenShot(const char *filePath, uint32_t width, uint32
                                     const void *data, uint32_t, bool yflip)
 {
     const uint32_t viewportWidth = takeQueuedViewportCrop(filePath);
+    cvt::log::infof("Screenshot callback: file=%s full=%ux%u cropWidth=%u pitch=%u\n",
+                    filePath != nullptr ? filePath : "<unknown>",
+                    static_cast<unsigned>(width),
+                    static_cast<unsigned>(height),
+                    static_cast<unsigned>(viewportWidth),
+                    static_cast<unsigned>(pitch));
     if (viewportWidth > 0 && viewportWidth < width && data != nullptr)
     {
         const uint32_t bytesPerPixel =
@@ -152,7 +177,8 @@ uint32_t ScreenshotCallback::takeQueuedViewportCrop(const char *filePath)
         return 0u;
     }
 
-    const auto it = pendingViewportCrops.find(filePath);
+    const std::string normalizedPath = normalizeScreenshotPathKey(filePath);
+    const auto it = pendingViewportCrops.find(normalizedPath);
     if (it == pendingViewportCrops.end())
     {
         return 0u;

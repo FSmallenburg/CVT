@@ -2320,6 +2320,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 ImGui::BulletText("B: Toggle simulation box");
                 ImGui::BulletText("W: Toggle wrap particles to box");
                 ImGui::BulletText("M: Cycle color mode");
+                ImGui::BulletText("Shift+S: Toggle white/black background");
                 ImGui::BulletText("Shift+M: Toggle mobility mode");
                 ImGui::BulletText("Shift+B: Toggle bond mode");
                 ImGui::BulletText("Shift+N: Toggle neighbor mode");

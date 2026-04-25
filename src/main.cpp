@@ -347,6 +347,8 @@ constexpr uint16_t kSphereResolutionStep = 2;
 constexpr float kParticleSizeScaleStep = 0.01f;
 constexpr float kMinParticleSizeScale = 0.01f;
 constexpr uint8_t kLightingLevelCount = 30u;
+constexpr uint32_t kBackgroundClearWhite = 0xffffffff;
+constexpr uint32_t kBackgroundClearBlack = 0x000000ff;
 constexpr uint16_t kBondDiagramPreviewSize = 192u;
 constexpr size_t kLargeStructureFactorParticleThreshold = 25000u;
 constexpr uint16_t kBondDiagramSphereStacks = 10u;
@@ -408,6 +410,18 @@ int particleTypeHotkeyIndex(int key)
     default:
         return -1;
     }
+}
+
+void applyViewerBackgroundClearColor(const ViewerState &viewerState)
+{
+    const uint32_t backgroundColor =
+        viewerState.useWhiteBackground ? kBackgroundClearWhite : kBackgroundClearBlack;
+    bgfx::setViewClear(kMainView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                       backgroundColor, 1.0f, 0);
+    bgfx::setViewClear(kPickView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                       0x00000000, 1.0f, 0);
+    bgfx::setViewClear(kBondDiagramView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                       backgroundColor, 1.0f, 0);
 }
 
 bx::Vec3 inverseRotateVector(const float *rotationTransform, const bx::Vec3 &vector)
@@ -1414,8 +1428,15 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
         case GLFW_KEY_S:
             if (action == GLFW_PRESS)
             {
-                state->lightingLevelIndex =
-                    static_cast<uint8_t>((state->lightingLevelIndex + 1u) % kLightingLevelCount);
+                if ((mods & GLFW_MOD_SHIFT) != 0)
+                {
+                    state->useWhiteBackground = !state->useWhiteBackground;
+                }
+                else
+                {
+                    state->lightingLevelIndex =
+                        static_cast<uint8_t>((state->lightingLevelIndex + 1u) % kLightingLevelCount);
+                }
                 markBondDiagramViewDirty(*state);
             }
             break;
@@ -2253,7 +2274,7 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
                             "Drag rotates. Shift+drag translates. A aligns to a selected pair. D/V print info.");
     }
     bgfx::dbgTextPrintf(0, 4, 0x0f,
-                        "Enter resets rotation. B toggles box. Shift+B toggles bonds. P saves PNG.");
+                        "Enter resets rotation. B toggles box. Shift+B toggles bonds. Shift+S toggles background. P saves PNG.");
     bgfx::dbgTextPrintf(0, 5, 0x0f,
                         "M cycles colors. Shift+M toggles mobility. Box: %s  Mobility: %s  Bonds: %s",
                         viewerState.showBox ? "on" : "off",
@@ -2535,12 +2556,7 @@ int main(int argc, char **argv)
             cvt::log::info() << viewerState.fileOpenStatusMessage << std::endl;
         }
 
-        bgfx::setViewClear(kMainView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                           0xffffffff, 1.0f, 0);
-        bgfx::setViewClear(kPickView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                           0x00000000, 1.0f, 0);
-        bgfx::setViewClear(kBondDiagramView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                           0xffffffff, 1.0f, 0);
+        applyViewerBackgroundClearColor(viewerState);
 
         const bool uiAvailable = ImGuiBgfx::create(kUiView);
         imGuiGuard.initialized = uiAvailable;
@@ -2675,6 +2691,8 @@ int main(int argc, char **argv)
             {
                 continue;
             }
+
+            applyViewerBackgroundClearColor(viewerState);
 
             float view[16];
             float proj[16];
@@ -2811,6 +2829,9 @@ int main(int argc, char **argv)
             if (viewerState.pendingScreenshotRequest)
             {
                 const std::string screenshotPath = makeTimestampedScreenshotPath();
+                cvt::log::infof("Screenshot requested: output=%s viewportWidth=%u\n",
+                                screenshotPath.c_str(),
+                                static_cast<unsigned>(viewerState.renderViewportWidth));
                 screenshotCallback.queueViewportCrop(screenshotPath,
                                                      viewerState.renderViewportWidth);
                 bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath.c_str());

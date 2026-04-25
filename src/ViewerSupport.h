@@ -195,6 +195,7 @@ struct ViewerState
     bool leftDragActive = false;
     bool leftTranslateMode = false;
     bool rightMouseDown = false;
+    bool useWhiteBackground = true;
     float sceneRotation[16];
     bx::Vec3 particleTranslation{0.0f, 0.0f, 0.0f};
     // Frame/file navigation actions queued by UI/input callbacks.
