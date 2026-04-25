@@ -68,6 +68,8 @@ class ScreenshotCallback final : public bgfx::CallbackI
     std::unordered_map<std::string, uint32_t> pendingViewportCrops;
 };
 
-/// Returns a timestamped file path in the current working directory of the
-/// form "snapshot_YYYYMMDD_HHMMSS_mmm.png".
-std::string makeTimestampedScreenshotPath();
+/// Returns a timestamped screenshot path of the form
+/// "snapshot_YYYYMMDD_HHMMSS_mmm.png". If @p loadedPath is a file path, the
+/// screenshot is written next to that file; otherwise it falls back to the
+/// current working directory.
+std::string makeTimestampedScreenshotPath(const std::string &loadedPath);

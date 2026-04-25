@@ -214,7 +214,7 @@ bool ScreenshotCallback::writeScreenshot(const char *filePath, uint32_t width, u
     return bytesWritten > 0 && error.isOk();
 }
 
-std::string makeTimestampedScreenshotPath()
+std::string makeTimestampedScreenshotPath(const std::string &loadedPath)
 {
     const auto now = std::chrono::system_clock::now();
     const auto timeValue = std::chrono::system_clock::to_time_t(now);
@@ -228,5 +228,20 @@ std::string makeTimestampedScreenshotPath()
     fileName << "snapshot_" << std::put_time(&localNow, "%Y%m%d_%H%M%S")
              << '_' << std::setw(3) << std::setfill('0') << milliseconds << ".png";
 
-    return (std::filesystem::current_path() / fileName.str()).string();
+    std::filesystem::path outputDirectory = std::filesystem::current_path();
+    if (!loadedPath.empty())
+    {
+        std::error_code error;
+        std::filesystem::path loadedFsPath(loadedPath);
+        if (std::filesystem::is_directory(loadedFsPath, error))
+        {
+            outputDirectory = loadedFsPath;
+        }
+        else if (loadedFsPath.has_parent_path())
+        {
+            outputDirectory = loadedFsPath.parent_path();
+        }
+    }
+
+    return (outputDirectory / fileName.str()).string();
 }

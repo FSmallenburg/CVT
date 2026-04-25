@@ -2828,7 +2828,7 @@ int main(int argc, char **argv)
             ImGuiBgfx::endFrame();
             if (viewerState.pendingScreenshotRequest)
             {
-                const std::string screenshotPath = makeTimestampedScreenshotPath();
+                const std::string screenshotPath = makeTimestampedScreenshotPath(loadedPath);
                 cvt::log::infof("Screenshot requested: output=%s viewportWidth=%u\n",
                                 screenshotPath.c_str(),
                                 static_cast<unsigned>(viewerState.renderViewportWidth));
