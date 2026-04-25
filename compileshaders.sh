@@ -4,6 +4,28 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+shader_debug_tools=${BGFX_SHADER_DEBUG_TOOLS:-0}
+debug_log() {
+	if [[ "${shader_debug_tools}" == "1" ]]; then
+		echo "[compileshaders] $*" >&2
+	fi
+}
+
+# On Windows, PATH may resolve to find.exe from System32; force POSIX find when available.
+find_cmd=find
+if [[ -x /usr/bin/find ]]; then
+	find_cmd=/usr/bin/find
+elif command -v gfind >/dev/null 2>&1; then
+	find_cmd=$(command -v gfind)
+fi
+debug_log "find command: ${find_cmd}"
+if command -v cmake >/dev/null 2>&1; then
+	debug_log "cmake command: $(command -v cmake)"
+fi
+if command -v bash >/dev/null 2>&1; then
+	debug_log "bash command: $(command -v bash)"
+fi
+
 bgfx_dir=${BGFX_DIR:-"${script_dir}/third_party/bgfx.cmake/bgfx"}
 bgfx_build_dir=${BGFX_BUILD_DIR:-}
 bgfx_include_dir=${BGFX_SHADER_INCLUDE_DIR:-"${bgfx_dir}/src"}
@@ -145,7 +167,7 @@ build_shaderc() {
 			echo "${candidate}"
 			return 0
 		fi
-	done < <(find "${bgfx_shaderc_build_dir}" -type f \( -name shaderc -o -name shadercRelease -o -name shadercDebug -o -name shaderc.exe -o -name shadercRelease.exe -o -name shadercDebug.exe \) 2>/dev/null || true)
+	done < <("${find_cmd}" "${bgfx_shaderc_build_dir}" -type f \( -name shaderc -o -name shadercRelease -o -name shadercDebug -o -name shaderc.exe -o -name shadercRelease.exe -o -name shadercDebug.exe \) 2>/dev/null || true)
 
 	return 1
 }

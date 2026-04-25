@@ -12,5 +12,8 @@
     "${workspaceFolder}/third_party/bgfx/include",
     "${workspaceFolder}/third_party/bx/include",
     "${workspaceFolder}/third_party/bimg/include"
-  ]
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "cmake": true
+  }
 }
