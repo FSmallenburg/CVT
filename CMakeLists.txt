@@ -85,10 +85,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     )
     if(NOT MINGW)
         target_compile_options(cvt PRIVATE
-            $<$<NOT:$<CONFIG:Debug>>:-flto>
+            $<$<NOT:$<CONFIG:Debug>>:-flto=auto>
         )
         target_link_options(cvt PRIVATE
-            $<$<NOT:$<CONFIG:Debug>>:-flto>
+            $<$<NOT:$<CONFIG:Debug>>:-flto=auto>
         )
     endif()
 endif()
