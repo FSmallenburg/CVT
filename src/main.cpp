@@ -76,6 +76,39 @@ namespace
 
 std::vector<fs::path> s_resourceSearchRoots;
 
+#if BX_PLATFORM_WINDOWS
+void enableWindowsDpiAwareness()
+{
+    // Make the process explicitly DPI aware before creating any windows.
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32 == nullptr)
+    {
+        return;
+    }
+
+    using SetProcessDpiAwarenessContextFn = BOOL(WINAPI *)(HANDLE);
+    const auto setProcessDpiAwarenessContext =
+        reinterpret_cast<SetProcessDpiAwarenessContextFn>(
+            GetProcAddress(user32, "SetProcessDpiAwarenessContext"));
+    if (setProcessDpiAwarenessContext != nullptr)
+    {
+        const DPI_AWARENESS_CONTEXT perMonitorAwareV2 = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
+        if (setProcessDpiAwarenessContext(perMonitorAwareV2))
+        {
+            return;
+        }
+    }
+
+    using SetProcessDPIAwareFn = BOOL(WINAPI *)();
+    const auto setProcessDPIAware = reinterpret_cast<SetProcessDPIAwareFn>(
+        GetProcAddress(user32, "SetProcessDPIAware"));
+    if (setProcessDPIAware != nullptr)
+    {
+        setProcessDPIAware();
+    }
+}
+#endif
+
 SimulationBox makeViewBoundsBox(const SimulationBox &simulationBox,
                                 const TrajectoryReader *trajectoryReader)
 {
@@ -2439,6 +2472,10 @@ int main(int argc, char **argv)
     ScreenshotCallback screenshotCallback;
     int exitCode = 0;
     s_resourceSearchRoots = buildResourceSearchRoots(argc > 0 ? argv[0] : nullptr);
+
+#if BX_PLATFORM_WINDOWS
+    enableWindowsDpiAwareness();
+#endif
 
     {
         const fs::path configPath = resolveResourcePath("cvt.ini");

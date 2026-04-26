@@ -69,10 +69,28 @@ add_executable(cvt
     ${BGFX_DIR}/3rdparty/dear-imgui/imgui_widgets.cpp
 )
 
+target_compile_definitions(cvt PRIVATE
+    IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:_USE_MATH_DEFINES>
+)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(cvt PRIVATE
+        $<$<NOT:$<CONFIG:Debug>>:-ffunction-sections>
+        $<$<NOT:$<CONFIG:Debug>>:-fdata-sections>
         $<$<CONFIG:Release>:-Ofast>
     )
+    target_link_options(cvt PRIVATE
+        $<$<NOT:$<CONFIG:Debug>>:-Wl,--gc-sections>
+    )
+    if(NOT MINGW)
+        target_compile_options(cvt PRIVATE
+            $<$<NOT:$<CONFIG:Debug>>:-flto>
+        )
+        target_link_options(cvt PRIVATE
+            $<$<NOT:$<CONFIG:Debug>>:-flto>
+        )
+    endif()
 endif()
 
 target_include_directories(cvt PRIVATE
@@ -80,7 +98,11 @@ target_include_directories(cvt PRIVATE
     ${BGFX_DIR}/examples/common/imgui
 )
 
-find_package(glfw3 CONFIG QUIET)
+# On MSVC, skip automatic system discovery: MinGW/MSYS2 packages are unusable with cl.exe.
+# Users with a native MSVC GLFW install can set glfw3_DIR explicitly.
+if(NOT MSVC)
+    find_package(glfw3 CONFIG QUIET)
+endif()
 
 set(GLFW_TARGET "")
 if(TARGET glfw)
@@ -90,18 +112,28 @@ elseif(TARGET glfw3)
 endif()
 
 if(NOT GLFW_TARGET)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(GLFW QUIET glfw3)
+    if(NOT MSVC)
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(GLFW QUIET glfw3)
+        endif()
     endif()
 
     if(GLFW_FOUND)
         target_include_directories(cvt PRIVATE ${GLFW_INCLUDE_DIRS})
         target_link_libraries(cvt PRIVATE ${GLFW_LIBRARIES})
     else()
-        message(FATAL_ERROR
-            "GLFW 3 not found. Install a CMake package that provides target glfw/glfw3, "
-            "or make glfw3 available through pkg-config.")
+        include(FetchContent)
+        FetchContent_Declare(glfw3_src
+            GIT_REPOSITORY https://github.com/glfw/glfw.git
+            GIT_TAG        3.4
+            GIT_SHALLOW    TRUE
+        )
+        set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(glfw3_src)
+        set(GLFW_TARGET glfw)
     endif()
 endif()
 
@@ -229,6 +261,48 @@ if(CVT_BUILD_SHADERS)
 
         add_custom_target(cvt-shaders DEPENDS ${CVT_SHADER_STAMP})
         add_dependencies(cvt cvt-shaders)
+    elseif(MSVC)
+        # No POSIX shell found, but building with MSVC: use the PowerShell companion script.
+        find_program(CVT_POWERSHELL_EXECUTABLE NAMES powershell.exe pwsh.exe
+            PATHS "C:/Windows/System32/WindowsPowerShell/v1.0" "C:/Program Files/PowerShell"
+            NO_DEFAULT_PATH)
+        if(NOT CVT_POWERSHELL_EXECUTABLE)
+            find_program(CVT_POWERSHELL_EXECUTABLE NAMES powershell.exe pwsh.exe)
+        endif()
+
+        if(CVT_POWERSHELL_EXECUTABLE)
+            set(CVT_SHADER_STAMP ${CMAKE_CURRENT_BINARY_DIR}/cvt-shaders.stamp)
+            add_custom_command(
+                OUTPUT ${CVT_SHADER_STAMP}
+                COMMAND ${CVT_POWERSHELL_EXECUTABLE}
+                    -ExecutionPolicy Bypass
+                    -NonInteractive
+                    -File "${CMAKE_SOURCE_DIR}/compileshaders.ps1"
+                COMMAND ${CMAKE_COMMAND} -E touch ${CVT_SHADER_STAMP}
+                DEPENDS
+                    ${CMAKE_SOURCE_DIR}/compileshaders.ps1
+                    ${CMAKE_SOURCE_DIR}/shaders/varying.def.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/vs_instancing.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/fs_instancing.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/vs_picking.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/fs_picking.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/vs_lines.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/fs_lines.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/vs_structure_factor.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/fs_structure_factor.sc
+                    ${CMAKE_SOURCE_DIR}/shaders/fs_structure_factor_color.sc
+                BYPRODUCTS ${CVT_SHADER_OUTPUTS}
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                COMMENT "Compiling runtime shaders (PowerShell)"
+                VERBATIM
+            )
+            add_custom_target(cvt-shaders DEPENDS ${CVT_SHADER_STAMP})
+            add_dependencies(cvt cvt-shaders)
+        else()
+            message(WARNING
+                "CVT_BUILD_SHADERS is ON but neither a POSIX shell nor PowerShell was found. "
+                "Build will continue without shader compilation; run compileshaders.ps1 manually.")
+        endif()
     else()
         message(WARNING
             "CVT_BUILD_SHADERS is ON but no POSIX shell executable was found in PATH. "

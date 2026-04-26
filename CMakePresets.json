@@ -67,6 +67,19 @@
             }
         },
         {
+            "name": "msvc-vs2026",
+            "displayName": "MSVC VS2026 x64",
+            "description": "Configure a Windows MSVC build with Visual Studio 2026 in build-msvc.",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "generator": "Visual Studio 18 2026",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build-msvc"
+        },
+        {
             "name": "macos-debug",
             "displayName": "macOS Debug",
             "description": "Configure a local macOS debug build in build-mac-debug.",
@@ -151,6 +164,28 @@
                 "rhs": "Windows"
             },
             "configurePreset": "mingw-release"
+        },
+        {
+            "name": "build-msvc-debug",
+            "displayName": "Build MSVC Debug",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "configurePreset": "msvc-vs2026",
+            "configuration": "Debug"
+        },
+        {
+            "name": "build-msvc-release",
+            "displayName": "Build MSVC Release",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "configurePreset": "msvc-vs2026",
+            "configuration": "Release"
         },
         {
             "name": "build-macos-debug",
