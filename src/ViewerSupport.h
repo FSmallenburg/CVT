@@ -171,6 +171,10 @@ struct ViewerState
         bondOrderScatterCache.enabledSpecies.fill(true);
         structureFactorIncludedSpecies.fill(true);
         rdfIncludedSpecies.fill(true);
+        for (size_t i = 0; i < kParticlePaletteColorCount; ++i)
+        {
+            speciesColorOverrides[i] = colorFromPaletteIndex(i);
+        }
     }
 
     bool showUi = true;
@@ -237,11 +241,16 @@ struct ViewerState
     bool nearestNeighborModeEnabled = false;
     std::array<bool, kParticlePaletteColorCount> particleTypeVisible{};
     std::array<bool, kParticlePaletteColorCount> bondOrderScatterTypeEnabled{};
+    // Per-species color overrides (session-only, active in FileDefault/PaletteCycle modes).
+    std::array<bool, kParticlePaletteColorCount> speciesColorOverrideEnabled{};
+    std::array<std::array<float, 4>, kParticlePaletteColorCount> speciesColorOverrides{};
     uint8_t maxSeenParticleTypeIndex = 0u;
     uint16_t orderParameterCount = 0u;
     bool sizeDistributionUseVisibleOnly = true;
     uint16_t sizeDistributionBinCount = 32u;
     std::unordered_set<uint32_t> selectedIds;
+    // Per-particle color overrides applied to individually colored particles.
+    std::unordered_map<uint32_t, std::array<float, 4>> particleColorOverrides;
     std::unordered_set<uint32_t> hiddenIds;
     std::unordered_set<uint32_t> frankKasperAutoHiddenIds;
     std::unordered_set<uint32_t> twelveCoordinatedAntiparallelAutoHiddenIds;
@@ -258,6 +267,11 @@ struct ViewerState
     bool pendingApplyParticleTypeVisibility = false;
     bool pendingDescribeVisibleCount = false;
     bool pendingUnselect = false;
+    // Pending color-override actions.
+    bool pendingApplyColorToSelected = false;
+    bool pendingClearSelectedColorOverrides = false;
+    bool pendingClearAllColorOverrides = false;
+    std::array<float, 4> pendingColorForSelected{1.0f, 1.0f, 1.0f, 1.0f};
     bool pendingIncreaseSphereResolution = false;
     bool pendingDecreaseSphereResolution = false;
     bool cutPlaneEnabled = false;
@@ -354,6 +368,7 @@ struct ViewerState
     RdfBatchState rdfBatchState{};
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
+    std::vector<uint32_t> previousRawPositionIds;
 };
 
 struct PickResources
@@ -432,6 +447,12 @@ uint16_t clampPickCoordinate(double value, int extent);
 uint16_t mapWindowYToPickY(uint16_t windowY, uint16_t height);
 /// Decodes a particle ID from a 4-byte pick-buffer pixel, respecting @p colorFormat byte order.
 uint32_t decodeParticleId(const uint8_t *pixel, bgfx::TextureFormat::Enum colorFormat);
+
+/// Returns true when @p mode allows user color overrides to take effect
+/// (i.e. FileDefault or PaletteCycle — not analysis-derived modes).
+bool colorModeSupportsOverrides(ColorMode mode);
+/// Clears all species and per-particle color overrides.
+void clearAllColorOverrides(ViewerState &state);
 
 /// Marks every helper render system (patches, bonds, neighbor lines, polygons,
 /// mobility, …) as dirty so they are rebuilt on the next active frame.

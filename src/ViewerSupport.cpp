@@ -84,6 +84,23 @@ void resetStructureFactorPreviewTexture(StructureFactorResources &structureFacto
 
 }
 
+bool colorModeSupportsOverrides(ColorMode mode)
+{
+    return mode == ColorMode::FileDefault || mode == ColorMode::PaletteCycle;
+}
+
+void clearAllColorOverrides(ViewerState &state)
+{
+    state.speciesColorOverrideEnabled.fill(false);
+    // Re-seed the pickers back to the current palette so they show sensible
+    // defaults the next time the user opens the color editor.
+    for (size_t i = 0; i < kParticlePaletteColorCount; ++i)
+    {
+        state.speciesColorOverrides[i] = colorFromPaletteIndex(i);
+    }
+    state.particleColorOverrides.clear();
+}
+
 void markAllHelperSystemsDirty(ViewerState &state)
 {
     state.patchRenderSystemsDirty = true;

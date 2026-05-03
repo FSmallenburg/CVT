@@ -489,10 +489,13 @@ void snapshotCurrentParticlePositions(const ParticleSystem &particleSystem,
                                       ViewerState &viewerState, bool hasPreviousFrame)
 {
     viewerState.previousRawPositions.clear();
+    viewerState.previousRawPositionIds.clear();
     viewerState.previousRawPositions.reserve(particleSystem.particles().size());
+    viewerState.previousRawPositionIds.reserve(particleSystem.particles().size());
     for (const Particle &particle : particleSystem.particles())
     {
         viewerState.previousRawPositions.push_back(particle.position);
+        viewerState.previousRawPositionIds.push_back(particle.id);
     }
     viewerState.hasPreviousFramePositions = hasPreviousFrame;
 }
@@ -1164,6 +1167,42 @@ void processSelectionAndVisibilityPendingActions(ViewerState &viewerState,
             viewerState.pendingFindNeighbors = true;
         }
     }
+
+    if (viewerState.pendingApplyColorToSelected)
+    {
+        for (const uint32_t id : viewerState.selectedIds)
+        {
+            viewerState.particleColorOverrides[id] = viewerState.pendingColorForSelected;
+        }
+        viewerState.pendingApplyColorToSelected = false;
+        if (colorModeSupportsOverrides(viewerState.colorMode))
+        {
+            markColorDependentHelperSystemsDirty(viewerState);
+        }
+    }
+
+    if (viewerState.pendingClearSelectedColorOverrides)
+    {
+        for (const uint32_t id : viewerState.selectedIds)
+        {
+            viewerState.particleColorOverrides.erase(id);
+        }
+        viewerState.pendingClearSelectedColorOverrides = false;
+        if (colorModeSupportsOverrides(viewerState.colorMode))
+        {
+            markColorDependentHelperSystemsDirty(viewerState);
+        }
+    }
+
+    if (viewerState.pendingClearAllColorOverrides)
+    {
+        clearAllColorOverrides(viewerState);
+        viewerState.pendingClearAllColorOverrides = false;
+        if (colorModeSupportsOverrides(viewerState.colorMode))
+        {
+            markColorDependentHelperSystemsDirty(viewerState);
+        }
+    }
 }
 
 } // namespace
@@ -1222,6 +1261,11 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
     }
 
     if (action == GLFW_RELEASE)
+    {
+        return;
+    }
+
+    if (ImGuiBgfx::wantsKeyboardCapture())
     {
         return;
     }
@@ -1869,6 +1913,7 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.mobilityColorStatsCache = {};
     viewerState.selectedIds.clear();
     viewerState.hiddenIds.clear();
+    clearAllColorOverrides(viewerState);
     resetFrankKasperState(viewerState, true);
     viewerState.lastPickedId = 0u;
     viewerState.pendingPickRequest = false;
@@ -1952,16 +1997,20 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
     }
 
     std::vector<bx::Vec3> previousRawPositions;
+    std::vector<uint32_t> previousRawPositionIds;
     previousRawPositions.reserve(particleSystem.particles().size());
+    previousRawPositionIds.reserve(particleSystem.particles().size());
     for (const Particle &particle : particleSystem.particles())
     {
         previousRawPositions.push_back(particle.position);
+        previousRawPositionIds.push_back(particle.id);
     }
 
     if (trajectoryReader->loadFrame(requestedFrame, particleSystem, simulationBox))
     {
         currentFrame = requestedFrame;
         viewerState.previousRawPositions = std::move(previousRawPositions);
+        viewerState.previousRawPositionIds = std::move(previousRawPositionIds);
         viewerState.hasPreviousFramePositions = true;
         viewerState.particleColorStatsCache = {};
         viewerState.mobilityColorStatsCache = {};
@@ -2425,18 +2474,7 @@ static void renderSimulationBoxWireframe(bgfx::ViewId viewId,
     }
     else
     {
-        const bx::Vec3 &minBounds = simulationBox.minBounds();
-        const bx::Vec3 &maxBounds = simulationBox.maxBounds();
-        const bx::Vec3 corners[8] = {
-            {minBounds.x, minBounds.y, minBounds.z},
-            {maxBounds.x, minBounds.y, minBounds.z},
-            {maxBounds.x, maxBounds.y, minBounds.z},
-            {minBounds.x, maxBounds.y, minBounds.z},
-            {minBounds.x, minBounds.y, maxBounds.z},
-            {maxBounds.x, minBounds.y, maxBounds.z},
-            {maxBounds.x, maxBounds.y, maxBounds.z},
-            {minBounds.x, maxBounds.y, maxBounds.z},
-        };
+        const std::array<bx::Vec3, 8> corners = simulationBox.corners();
 
         if (!bgfx::getAvailTransientVertexBuffer(kVertexCount, layout))
         {

@@ -395,6 +395,11 @@ bool usesPeriodicNeighborGrid(const ViewerState &viewerState,
         return false;
     }
 
+    if (simulationBox.isTriclinic())
+    {
+        return false;
+    }
+
     if (!simulationBox.isPeriodic(0) || !simulationBox.isPeriodic(1))
     {
         return false;
@@ -491,6 +496,25 @@ void applyColorMode(ParticleSystem &particleSystem,
                                               patchMetadata,
                                               supportsOrientationMode,
                                               uniformUsesOrientation);
+
+        if (colorModeSupportsOverrides(colorMode))
+        {
+            // Per-particle override takes priority over species override.
+            const auto particleIt =
+                viewerState.particleColorOverrides.find(particle.id);
+            if (particleIt != viewerState.particleColorOverrides.end())
+            {
+                particle.color = particleIt->second;
+            }
+            else
+            {
+                const uint8_t typeIndex = particleTypeIndex(particle.typeLabel);
+                if (viewerState.speciesColorOverrideEnabled[typeIndex])
+                {
+                    particle.color = viewerState.speciesColorOverrides[typeIndex];
+                }
+            }
+        }
     }
 }
 

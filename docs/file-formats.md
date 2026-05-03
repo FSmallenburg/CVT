@@ -11,6 +11,7 @@ If a pull request changes extension detection or parsing behavior in `src/Trajec
 - .sph: Sphere
 - .bsph: Bonded sphere
 - .osph: Ordered sphere
+- .lammpstrj: LAMMPS trajectory
 - .dsk: Disk
 - .rod: Rod
 - .cub: Cube
@@ -37,6 +38,9 @@ Notes:
   - spherical bounds starting with `ball`:
     - `ball originalRadius`
     - `ball originalRadius currentRadius`
+
+LAMMPS `.lammpstrj` files are an exception: they use the native LAMMPS `ITEM:`
+section layout instead of the compact CVT frame header + box line format.
 
 ## Per-format particle syntax
 
@@ -76,6 +80,54 @@ Rules:
 
 - Order parameters are optional; lines with only radius are valid.
 - If order parameters are present, all particles in the same frame must provide the same number of order parameters.
+
+### .lammpstrj
+
+Supported LAMMPS frame structure:
+
+```text
+ITEM: TIMESTEP
+<step>
+ITEM: NUMBER OF ATOMS
+<count>
+ITEM: BOX BOUNDS [boundary flags]
+<xlo> <xhi>
+<ylo> <yhi>
+<zlo> <zhi>
+ITEM: ATOMS <columns...>
+<atom row 1>
+...
+<atom row N>
+```
+
+Accepted `ITEM: ATOMS` position columns:
+
+- `x y z`
+- `xu yu zu`
+- `xs ys zs`
+- `xsu ysu zsu`
+
+Required columns:
+
+- `id`
+- `type`
+- one accepted position triplet from the list above
+
+Optional size columns:
+
+- `radius`
+- `diameter` (converted internally to radius)
+
+Rules and current limitations:
+
+- LAMMPS atom ids must be non-negative and unique within each frame.
+- Numeric atom types are mapped onto CVT's existing A-Z palette slots, wrapping after 26 types.
+- If neither `radius` nor `diameter` is present, CVT uses a default particle radius of `0.5`.
+- Orthogonal boxes with arbitrary lower/upper bounds are supported.
+- Triclinic dumps with `xy/xz/yz` tilt factors are supported for file loading, wrapping, and minimum-image distance calculations.
+- Rectangular-only downstream features such as structure-factor rendering still reject triclinic boxes.
+- The current parser expects three box-bound lines and three position coordinates per atom row.
+- 2D LAMMPS data are only supported when still emitted in a 3-axis dump layout.
 
 ### .rod
 
@@ -188,3 +240,4 @@ Examples:
 - Include at least one multi-frame example.
 - Include one negative test file with a known parse error (kept outside normal demos).
 - Re-run the examples after parser changes.
+- For `.lammpstrj`, keep at least one orthogonal multi-frame example and one unsupported triclinic example.

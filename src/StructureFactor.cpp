@@ -270,7 +270,8 @@ bool beginStructureFactorBatch(const ParticleSystem &particleSystem,
         return false;
     }
 
-    if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
+    if (simulationBox.shape() != SimulationBox::Shape::Rectangular
+        || simulationBox.isTriclinic())
     {
         error = "Structure factor rendering currently requires a rectangular simulation box.";
         return false;
@@ -526,7 +527,8 @@ bool computeStructureFactorImage(const ParticleSystem &particleSystem,
         return false;
     }
 
-    if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
+    if (simulationBox.shape() != SimulationBox::Shape::Rectangular
+        || simulationBox.isTriclinic())
     {
         error = "Structure factor rendering currently requires a rectangular simulation box.";
         return false;
@@ -954,7 +956,8 @@ bool renderStructureFactorPreviewGpu(const StructureFactorSettings &settings,
     error.clear();
     finished = false;
 
-    if (simulationBox.shape() != SimulationBox::Shape::Rectangular)
+    if (simulationBox.shape() != SimulationBox::Shape::Rectangular
+        || simulationBox.isTriclinic())
     {
         error = "GPU structure-factor rendering currently requires a rectangular simulation box.";
         return false;

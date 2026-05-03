@@ -22,6 +22,7 @@
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace
 {
@@ -788,6 +789,7 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
     if (fileType == TrajectoryReader::FileType::Sphere
         || fileType == TrajectoryReader::FileType::BondedSphere
         || fileType == TrajectoryReader::FileType::OrderedSphere
+        || fileType == TrajectoryReader::FileType::LammpsTrajectory
         || fileType == TrajectoryReader::FileType::Disk)
     {
         return createSphereParticleType(layout, stacks, slices);
@@ -825,6 +827,7 @@ bool isSphereLikeFileType(TrajectoryReader::FileType fileType)
     return fileType == TrajectoryReader::FileType::Sphere
            || fileType == TrajectoryReader::FileType::BondedSphere
            || fileType == TrajectoryReader::FileType::OrderedSphere
+            || fileType == TrajectoryReader::FileType::LammpsTrajectory
            || fileType == TrajectoryReader::FileType::Disk;
 }
 
@@ -923,21 +926,35 @@ void rebuildMobilitySystem(const ParticleSystem &particleSystem,
 
     const std::vector<Particle> &particles = particleSystem.particles();
     if (!viewerState.hasPreviousFramePositions
-        || viewerState.previousRawPositions.size() != particles.size())
+        || viewerState.previousRawPositions.empty()
+        || viewerState.previousRawPositionIds.size() != viewerState.previousRawPositions.size())
     {
         return;
     }
 
-    mobilitySystem.reserve(particles.size());
-    for (size_t index = 0; index < particles.size(); ++index)
+    std::unordered_map<uint32_t, bx::Vec3> previousPositionById;
+    previousPositionById.reserve(viewerState.previousRawPositions.size());
+    for (size_t index = 0u; index < viewerState.previousRawPositions.size(); ++index)
     {
-        const Particle &particle = particles[index];
+        previousPositionById.emplace(viewerState.previousRawPositionIds[index],
+                                     viewerState.previousRawPositions[index]);
+    }
+
+    mobilitySystem.reserve(particles.size());
+    for (const Particle &particle : particles)
+    {
         if (!particle.visible)
         {
             continue;
         }
 
-        const bx::Vec3 previousPosition = viewerState.previousRawPositions[index];
+        const auto previousPositionIt = previousPositionById.find(particle.id);
+        if (previousPositionIt == previousPositionById.end())
+        {
+            continue;
+        }
+
+        const bx::Vec3 previousPosition = previousPositionIt->second;
         const bx::Vec3 rawDelta = {particle.position.x - previousPosition.x,
                                    particle.position.y - previousPosition.y,
                                    particle.position.z - previousPosition.z};

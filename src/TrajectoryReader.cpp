@@ -12,6 +12,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace
 {
@@ -19,6 +20,51 @@ namespace
 constexpr float kSphericalBoxPadding = 1.0f;
 constexpr float kLegacyPatchyCoreRadius = 0.5f;
 constexpr float kLegacyPatchyInteractionRange = 1.1f;
+constexpr float kLammpsDefaultRadius = 0.5f;
+constexpr float kLammpsDimensionalityEpsilon = 1.0e-5f;
+
+enum class LammpsCoordinateMode
+{
+    Cartesian,
+    Scaled,
+};
+
+struct LammpsAtomColumns
+{
+    static constexpr size_t kInvalidIndex = std::numeric_limits<size_t>::max();
+
+    size_t idIndex = kInvalidIndex;
+    size_t typeIndex = kInvalidIndex;
+    size_t xIndex = kInvalidIndex;
+    size_t yIndex = kInvalidIndex;
+    size_t zIndex = kInvalidIndex;
+    size_t radiusIndex = kInvalidIndex;
+    bool radiusIsDiameter = false;
+    LammpsCoordinateMode coordinateMode = LammpsCoordinateMode::Cartesian;
+
+    bool hasRequiredColumns() const
+    {
+        return idIndex != kInvalidIndex
+               && typeIndex != kInvalidIndex
+               && xIndex != kInvalidIndex
+               && yIndex != kInvalidIndex
+               && zIndex != kInvalidIndex;
+    }
+};
+
+struct LammpsBoundsData
+{
+    bx::Vec3 minBounds{0.0f, 0.0f, 0.0f};
+    bx::Vec3 maxBounds{0.0f, 0.0f, 0.0f};
+    std::array<bool, 3> periodic{true, true, true};
+    bool isTriclinic = false;
+    bx::Vec3 cellOrigin{0.0f, 0.0f, 0.0f};
+    std::array<bx::Vec3, 3> cellVectors{
+        bx::Vec3{0.0f, 0.0f, 0.0f},
+        bx::Vec3{0.0f, 0.0f, 0.0f},
+        bx::Vec3{0.0f, 0.0f, 0.0f},
+    };
+};
 
 std::string lowercaseExtension(const std::string &path)
 {
@@ -48,6 +94,10 @@ std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path
     if (extension == ".osph")
     {
         return TrajectoryReader::FileType::OrderedSphere;
+    }
+    if (extension == ".lammpstrj")
+    {
+        return TrajectoryReader::FileType::LammpsTrajectory;
     }
     if (extension == ".dsk")
     {
@@ -96,6 +146,7 @@ TrajectoryReader::Dimensionality detectDimensionality(TrajectoryReader::FileType
     case TrajectoryReader::FileType::Sphere:
     case TrajectoryReader::FileType::BondedSphere:
     case TrajectoryReader::FileType::OrderedSphere:
+    case TrajectoryReader::FileType::LammpsTrajectory:
     case TrajectoryReader::FileType::Rod:
     case TrajectoryReader::FileType::Cube:
     case TrajectoryReader::FileType::Voronoi:
@@ -209,6 +260,363 @@ bool parseIntToken(const std::string &token, int32_t &value)
     {
         return false;
     }
+}
+
+std::vector<std::string> splitTokens(const std::string &line)
+{
+    std::istringstream lineStream(line);
+    std::vector<std::string> tokens;
+    std::string token;
+    while (lineStream >> token)
+    {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+bool startsWith(const std::string &value, const char *prefix)
+{
+    return value.rfind(prefix, 0u) == 0u;
+}
+
+char lammpsTypeLabel(int32_t numericType)
+{
+    const int32_t clampedType = std::max<int32_t>(numericType, 1);
+    return static_cast<char>('A' + ((clampedType - 1) % 26));
+}
+
+bool readRequiredDataLine(std::istream &input, std::string &line, std::string &error)
+{
+    if (!readNextDataLine(input, line))
+    {
+        error = "unexpected end of file";
+        return false;
+    }
+    return true;
+}
+
+bool parseLammpsAtomCountHeader(const std::string &line)
+{
+    return startsWith(line, "ITEM: NUMBER OF ATOMS");
+}
+
+bool parseLammpsAtomsHeader(const std::string &line,
+                            LammpsAtomColumns &columns,
+                            std::string &error)
+{
+    const std::vector<std::string> tokens = splitTokens(line);
+    if (tokens.size() < 5u || tokens[0] != "ITEM:" || tokens[1] != "ATOMS")
+    {
+        error = "expected 'ITEM: ATOMS ...' header";
+        return false;
+    }
+
+    columns = {};
+    const auto setCoordinateColumns = [&](const char *xName,
+                                          const char *yName,
+                                          const char *zName,
+                                          LammpsCoordinateMode mode) {
+        size_t xIndex = LammpsAtomColumns::kInvalidIndex;
+        size_t yIndex = LammpsAtomColumns::kInvalidIndex;
+        size_t zIndex = LammpsAtomColumns::kInvalidIndex;
+        for (size_t tokenIndex = 2u; tokenIndex < tokens.size(); ++tokenIndex)
+        {
+            const std::string &name = tokens[tokenIndex];
+            const size_t columnIndex = tokenIndex - 2u;
+            if (name == xName)
+            {
+                xIndex = columnIndex;
+            }
+            else if (name == yName)
+            {
+                yIndex = columnIndex;
+            }
+            else if (name == zName)
+            {
+                zIndex = columnIndex;
+            }
+        }
+
+        if (xIndex != LammpsAtomColumns::kInvalidIndex
+            && yIndex != LammpsAtomColumns::kInvalidIndex
+            && zIndex != LammpsAtomColumns::kInvalidIndex)
+        {
+            columns.xIndex = xIndex;
+            columns.yIndex = yIndex;
+            columns.zIndex = zIndex;
+            columns.coordinateMode = mode;
+            return true;
+        }
+
+        return false;
+    };
+
+    for (size_t tokenIndex = 2u; tokenIndex < tokens.size(); ++tokenIndex)
+    {
+        const std::string &name = tokens[tokenIndex];
+        const size_t columnIndex = tokenIndex - 2u;
+        if (name == "id")
+        {
+            columns.idIndex = columnIndex;
+        }
+        else if (name == "type")
+        {
+            columns.typeIndex = columnIndex;
+        }
+        else if (name == "radius")
+        {
+            columns.radiusIndex = columnIndex;
+            columns.radiusIsDiameter = false;
+        }
+        else if (name == "diameter")
+        {
+            columns.radiusIndex = columnIndex;
+            columns.radiusIsDiameter = true;
+        }
+    }
+
+    if (!setCoordinateColumns("x", "y", "z", LammpsCoordinateMode::Cartesian)
+        && !setCoordinateColumns("xu", "yu", "zu", LammpsCoordinateMode::Cartesian)
+        && !setCoordinateColumns("xs", "ys", "zs", LammpsCoordinateMode::Scaled)
+        && !setCoordinateColumns("xsu", "ysu", "zsu", LammpsCoordinateMode::Scaled))
+    {
+        error = "LAMMPS dump must provide one of: x/y/z, xu/yu/zu, xs/ys/zs, or xsu/ysu/zsu columns";
+        return false;
+    }
+
+    if (!columns.hasRequiredColumns())
+    {
+        error = "LAMMPS dump requires id, type, and position columns";
+        return false;
+    }
+
+    return true;
+}
+
+bool parseLammpsBoundsHeader(const std::string &line,
+                             std::array<bool, 3> &periodic,
+                             bool &hasTilt,
+                             std::string &error)
+{
+    const std::vector<std::string> tokens = splitTokens(line);
+    if (tokens.size() < 5u || tokens[0] != "ITEM:" || tokens[1] != "BOX" || tokens[2] != "BOUNDS")
+    {
+        error = "expected 'ITEM: BOX BOUNDS ...' header";
+        return false;
+    }
+
+    periodic = {true, true, true};
+    hasTilt = false;
+    size_t boundaryAxis = 0u;
+    for (size_t tokenIndex = 3u; tokenIndex < tokens.size(); ++tokenIndex)
+    {
+        const std::string &token = tokens[tokenIndex];
+        if (token == "xy" || token == "xz" || token == "yz")
+        {
+            hasTilt = true;
+            continue;
+        }
+
+        if (token.size() == 2u && boundaryAxis < periodic.size())
+        {
+            periodic[boundaryAxis] = token.find('p') != std::string::npos;
+            ++boundaryAxis;
+        }
+    }
+
+    return true;
+}
+
+bool parseLammpsBoundsSection(std::istream &input,
+                              const std::string &headerLine,
+                              LammpsBoundsData &bounds,
+                              std::string &error)
+{
+    bool hasTilt = false;
+    if (!parseLammpsBoundsHeader(headerLine, bounds.periodic, hasTilt, error))
+    {
+        return false;
+    }
+
+    std::array<float, 3> minBounds{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> maxBounds{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> tiltFactors{0.0f, 0.0f, 0.0f};
+    for (size_t axis = 0u; axis < 3u; ++axis)
+    {
+        std::string line;
+        if (!readRequiredDataLine(input, line, error))
+        {
+            error = "missing LAMMPS bounds line";
+            return false;
+        }
+
+        std::istringstream boundsStream(line);
+        if (!(boundsStream >> minBounds[axis] >> maxBounds[axis]))
+        {
+            error = "invalid LAMMPS bounds line: '" + line + "'";
+            return false;
+        }
+
+        float tiltValue = 0.0f;
+        if (boundsStream >> tiltValue)
+        {
+            tiltFactors[axis] = tiltValue;
+        }
+        else if (hasTilt)
+        {
+            error = "expected tilt factor in triclinic LAMMPS bounds line: '" + line + "'";
+            return false;
+        }
+    }
+
+    if (!hasTilt)
+    {
+        bounds.minBounds = {minBounds[0], minBounds[1], minBounds[2]};
+        bounds.maxBounds = {maxBounds[0], maxBounds[1], maxBounds[2]};
+        bounds.cellOrigin = bounds.minBounds;
+        bounds.cellVectors = {
+            bx::Vec3{bounds.maxBounds.x - bounds.minBounds.x, 0.0f, 0.0f},
+            bx::Vec3{0.0f, bounds.maxBounds.y - bounds.minBounds.y, 0.0f},
+            bx::Vec3{0.0f, 0.0f, bounds.maxBounds.z - bounds.minBounds.z},
+        };
+        return true;
+    }
+
+    bounds.isTriclinic = true;
+    const float xy = tiltFactors[0];
+    const float xz = tiltFactors[1];
+    const float yz = tiltFactors[2];
+
+    const float xlo = minBounds[0] - std::min({0.0f, xy, xz, xy + xz});
+    const float xhi = maxBounds[0] - std::max({0.0f, xy, xz, xy + xz});
+    const float ylo = minBounds[1] - std::min(0.0f, yz);
+    const float yhi = maxBounds[1] - std::max(0.0f, yz);
+    const float zlo = minBounds[2];
+    const float zhi = maxBounds[2];
+
+    const float lx = xhi - xlo;
+    const float ly = yhi - ylo;
+    const float lz = zhi - zlo;
+    if (!(lx > 0.0f) || !(ly > 0.0f) || !(lz > 0.0f))
+    {
+        error = "invalid triclinic LAMMPS bounds with non-positive cell length";
+        return false;
+    }
+
+    bounds.cellOrigin = {xlo, ylo, zlo};
+    bounds.cellVectors = {
+        bx::Vec3{lx, 0.0f, 0.0f},
+        bx::Vec3{xy, ly, 0.0f},
+        bx::Vec3{xz, yz, lz},
+    };
+
+    const std::array<bx::Vec3, 8> corners = {
+        bounds.cellOrigin,
+        bounds.cellOrigin + bounds.cellVectors[0],
+        bounds.cellOrigin + bounds.cellVectors[0] + bounds.cellVectors[1],
+        bounds.cellOrigin + bounds.cellVectors[1],
+        bounds.cellOrigin + bounds.cellVectors[2],
+        bounds.cellOrigin + bounds.cellVectors[0] + bounds.cellVectors[2],
+        bounds.cellOrigin + bounds.cellVectors[0] + bounds.cellVectors[1] + bounds.cellVectors[2],
+        bounds.cellOrigin + bounds.cellVectors[1] + bounds.cellVectors[2],
+    };
+    bounds.minBounds = corners[0];
+    bounds.maxBounds = corners[0];
+    for (const bx::Vec3 &corner : corners)
+    {
+        bounds.minBounds.x = bx::min(bounds.minBounds.x, corner.x);
+        bounds.minBounds.y = bx::min(bounds.minBounds.y, corner.y);
+        bounds.minBounds.z = bx::min(bounds.minBounds.z, corner.z);
+        bounds.maxBounds.x = bx::max(bounds.maxBounds.x, corner.x);
+        bounds.maxBounds.y = bx::max(bounds.maxBounds.y, corner.y);
+        bounds.maxBounds.z = bx::max(bounds.maxBounds.z, corner.z);
+    }
+
+    return true;
+}
+
+float lammpsCoordinateToPosition(float value,
+                                 float minBound,
+                                 float maxBound,
+                                 LammpsCoordinateMode mode)
+{
+    if (mode == LammpsCoordinateMode::Scaled)
+    {
+        return bx::lerp(minBound, maxBound, value);
+    }
+
+    return value;
+}
+
+bool parseLammpsParticleLine(const std::string &line,
+                             const LammpsAtomColumns &columns,
+                             const LammpsBoundsData &bounds,
+                             Particle &particle,
+                             std::string &error)
+{
+    const std::vector<std::string> tokens = splitTokens(line);
+    const size_t minimumTokenCount = std::max({columns.idIndex,
+                                               columns.typeIndex,
+                                               columns.xIndex,
+                                               columns.yIndex,
+                                               columns.zIndex,
+                                               columns.radiusIndex})
+                                     + 1u;
+    if (tokens.size() < minimumTokenCount)
+    {
+        error = "particle line has too few columns: '" + line + "'";
+        return false;
+    }
+
+    int32_t id = 0;
+    int32_t numericType = 0;
+    float rawX = 0.0f;
+    float rawY = 0.0f;
+    float rawZ = 0.0f;
+    if (!parseIntToken(tokens[columns.idIndex], id)
+        || !parseIntToken(tokens[columns.typeIndex], numericType)
+        || !parseFloatToken(tokens[columns.xIndex], rawX)
+        || !parseFloatToken(tokens[columns.yIndex], rawY)
+        || !parseFloatToken(tokens[columns.zIndex], rawZ))
+    {
+        error = "invalid id, type, or coordinate value in line '" + line + "'";
+        return false;
+    }
+    if (id < 0)
+    {
+        error = "LAMMPS atom ids must be non-negative";
+        return false;
+    }
+
+    float radius = kLammpsDefaultRadius;
+    if (columns.radiusIndex != LammpsAtomColumns::kInvalidIndex)
+    {
+        if (!parseFloatToken(tokens[columns.radiusIndex], radius))
+        {
+            error = "invalid LAMMPS radius value in line '" + line + "'";
+            return false;
+        }
+        if (columns.radiusIsDiameter)
+        {
+            radius *= 0.5f;
+        }
+    }
+
+    particle.id = static_cast<uint32_t>(id);
+    particle.typeLabel = lammpsTypeLabel(numericType);
+    particle.position = {
+        lammpsCoordinateToPosition(rawX, bounds.minBounds.x, bounds.maxBounds.x,
+                                   columns.coordinateMode),
+        lammpsCoordinateToPosition(rawY, bounds.minBounds.y, bounds.maxBounds.y,
+                                   columns.coordinateMode),
+        lammpsCoordinateToPosition(rawZ, bounds.minBounds.z, bounds.maxBounds.z,
+                                   columns.coordinateMode),
+    };
+    particle.baseColor = colorFromLetter(particle.typeLabel);
+    particle.color = particle.baseColor;
+    particle.setUniformScale(radius);
+    particle.sizeParams[3] = 1.0f;
+    return true;
 }
 
 bool orthonormalizeRotationMatrix(std::array<float, 9> &matrix)
@@ -342,12 +750,12 @@ TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
         if (extension.empty())
         {
             m_error = "Unsupported trajectory file extension in " + m_path
-                      + ". Expected one of: .sph, .bsph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
+                      + ". Expected one of: .sph, .bsph, .osph, .lammpstrj, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         else
         {
             m_error = "Unsupported trajectory file extension '" + extension + "' in "
-                      + m_path + ". Expected one of: .sph, .bsph, .osph, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
+                      + m_path + ". Expected one of: .sph, .bsph, .osph, .lammpstrj, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         return;
     }
@@ -434,6 +842,104 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
     if (!readNextDataLine(input, line))
     {
         return setParseError("missing frame header");
+    }
+
+    if (m_fileType == FileType::LammpsTrajectory)
+    {
+        if (!startsWith(line, "ITEM: TIMESTEP"))
+        {
+            return setParseError("expected 'ITEM: TIMESTEP' header, got '" + line + "'");
+        }
+
+        std::string localError;
+        if (!readRequiredDataLine(input, line, localError))
+        {
+            return setParseError("missing timestep value");
+        }
+
+        if (!readRequiredDataLine(input, line, localError)
+            || !parseLammpsAtomCountHeader(line))
+        {
+            return setParseError("missing 'ITEM: NUMBER OF ATOMS' header");
+        }
+
+        if (!readRequiredDataLine(input, line, localError))
+        {
+            return setParseError("missing atom count value");
+        }
+
+        size_t particleCount = 0u;
+        if (!parseFrameHeader(line, particleCount))
+        {
+            return setParseError("invalid atom count line: '" + line + "'");
+        }
+
+        if (!readRequiredDataLine(input, line, localError))
+        {
+            return setParseError("missing BOX BOUNDS header");
+        }
+
+        LammpsBoundsData bounds;
+        if (!parseLammpsBoundsSection(input, line, bounds, localError))
+        {
+            return setParseError(localError);
+        }
+        if (bounds.isTriclinic)
+        {
+            simulationBox.setTriclinicBounds(bounds.cellOrigin,
+                                             bounds.cellVectors[0],
+                                             bounds.cellVectors[1],
+                                             bounds.cellVectors[2]);
+        }
+        else
+        {
+            simulationBox.setBounds(bounds.minBounds, bounds.maxBounds);
+        }
+        simulationBox.setPeriodic(bounds.periodic[0], bounds.periodic[1], bounds.periodic[2]);
+
+        if (!readRequiredDataLine(input, line, localError))
+        {
+            return setParseError("missing ATOMS header");
+        }
+
+        LammpsAtomColumns columns;
+        if (!parseLammpsAtomsHeader(line, columns, localError))
+        {
+            return setParseError(localError);
+        }
+
+        particleSystem.clear();
+        particleSystem.reserve(particleCount);
+        std::unordered_set<uint32_t> seenIds;
+        seenIds.reserve(particleCount);
+        for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+        {
+            if (!readRequiredDataLine(input, line, localError))
+            {
+                return setParseError("missing particle line");
+            }
+
+            Particle particle;
+            if (!parseLammpsParticleLine(line, columns, bounds, particle, localError))
+            {
+                std::ostringstream message;
+                message << "particle " << (particleIndex + 1u) << ": " << localError;
+                return setParseError(message.str());
+            }
+
+            if (!seenIds.insert(particle.id).second)
+            {
+                std::ostringstream message;
+                message << "particle " << (particleIndex + 1u)
+                        << ": duplicate LAMMPS atom id " << particle.id;
+                return setParseError(message.str());
+            }
+
+            particleSystem.addParticle(particle);
+        }
+
+        m_error.clear();
+        return true;
     }
 
     size_t particleCount = 0;
@@ -839,6 +1345,107 @@ bool TrajectoryReader::scanFrames()
 
     std::string line;
     std::streampos frameOffset = std::streampos(0);
+
+    if (m_fileType == FileType::LammpsTrajectory)
+    {
+        bool inferredDimensionality = false;
+        while (readNextDataLine(input, line, &frameOffset))
+        {
+            if (!startsWith(line, "ITEM: TIMESTEP"))
+            {
+                m_error = "Invalid LAMMPS frame header in trajectory file: " + m_path
+                          + " : " + line;
+                m_frameOffsets.clear();
+                return false;
+            }
+
+            m_frameOffsets.push_back(frameOffset);
+
+            std::string localError;
+            if (!readRequiredDataLine(input, line, localError)
+                || !readRequiredDataLine(input, line, localError)
+                || !parseLammpsAtomCountHeader(line)
+                || !readRequiredDataLine(input, line, localError))
+            {
+                m_error = "Invalid LAMMPS atom-count section in trajectory file: " + m_path;
+                m_frameOffsets.clear();
+                return false;
+            }
+
+            size_t particleCount = 0u;
+            if (!parseFrameHeader(line, particleCount))
+            {
+                m_error = "Invalid LAMMPS atom count in trajectory file: " + m_path
+                          + " : " + line;
+                m_frameOffsets.clear();
+                return false;
+            }
+
+            if (!readRequiredDataLine(input, line, localError))
+            {
+                m_error = "Missing LAMMPS BOX BOUNDS header in trajectory file: " + m_path;
+                m_frameOffsets.clear();
+                return false;
+            }
+
+            LammpsBoundsData bounds;
+            if (!parseLammpsBoundsSection(input, line, bounds, localError))
+            {
+                m_error = "Invalid LAMMPS bounds in trajectory file: " + m_path + " : "
+                          + localError;
+                m_frameOffsets.clear();
+                return false;
+            }
+
+            const bx::Vec3 frameSize = bounds.maxBounds - bounds.minBounds;
+            m_maxFrameBoxSize.x = bx::max(m_maxFrameBoxSize.x, frameSize.x);
+            m_maxFrameBoxSize.y = bx::max(m_maxFrameBoxSize.y, frameSize.y);
+            m_maxFrameBoxSize.z = bx::max(m_maxFrameBoxSize.z, frameSize.z);
+            if (!inferredDimensionality)
+            {
+                m_dimensionality = frameSize.z <= kLammpsDimensionalityEpsilon
+                                       ? Dimensionality::TwoDimensional
+                                       : Dimensionality::ThreeDimensional;
+                inferredDimensionality = true;
+            }
+
+            if (!readRequiredDataLine(input, line, localError))
+            {
+                m_error = "Missing LAMMPS ATOMS header in trajectory file: " + m_path;
+                m_frameOffsets.clear();
+                return false;
+            }
+
+            LammpsAtomColumns columns;
+            if (!parseLammpsAtomsHeader(line, columns, localError))
+            {
+                m_error = "Invalid LAMMPS ATOMS header in trajectory file: " + m_path
+                          + " : " + localError;
+                m_frameOffsets.clear();
+                return false;
+            }
+
+            for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
+            {
+                if (!readNextDataLine(input, line))
+                {
+                    m_error = "Unexpected end of LAMMPS trajectory file while reading particles: "
+                              + m_path;
+                    m_frameOffsets.clear();
+                    return false;
+                }
+            }
+        }
+
+        if (m_frameOffsets.empty())
+        {
+            m_error = "Trajectory file contains no frames: " + m_path;
+            return false;
+        }
+
+        return true;
+    }
+
     while (readNextDataLine(input, line, &frameOffset))
     {
         size_t particleCount = 0;

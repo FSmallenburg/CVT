@@ -23,6 +23,11 @@ class SimulationBox
 
     /// Sets rectangular bounds and resets the shape to Rectangular.
     void setBounds(const bx::Vec3 &minBounds, const bx::Vec3 &maxBounds);
+    /// Sets triclinic bounds using a cell origin and three cell vectors.
+    void setTriclinicBounds(const bx::Vec3 &origin,
+                const bx::Vec3 &a,
+                const bx::Vec3 &b,
+                const bx::Vec3 &c);
     /// Sets spherical bounds. @p boundsRadius is used for periodic wrapping;
     /// @p renderRadius controls the size of the sphere drawn on screen.
     void setSphericalBounds(const bx::Vec3 &center, float boundsRadius, float renderRadius);
@@ -36,6 +41,10 @@ class SimulationBox
     /// Returns the geometric center of the box.
     bx::Vec3 center() const;
     Shape shape() const;
+    /// Returns true when the rectangular box is stored as a skewed triclinic cell.
+    bool isTriclinic() const;
+    /// Returns the 8 corner positions of the current box/cell.
+    std::array<bx::Vec3, 8> corners() const;
     /// Returns the render radius (only meaningful for Spherical boxes).
     float renderRadius() const;
     /// Returns the box measure for the requested dimensionality:
@@ -56,4 +65,16 @@ class SimulationBox
     std::array<bool, 3> m_periodic{false, false, false};
     Shape m_shape = Shape::Rectangular;
     float m_renderRadius = 1.0f;
+    bool m_isTriclinic = false;
+    bx::Vec3 m_cellOrigin{-1.0f, -1.0f, -1.0f};
+    std::array<bx::Vec3, 3> m_cellVectors{
+      bx::Vec3{2.0f, 0.0f, 0.0f},
+      bx::Vec3{0.0f, 2.0f, 0.0f},
+      bx::Vec3{0.0f, 0.0f, 2.0f},
+    };
+    std::array<float, 9> m_inverseCellMatrix{
+      0.5f, 0.0f, 0.0f,
+      0.0f, 0.5f, 0.0f,
+      0.0f, 0.0f, 0.5f,
+    };
 };

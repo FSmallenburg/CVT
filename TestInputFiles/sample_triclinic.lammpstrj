@@ -1,0 +1,27 @@
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+4
+ITEM: BOX BOUNDS xy xz yz pp pp pp
+0.0 5.5 1.0
+0.0 4.4 0.5
+0.0 4.0 0.25
+ITEM: ATOMS id type xs ys zs radius
+1 1 0.10 0.10 0.10 0.45
+2 2 0.35 0.20 0.30 0.55
+3 1 0.62 0.58 0.40 0.45
+4 3 0.82 0.76 0.72 0.60
+
+ITEM: TIMESTEP
+200
+ITEM: NUMBER OF ATOMS
+4
+ITEM: BOX BOUNDS xy xz yz pp pp pp
+0.0 5.5 1.0
+0.0 4.4 0.5
+0.0 4.0 0.25
+ITEM: ATOMS id type xs ys zs radius
+1 1 0.14 0.12 0.16 0.45
+2 2 0.38 0.26 0.32 0.55
+3 1 0.66 0.62 0.44 0.45
+4 3 0.79 0.73 0.68 0.60

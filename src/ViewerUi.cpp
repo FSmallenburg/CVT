@@ -1441,6 +1441,41 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     markVisibilityDependentHelperSystemsDirty(viewerState);
                     markPickDirty = true;
                 }
+                ImGui::SameLine();
+                ImGui::PushID(typeIndex);
+                bool overrideEnabled = viewerState.speciesColorOverrideEnabled[typeIndex];
+                if (ImGui::Checkbox("##ce", &overrideEnabled))
+                {
+                    viewerState.speciesColorOverrideEnabled[typeIndex] = overrideEnabled;
+                    if (colorModeSupportsOverrides(viewerState.colorMode))
+                    {
+                        markColorDependentHelperSystemsDirty(viewerState);
+                    }
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Enable custom color for species %c", label[0]);
+                }
+                ImGui::SameLine();
+                if (ImGui::ColorEdit4("##cc",
+                                      viewerState.speciesColorOverrides[typeIndex].data(),
+                                      ImGuiColorEditFlags_NoInputs
+                                          | ImGuiColorEditFlags_NoLabel
+                                          | ImGuiColorEditFlags_NoAlpha))
+                {
+                    viewerState.speciesColorOverrideEnabled[typeIndex] = true;
+                    if (colorModeSupportsOverrides(viewerState.colorMode))
+                    {
+                        markColorDependentHelperSystemsDirty(viewerState);
+                    }
+                }
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Custom color for species %c\n"
+                                      "Check the box to the left to activate.",
+                                      label[0]);
+                }
+                ImGui::PopID();
             }
             ImGui::TextDisabled("Hotkeys: 1-8 toggle species, Shift+1-8 solo.");
         }
@@ -1478,6 +1513,42 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             viewerState.pendingAlignViewToSelection = true;
         }
         ImGui::EndDisabled();
+
+        // --- Selected-particle color override ---
+        ImGui::Separator();
+        ImGui::TextUnformatted("Selected particle color");
+        ImGui::ColorEdit4("##sel_color",
+                          viewerState.pendingColorForSelected.data(),
+                          ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoAlpha);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(viewerState.selectedIds.empty());
+        if (ImGui::Button("Apply to selected"))
+        {
+            viewerState.pendingApplyColorToSelected = true;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("Assigns this color to all currently selected particles.\n"
+                              "Active in File default and Palette cycle modes.");
+        }
+        ImGui::BeginDisabled(viewerState.selectedIds.empty());
+        if (ImGui::Button("Clear selected colors"))
+        {
+            viewerState.pendingClearSelectedColorOverrides = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Clear all overrides"))
+        {
+            viewerState.pendingClearAllColorOverrides = true;
+        }
+        if (!viewerState.particleColorOverrides.empty())
+        {
+            ImGui::TextDisabled("%zu particle(s) have custom colors.",
+                                viewerState.particleColorOverrides.size());
+        }
+        ImGui::Separator();
 
         if (ImGui::Button("Screenshot (p)"))
         {
