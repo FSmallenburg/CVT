@@ -4,6 +4,8 @@ CVT is a bgfx/GLFW-based viewer for colloid and particle trajectory files. This 
 
 DISCLAIMER: Please not that any analysis provided by this tool is intended for quick exploration, and to more easily understand any structure you see in the visualized snapshots. Analysis outputs are not intended for direct publication. If you see something interesting, please run your own version of the analysis to make sure results are fully correct. 
 
+For more information, and a link to directly install this for Windows from the Microsoft store, see the [website](http://www.softmatterdemos.org/CVT).
+
 
 ## Quick start
 
