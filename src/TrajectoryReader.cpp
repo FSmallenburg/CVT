@@ -1,5 +1,6 @@
 #include "ColorPalette.h"
 #include "BxVec3Operators.h"
+#include "Log.h"
 #include "PatchPlacement.h"
 #include "TrajectoryReader.h"
 
@@ -1349,17 +1350,35 @@ bool TrajectoryReader::scanFrames()
     if (m_fileType == FileType::LammpsTrajectory)
     {
         bool inferredDimensionality = false;
-        while (readNextDataLine(input, line, &frameOffset))
+        bool truncated = false;
+        while (!truncated && readNextDataLine(input, line, &frameOffset))
         {
             if (!startsWith(line, "ITEM: TIMESTEP"))
             {
+                if (!m_frameOffsets.empty())
+                {
+                    cvt::log::warn() << "Warning: frame " << m_frameOffsets.size()
+                                     << " in " << m_path
+                                     << " has an unreadable header; ignoring it and all subsequent frames.\n";
+                    break;
+                }
                 m_error = "Invalid LAMMPS frame header in trajectory file: " + m_path
                           + " : " + line;
                 m_frameOffsets.clear();
                 return false;
             }
 
+            const size_t currentFrameIndex = m_frameOffsets.size();
             m_frameOffsets.push_back(frameOffset);
+
+            const auto warnTruncated = [&](const std::string &detail) {
+                m_frameOffsets.pop_back();
+                cvt::log::warn() << "Warning: frame " << currentFrameIndex
+                                 << " in " << m_path
+                                 << " is truncated or corrupted (" << detail
+                                 << "); ignoring it and all subsequent frames.\n";
+                truncated = true;
+            };
 
             std::string localError;
             if (!readRequiredDataLine(input, line, localError)
@@ -1367,34 +1386,28 @@ bool TrajectoryReader::scanFrames()
                 || !parseLammpsAtomCountHeader(line)
                 || !readRequiredDataLine(input, line, localError))
             {
-                m_error = "Invalid LAMMPS atom-count section in trajectory file: " + m_path;
-                m_frameOffsets.clear();
-                return false;
+                warnTruncated("missing atom-count section");
+                break;
             }
 
             size_t particleCount = 0u;
             if (!parseFrameHeader(line, particleCount))
             {
-                m_error = "Invalid LAMMPS atom count in trajectory file: " + m_path
-                          + " : " + line;
-                m_frameOffsets.clear();
-                return false;
+                warnTruncated("invalid atom count '" + line + "'");
+                break;
             }
 
             if (!readRequiredDataLine(input, line, localError))
             {
-                m_error = "Missing LAMMPS BOX BOUNDS header in trajectory file: " + m_path;
-                m_frameOffsets.clear();
-                return false;
+                warnTruncated("missing BOX BOUNDS header");
+                break;
             }
 
             LammpsBoundsData bounds;
             if (!parseLammpsBoundsSection(input, line, bounds, localError))
             {
-                m_error = "Invalid LAMMPS bounds in trajectory file: " + m_path + " : "
-                          + localError;
-                m_frameOffsets.clear();
-                return false;
+                warnTruncated("invalid bounds: " + localError);
+                break;
             }
 
             const bx::Vec3 frameSize = bounds.maxBounds - bounds.minBounds;
@@ -1411,28 +1424,24 @@ bool TrajectoryReader::scanFrames()
 
             if (!readRequiredDataLine(input, line, localError))
             {
-                m_error = "Missing LAMMPS ATOMS header in trajectory file: " + m_path;
-                m_frameOffsets.clear();
-                return false;
+                warnTruncated("missing ATOMS header");
+                break;
             }
 
             LammpsAtomColumns columns;
             if (!parseLammpsAtomsHeader(line, columns, localError))
             {
-                m_error = "Invalid LAMMPS ATOMS header in trajectory file: " + m_path
-                          + " : " + localError;
-                m_frameOffsets.clear();
-                return false;
+                warnTruncated("invalid ATOMS header: " + localError);
+                break;
             }
 
             for (size_t particleIndex = 0u; particleIndex < particleCount; ++particleIndex)
             {
                 if (!readNextDataLine(input, line))
                 {
-                    m_error = "Unexpected end of LAMMPS trajectory file while reading particles: "
-                              + m_path;
-                    m_frameOffsets.clear();
-                    return false;
+                    warnTruncated("only " + std::to_string(particleIndex) + " of "
+                                  + std::to_string(particleCount) + " particles written");
+                    break;
                 }
             }
         }
@@ -1446,23 +1455,40 @@ bool TrajectoryReader::scanFrames()
         return true;
     }
 
-    while (readNextDataLine(input, line, &frameOffset))
+    bool truncated = false;
+    while (!truncated && readNextDataLine(input, line, &frameOffset))
     {
         size_t particleCount = 0;
         if (!parseFrameHeader(line, particleCount))
         {
+            if (!m_frameOffsets.empty())
+            {
+                cvt::log::warn() << "Warning: frame " << m_frameOffsets.size()
+                                 << " in " << m_path
+                                 << " has an unreadable header; ignoring it and all subsequent frames.\n";
+                break;
+            }
             m_error = "Invalid frame header in trajectory file: " + m_path + " : " + line;
             m_frameOffsets.clear();
             return false;
         }
 
+        const size_t currentFrameIndex = m_frameOffsets.size();
         m_frameOffsets.push_back(frameOffset);
+
+        const auto warnTruncated = [&](const std::string &detail) {
+            m_frameOffsets.pop_back();
+            cvt::log::warn() << "Warning: frame " << currentFrameIndex
+                             << " in " << m_path
+                             << " is truncated or corrupted (" << detail
+                             << "); ignoring it and all subsequent frames.\n";
+            truncated = true;
+        };
 
         if (!readNextDataLine(input, line))
         {
-            m_error = "Missing box line in trajectory file: " + m_path;
-            m_frameOffsets.clear();
-            return false;
+            warnTruncated("missing box line");
+            break;
         }
 
         SimulationBox frameBox;
@@ -1476,9 +1502,8 @@ bool TrajectoryReader::scanFrames()
         }
         else if (!parseBallBounds(line, frameBox))
         {
-            m_error = "Invalid box line in trajectory file: " + m_path + " : " + line;
-            m_frameOffsets.clear();
-            return false;
+            warnTruncated("invalid box line '" + line + "'");
+            break;
         }
 
         const bx::Vec3 frameSize = frameBox.size();
@@ -1490,9 +1515,9 @@ bool TrajectoryReader::scanFrames()
         {
             if (!readNextDataLine(input, line))
             {
-                m_error = "Unexpected end of trajectory file while reading particles: " + m_path;
-                m_frameOffsets.clear();
-                return false;
+                warnTruncated("only " + std::to_string(particleIndex) + " of "
+                              + std::to_string(particleCount) + " particles written");
+                break;
             }
         }
     }
