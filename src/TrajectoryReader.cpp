@@ -993,7 +993,18 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
         float x = 0.0f;
         float y = 0.0f;
         float z = 0.0f;
-        if (!(particleStream >> label >> x >> y >> z))
+        const bool is2D = (m_fileType == FileType::Disk
+                           || m_fileType == FileType::Polygon
+                           || m_fileType == FileType::Patchy2D);
+        if (is2D)
+        {
+            if (!(particleStream >> label >> x >> y))
+            {
+                return setParticleError("expected label and xy coordinates in line '" + line
+                                        + "'");
+            }
+        }
+        else if (!(particleStream >> label >> x >> y >> z))
         {
             return setParticleError("expected label and xyz coordinates in line '" + line
                                     + "'");
@@ -1188,17 +1199,26 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
             }
 
             const bool isLegacyPatchy = (m_fileType == FileType::PatchyLegacy);
-            const size_t minTokenCount = isLegacyPatchy ? 10u : 12u;
+            const bool isPlanar = (m_fileType == FileType::Patchy2D);
+            size_t minTokenCount = 0u;
+            if (isLegacyPatchy)
+                minTokenCount = 10u;
+            else if (isPlanar)
+                minTokenCount = 4u;
+            else
+                minTokenCount = 12u;
             if (tokens.size() < minTokenCount)
             {
-                return setParticleError(isLegacyPatchy
-                                            ? "legacy patchy particles require cosHalfAngle and 9 rotation matrix values, followed by zero or more bond ids"
-                                            : "patchy particles require radius, cosHalfAngle, capDiameter, and 9 rotation matrix values, followed by zero or more bond ids");
+                if (isLegacyPatchy)
+                    return setParticleError("legacy patchy particles require cosHalfAngle and 9 rotation matrix values, followed by zero or more bond ids");
+                else if (isPlanar)
+                    return setParticleError("patchy 2D particles require coreRadius, cosHalfAngle, capDiameter, and a rotation angle, followed by zero or more bond ids");
+                else
+                    return setParticleError("patchy particles require radius, cosHalfAngle, capDiameter, and 9 rotation matrix values, followed by zero or more bond ids");
             }
 
             PatchyParticleData patchData;
-            patchData.planarPlacement = (m_fileType == FileType::Patchy2D);
-            size_t orientationTokenOffset = 0u;
+            patchData.planarPlacement = isPlanar;
             size_t bondTokenOffset = 0u;
             if (isLegacyPatchy)
             {
@@ -1208,8 +1228,50 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 {
                     return setParticleError("invalid cosHalfAngle");
                 }
-                orientationTokenOffset = 1u;
+                std::array<float, 9> parsedOrientationMatrix{};
+                for (size_t matrixIndex = 0; matrixIndex < 9u; ++matrixIndex)
+                {
+                    if (!parseFloatToken(tokens[1u + matrixIndex],
+                                         parsedOrientationMatrix[matrixIndex]))
+                    {
+                        return setParticleError("invalid rotation matrix entry at index "
+                                                + std::to_string(matrixIndex));
+                    }
+                }
+                for (size_t row = 0; row < 3u; ++row)
+                {
+                    for (size_t column = 0; column < 3u; ++column)
+                    {
+                        patchData.orientationMatrix[row * 3u + column] =
+                            parsedOrientationMatrix[column * 3u + row];
+                    }
+                }
                 bondTokenOffset = 10u;
+            }
+            else if (isPlanar)
+            {
+                if (!parseFloatToken(tokens[0], patchData.coreRadius)
+                    || !parseFloatToken(tokens[1], patchData.cosHalfAngle))
+                {
+                    return setParticleError("invalid core radius or cosHalfAngle");
+                }
+                float capDiameter = 0.0f;
+                if (!parseFloatToken(tokens[2], capDiameter))
+                {
+                    return setParticleError("invalid cap diameter");
+                }
+                patchData.capRadius = 0.5f * capDiameter;
+                float angle = 0.0f;
+                if (!parseFloatToken(tokens[3], angle))
+                {
+                    return setParticleError("invalid rotation angle");
+                }
+                const float cosine = std::cos(angle);
+                const float sine = std::sin(angle);
+                patchData.orientationMatrix = {cosine, -sine, 0.0f,
+                                               sine,   cosine, 0.0f,
+                                               0.0f,   0.0f,   1.0f};
+                bondTokenOffset = 4u;
             }
             else
             {
@@ -1218,35 +1280,31 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 {
                     return setParticleError("invalid core radius or cosHalfAngle");
                 }
-
                 float capDiameter = 0.0f;
                 if (!parseFloatToken(tokens[2], capDiameter))
                 {
                     return setParticleError("invalid cap diameter");
                 }
                 patchData.capRadius = 0.5f * capDiameter;
-                orientationTokenOffset = 3u;
+                std::array<float, 9> parsedOrientationMatrix{};
+                for (size_t matrixIndex = 0; matrixIndex < 9u; ++matrixIndex)
+                {
+                    if (!parseFloatToken(tokens[3u + matrixIndex],
+                                         parsedOrientationMatrix[matrixIndex]))
+                    {
+                        return setParticleError("invalid rotation matrix entry at index "
+                                                + std::to_string(matrixIndex));
+                    }
+                }
+                for (size_t row = 0; row < 3u; ++row)
+                {
+                    for (size_t column = 0; column < 3u; ++column)
+                    {
+                        patchData.orientationMatrix[row * 3u + column] =
+                            parsedOrientationMatrix[column * 3u + row];
+                    }
+                }
                 bondTokenOffset = 12u;
-            }
-
-            std::array<float, 9> parsedOrientationMatrix{};
-            for (size_t matrixIndex = 0; matrixIndex < 9u; ++matrixIndex)
-            {
-                if (!parseFloatToken(tokens[orientationTokenOffset + matrixIndex],
-                                     parsedOrientationMatrix[matrixIndex]))
-                {
-                    return setParticleError("invalid rotation matrix entry at index "
-                                            + std::to_string(matrixIndex));
-                }
-            }
-
-            for (size_t row = 0; row < 3u; ++row)
-            {
-                for (size_t column = 0; column < 3u; ++column)
-                {
-                    patchData.orientationMatrix[row * 3u + column] =
-                        parsedOrientationMatrix[column * 3u + row];
-                }
             }
 
             patchData.bondIds.reserve(tokens.size() - bondTokenOffset);

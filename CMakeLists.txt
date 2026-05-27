@@ -80,9 +80,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         $<$<NOT:$<CONFIG:Debug>>:-fdata-sections>
         $<$<CONFIG:Release>:-Ofast>
     )
-    target_link_options(cvt PRIVATE
-        $<$<NOT:$<CONFIG:Debug>>:-Wl,--gc-sections>
-    )
+    if(WIN32)
+        target_link_options(cvt PRIVATE
+            $<$<NOT:$<CONFIG:Debug>>:-Wl,--gc-sections>
+        )
+    endif()
     if(NOT MINGW)
         target_compile_options(cvt PRIVATE
             $<$<NOT:$<CONFIG:Debug>>:-flto=auto>

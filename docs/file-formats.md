@@ -44,18 +44,30 @@ section layout instead of the compact CVT frame header + box line format.
 
 ## Per-format particle syntax
 
-All particle lines begin with:
+3D particle lines begin with:
 
 ```text
 <label> <x> <y> <z> ...
 ```
 
-Note that a z-coordinate is expected to be present even for 2D files!
+2D particle lines (`.dsk`, `.gon`, `.patch`) omit the z-coordinate and begin with:
 
-### .sph and .dsk
+```text
+<label> <x> <y> ...
+```
+
+All particles in 2D formats are implicitly at z = 0.
+
+### .sph
 
 ```text
 <label> <x> <y> <z> <radius>
+```
+
+### .dsk
+
+```text
+<label> <x> <y> <radius>
 ```
 
 ### .bsph
@@ -158,7 +170,7 @@ Rules:
 ### .gon
 
 ```text
-<label> <x> <y> <z> <radius> <sideCount> <angle>
+<label> <x> <y> <radius> <sideCount> <angle>
 ```
 
 Rules:
@@ -220,7 +232,15 @@ Rules:
 
 ### .patch (patchy 2D)
 
-Same token layout as .ptc, but interpreted as planar patch placement. Patches are always evenly spaced around the particle circumference.
+```text
+<label> <x> <y> <coreRadius> <cosHalfAngle> <capDiameter> <angle> [bondId ...]
+```
+
+Rules:
+
+- No z-coordinate; all particles are implicitly at z = 0.
+- Uses a single rotation angle (in radians) around the z-axis instead of a full rotation matrix.
+- Patches are always evenly spaced around the particle circumference (planar placement).
 
 ## Error reporting behavior
 
