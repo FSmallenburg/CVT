@@ -1362,6 +1362,14 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             markPickDirty = true;
         }
 
+        if (particleSystem.hasPatchyMetadata())
+        {
+            if (ImGui::Checkbox("Colorize patches (k)", &viewerState.colorizePatches))
+            {
+                viewerState.patchRenderSystemsDirty = true;
+            }
+        }
+
         float particleSizeScale = viewerState.particleSizeScale;
         if (ImGui::SliderFloat("Particle size scale (/ and *)", &particleSizeScale,
                                kMinParticleSizeScale, 3.0f, "%.2f"))

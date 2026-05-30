@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <optional>
 #include <string>
 
 namespace
@@ -41,6 +42,44 @@ int parseInt(const std::string &value, int fallback)
     {
         return fallback;
     }
+}
+
+/// Parses a hex color string of the form RRGGBB or #RRGGBB (alpha = 1.0),
+/// or RRGGBBAA / #RRGGBBAA (with explicit alpha). Returns std::nullopt on failure.
+std::optional<std::array<float, 4>> parseHexColor(const std::string &value)
+{
+    std::string hex = value;
+    if (!hex.empty() && hex[0] == '#')
+    {
+        hex = hex.substr(1u);
+    }
+    if (hex.size() != 6u && hex.size() != 8u)
+    {
+        return std::nullopt;
+    }
+    for (char c : hex)
+    {
+        if (!std::isxdigit(static_cast<unsigned char>(c)))
+        {
+            return std::nullopt;
+        }
+    }
+    const unsigned long packed = std::stoul(hex, nullptr, 16);
+    if (hex.size() == 8u)
+    {
+        return std::array<float, 4>{
+            static_cast<float>((packed >> 24u) & 0xFFu) / 255.0f,
+            static_cast<float>((packed >> 16u) & 0xFFu) / 255.0f,
+            static_cast<float>((packed >>  8u) & 0xFFu) / 255.0f,
+            static_cast<float>((packed       ) & 0xFFu) / 255.0f,
+        };
+    }
+    return std::array<float, 4>{
+        static_cast<float>((packed >> 16u) & 0xFFu) / 255.0f,
+        static_cast<float>((packed >>  8u) & 0xFFu) / 255.0f,
+        static_cast<float>((packed       ) & 0xFFu) / 255.0f,
+        1.0f,
+    };
 }
 
 } // namespace
@@ -98,6 +137,26 @@ ViewerConfig loadViewerConfig(const std::filesystem::path &path)
         else if (key == "sf_gpu_rows_per_step")
             config.structureFactorGpuRowsPerStep =
                 static_cast<uint16_t>(std::clamp(parseInt(value, int(config.structureFactorGpuRowsPerStep)), 4, 128));
+        else if (key.size() > 12u && key.substr(0u, 12u) == "patch_color_")
+        {
+            const std::string indexStr = key.substr(12u);
+            try
+            {
+                size_t pos = 0u;
+                const auto index = static_cast<size_t>(std::stoul(indexStr, &pos));
+                if (pos == indexStr.size())
+                {
+                    const auto color = parseHexColor(value);
+                    if (color.has_value())
+                    {
+                        config.patchColorOverrides.emplace_back(index, *color);
+                    }
+                }
+            }
+            catch (...)
+            {
+            }
+        }
         // Unknown keys are silently ignored.
     }
 

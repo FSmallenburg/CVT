@@ -174,6 +174,7 @@ struct ViewerState
         for (size_t i = 0; i < kParticlePaletteColorCount; ++i)
         {
             speciesColorOverrides[i] = colorFromPaletteIndex(i);
+            patchColors[i]           = colorFromPaletteIndex(i);
         }
     }
 
@@ -244,6 +245,9 @@ struct ViewerState
     // Per-species color overrides (session-only, active in FileDefault/PaletteCycle modes).
     std::array<bool, kParticlePaletteColorCount> speciesColorOverrideEnabled{};
     std::array<std::array<float, 4>, kParticlePaletteColorCount> speciesColorOverrides{};
+    /// Per-patch-slot colors used when colorizePatches is true.
+    /// Defaults to the palette; overrideable via cvt.ini patch_color_N keys.
+    std::array<std::array<float, 4>, kParticlePaletteColorCount> patchColors{};
     uint8_t maxSeenParticleTypeIndex = 0u;
     uint16_t orderParameterCount = 0u;
     bool sizeDistributionUseVisibleOnly = true;
@@ -314,6 +318,7 @@ struct ViewerState
     BondOrderBasedBondHistogramCache bondOrderBasedBondHistogramCache{};
     bool mobilityModeEnabled = false;
     bool bondModeEnabled = false;
+    bool colorizePatches = false;
     bool bondDiagramGeometryDirty = true;
     bool bondDiagramViewDirty = true;
     bool bondDiagramRenderRequested = false;

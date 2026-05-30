@@ -1418,6 +1418,13 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
                 }
             }       
             break;
+        case GLFW_KEY_K:
+            if (action == GLFW_PRESS && !(mods & (GLFW_MOD_SHIFT | GLFW_MOD_CONTROL | GLFW_MOD_ALT)))
+            {
+                state->colorizePatches = !state->colorizePatches;
+                state->patchRenderSystemsDirty = true;
+            }
+            break;
         case GLFW_KEY_H:
             if (action == GLFW_PRESS)
             {
@@ -2528,6 +2535,13 @@ int main(int argc, char **argv)
             viewerState.structureFactorSuppressCentralPeak  = config.structureFactorSuppressCentralPeak;
             viewerState.structureFactorBatchModesPerStep    = config.structureFactorCpuModesPerStep;
             viewerState.structureFactorGpuBatchRowsPerStep  = config.structureFactorGpuRowsPerStep;
+            for (const auto &[index, color] : config.patchColorOverrides)
+            {
+                if (index < kParticlePaletteColorCount)
+                {
+                    viewerState.patchColors[index] = color;
+                }
+            }
         }
     }
 

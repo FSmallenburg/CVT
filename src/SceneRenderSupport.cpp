@@ -174,7 +174,9 @@ void ensurePatchRenderSystems(const bgfx::VertexLayout &layout, uint16_t sphereS
 }
 
 void rebuildPatchRenderSystems(const ParticleSystem &particleSystem,
-                               PatchRenderSystems &patchRenderSystems)
+                               PatchRenderSystems &patchRenderSystems,
+                               bool colorizePatches,
+                               const std::array<std::array<float, 4>, kParticlePaletteColorCount> &patchColors)
 {
     if (!particleSystem.hasPatchyMetadata() || !patchRenderSystems.coneSystem)
     {
@@ -213,17 +215,19 @@ void rebuildPatchRenderSystems(const ParticleSystem &particleSystem,
             continue;
         }
 
-        for (const bx::Vec3 &referenceDirection : referenceDirections)
+        for (size_t patchIndex = 0; patchIndex < referenceDirections.size(); ++patchIndex)
         {
             const bx::Vec3 rotatedDirection =
-                rotatePatchDirection(patchData.orientationMatrix, referenceDirection);
+                rotatePatchDirection(patchData.orientationMatrix, referenceDirections[patchIndex]);
+            const std::array<float, 4> patchColor =
+                colorizePatches ? patchColors[patchIndex % kParticlePaletteColorCount] : kPatchColor;
 
             Particle coneParticle;
             coneParticle.id = particle.id;
             coneParticle.position = particle.position;
             coneParticle.direction = rotatedDirection;
-            coneParticle.baseColor = kPatchColor;
-            coneParticle.color = kPatchColor;
+            coneParticle.baseColor = patchColor;
+            coneParticle.color = patchColor;
             coneParticle.visible = true;
             coneParticle.sizeParams[0] = coneRadius;
             coneParticle.sizeParams[1] = coneHeight;
@@ -233,8 +237,8 @@ void rebuildPatchRenderSystems(const ParticleSystem &particleSystem,
             capParticle.id = particle.id;
             capParticle.position = particle.position;
             capParticle.direction = rotatedDirection;
-            capParticle.baseColor = kPatchColor;
-            capParticle.color = kPatchColor;
+            capParticle.baseColor = patchColor;
+            capParticle.color = patchColor;
             capParticle.visible = true;
             capParticle.sizeParams[0] = patchData.capRadius;
             capSystem->system->addParticle(capParticle);
@@ -1022,7 +1026,9 @@ void updateAuxiliaryRenderSystemsIfNeeded(ViewerState &viewerState,
     {
         ensurePatchRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
                                  patchRenderSystems);
-        rebuildPatchRenderSystems(particleSystem, patchRenderSystems);
+        rebuildPatchRenderSystems(particleSystem, patchRenderSystems,
+                                  viewerState.colorizePatches,
+                                  viewerState.patchColors);
         viewerState.patchRenderSystemsDirty = false;
     }
     if ((isPatchyFileType(particleFileType) || particleSystem.hasPatchyMetadata()) 

@@ -953,21 +953,30 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
     {
         return setParseError("missing box line");
     }
-    std::istringstream boxStream(line);
-    float boxX = 0.0f;
-    float boxY = 0.0f;
-    float boxZ = 0.0f;
-    if (!(boxStream >> boxX >> boxY >> boxZ))
     {
-        if (!parseBallBounds(line, simulationBox))
+        const std::vector<std::string> boxTokens = splitTokens(line);
+        float boxX = 0.0f;
+        float boxY = 0.0f;
+        float boxZ = 0.0f;
+        if (boxTokens.size() >= 3u
+            && parseFloatToken(boxTokens[0], boxX)
+            && parseFloatToken(boxTokens[1], boxY)
+            && parseFloatToken(boxTokens[2], boxZ))
+        {
+            simulationBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, boxZ});
+            simulationBox.setPeriodic(true, true, true);
+        }
+        else if (boxTokens.size() == 2u
+                 && parseFloatToken(boxTokens[0], boxX)
+                 && parseFloatToken(boxTokens[1], boxY))
+        {
+            simulationBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, 0.0f});
+            simulationBox.setPeriodic(true, true, false);
+        }
+        else if (!parseBallBounds(line, simulationBox))
         {
             return setParseError("invalid box line: '" + line + "'");
         }
-    }
-    else
-    {
-        simulationBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, boxZ});
-        simulationBox.setPeriodic(true, true, true);
     }
 
     particleSystem.clear();
@@ -995,7 +1004,8 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
         float z = 0.0f;
         const bool is2D = (m_fileType == FileType::Disk
                            || m_fileType == FileType::Polygon
-                           || m_fileType == FileType::Patchy2D);
+                           || m_fileType == FileType::Patchy2D
+                           || m_dimensionality == Dimensionality::TwoDimensional);
         if (is2D)
         {
             if (!(particleStream >> label >> x >> y))
@@ -1026,20 +1036,39 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 values.push_back(value);
             }
 
-            if (values.size() != 3u && values.size() != 4u)
+            if (is2D)
             {
-                return setParticleError("rod particles require 3 or 4 trailing numeric fields");
-            }
+                if (values.size() != 2u && values.size() != 3u)
+                {
+                    return setParticleError("2D rod particles require 2 or 3 trailing numeric fields");
+                }
 
-            const float radius = values.size() == 4u ? values[0] * 0.5f : 0.5f;
-            const size_t directionOffset = values.size() == 4u ? 1u : 0u;
-            const bx::Vec3 direction = {values[directionOffset], values[directionOffset + 1u],
-                                        values[directionOffset + 2u]};
-            particle.direction = direction;
-            particle.sizeParams[0] = radius;
-            particle.sizeParams[1] = bx::length(direction);
-            particle.sizeParams[2] = radius;
-            particle.sizeParams[3] = 1.0f;
+                const float radius = values.size() == 3u ? values[0] * 0.5f : 0.5f;
+                const size_t directionOffset = values.size() == 3u ? 1u : 0u;
+                const bx::Vec3 direction = {values[directionOffset], values[directionOffset + 1u], 0.0f};
+                particle.direction = direction;
+                particle.sizeParams[0] = radius;
+                particle.sizeParams[1] = bx::length(direction);
+                particle.sizeParams[2] = radius;
+                particle.sizeParams[3] = 1.0f;
+            }
+            else
+            {
+                if (values.size() != 3u && values.size() != 4u)
+                {
+                    return setParticleError("rod particles require 3 or 4 trailing numeric fields");
+                }
+
+                const float radius = values.size() == 4u ? values[0] * 0.5f : 0.5f;
+                const size_t directionOffset = values.size() == 4u ? 1u : 0u;
+                const bx::Vec3 direction = {values[directionOffset], values[directionOffset + 1u],
+                                            values[directionOffset + 2u]};
+                particle.direction = direction;
+                particle.sizeParams[0] = radius;
+                particle.sizeParams[1] = bx::length(direction);
+                particle.sizeParams[2] = radius;
+                particle.sizeParams[3] = 1.0f;
+            }
         }
         else if (m_fileType == FileType::Cube)
         {
@@ -1514,6 +1543,7 @@ bool TrajectoryReader::scanFrames()
     }
 
     bool truncated = false;
+    bool inferredDimensionality = false;
     while (!truncated && readNextDataLine(input, line, &frameOffset))
     {
         size_t particleCount = 0;
@@ -1550,18 +1580,35 @@ bool TrajectoryReader::scanFrames()
         }
 
         SimulationBox frameBox;
-        std::istringstream boxStream(line);
-        float boxX = 0.0f;
-        float boxY = 0.0f;
-        float boxZ = 0.0f;
-        if ((boxStream >> boxX >> boxY >> boxZ))
         {
-            frameBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, boxZ});
-        }
-        else if (!parseBallBounds(line, frameBox))
-        {
-            warnTruncated("invalid box line '" + line + "'");
-            break;
+            const std::vector<std::string> boxTokens = splitTokens(line);
+            float boxX = 0.0f;
+            float boxY = 0.0f;
+            float boxZ = 0.0f;
+            if (boxTokens.size() >= 3u
+                && parseFloatToken(boxTokens[0], boxX)
+                && parseFloatToken(boxTokens[1], boxY)
+                && parseFloatToken(boxTokens[2], boxZ))
+            {
+                frameBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, boxZ});
+                inferredDimensionality = true;
+            }
+            else if (boxTokens.size() == 2u
+                     && parseFloatToken(boxTokens[0], boxX)
+                     && parseFloatToken(boxTokens[1], boxY))
+            {
+                frameBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, 0.0f});
+                if (!inferredDimensionality)
+                {
+                    m_dimensionality = Dimensionality::TwoDimensional;
+                    inferredDimensionality = true;
+                }
+            }
+            else if (!parseBallBounds(line, frameBox))
+            {
+                warnTruncated("invalid box line '" + line + "'");
+                break;
+            }
         }
 
         const bx::Vec3 frameSize = frameBox.size();
