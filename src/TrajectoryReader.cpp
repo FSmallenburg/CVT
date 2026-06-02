@@ -1228,7 +1228,8 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
             }
 
             const bool isLegacyPatchy = (m_fileType == FileType::PatchyLegacy);
-            const bool isPlanar = (m_fileType == FileType::Patchy2D);
+            const bool isPlanar = (m_fileType == FileType::Patchy2D
+                                   || (m_fileType == FileType::Patchy && is2D));
             size_t minTokenCount = 0u;
             if (isLegacyPatchy)
                 minTokenCount = 10u;
