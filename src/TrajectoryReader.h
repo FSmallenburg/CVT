@@ -84,5 +84,5 @@ class TrajectoryReader
     std::vector<std::vector<bx::Vec3>> m_voronoiPointSets;
     bx::Vec3 m_maxFrameBoxSize{0.0f, 0.0f, 0.0f};
     FileType m_fileType = FileType::Sphere;
-    Dimensionality m_dimensionality = Dimensionality::ThreeDimensional;
+    mutable Dimensionality m_dimensionality = Dimensionality::ThreeDimensional;
 };

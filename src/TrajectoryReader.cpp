@@ -972,6 +972,10 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
         {
             simulationBox.setBounds({0.0f, 0.0f, 0.0f}, {boxX, boxY, 0.0f});
             simulationBox.setPeriodic(true, true, false);
+            if (m_fileType == FileType::Patchy || m_fileType == FileType::PatchyLegacy)
+            {
+                m_dimensionality = Dimensionality::TwoDimensional;
+            }
         }
         else if (!parseBallBounds(line, simulationBox))
         {

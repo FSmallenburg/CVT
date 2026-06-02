@@ -252,6 +252,8 @@ struct ViewerState
     uint16_t orderParameterCount = 0u;
     bool sizeDistributionUseVisibleOnly = true;
     uint16_t sizeDistributionBinCount = 32u;
+    bool orientationHistogramUseVisibleOnly = true;
+    uint16_t orientationHistogramBinCount = 36u;
     std::unordered_set<uint32_t> selectedIds;
     // Per-particle color overrides applied to individually colored particles.
     std::unordered_map<uint32_t, std::array<float, 4>> particleColorOverrides;

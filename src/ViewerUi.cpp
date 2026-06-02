@@ -223,6 +223,17 @@ struct SizeDistributionData
     float binWidth = 0.0f;
 };
 
+struct OrientationHistogramData
+{
+    std::vector<float> binCenters;
+    std::vector<float> binCounts;
+    float binWidth = 0.0f;
+    float maxBinCount = 0.0f;
+    float meanAngle = 0.0f;
+    float circularSD = 0.0f;
+    size_t sampleCount = 0u;
+};
+
 struct BondOrderBasedBondHistogramData
 {
     size_t pairCount = 0u;
@@ -1121,6 +1132,91 @@ SizeDistributionData buildSizeDistributionData(const ParticleSystem &particleSys
     for (float value : values)
     {
         int binIndex = static_cast<int>((value - data.plotMinValue) * inverseBinWidth);
+        binIndex = std::clamp(binIndex, 0, int(binCount) - 1);
+        data.binCounts[static_cast<size_t>(binIndex)] += 1.0f;
+    }
+
+    data.maxBinCount = *std::max_element(data.binCounts.begin(), data.binCounts.end());
+    return data;
+}
+
+OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &particleSystem,
+                                                       TrajectoryReader::FileType particleFileType,
+                                                       bool visibleOnly,
+                                                       uint16_t requestedBinCount)
+{
+    using FileType = TrajectoryReader::FileType;
+
+    OrientationHistogramData data;
+
+    std::vector<float> angles;
+    angles.reserve(particleSystem.particles().size());
+
+    if (particleFileType == FileType::Polygon)
+    {
+        for (const Particle &particle : particleSystem.particles())
+        {
+            if (visibleOnly && !particle.visible)
+            {
+                continue;
+            }
+            angles.push_back(std::atan2(particle.direction.y, particle.direction.x));
+        }
+    }
+    else if ((particleFileType == FileType::Patchy2D
+              || particleFileType == FileType::Patchy)
+             && particleSystem.hasPatchyMetadata())
+    {
+        const auto &particles = particleSystem.particles();
+        const auto &patchyMeta = particleSystem.patchyMetadata();
+        for (size_t i = 0u; i < particles.size(); ++i)
+        {
+            if (visibleOnly && !particles[i].visible)
+            {
+                continue;
+            }
+            // Row-major 3×3: [0]=cos θ, [3]=sin θ
+            const auto &m = patchyMeta[i].orientationMatrix;
+            angles.push_back(std::atan2(m[3], m[0]));
+        }
+    }
+
+    data.sampleCount = angles.size();
+    if (angles.empty())
+    {
+        return data;
+    }
+
+    // Circular mean and SD.
+    double sinSum = 0.0;
+    double cosSum = 0.0;
+    for (float angle : angles)
+    {
+        sinSum += std::sin(static_cast<double>(angle));
+        cosSum += std::cos(static_cast<double>(angle));
+    }
+    const double n = static_cast<double>(angles.size());
+    data.meanAngle = static_cast<float>(std::atan2(sinSum / n, cosSum / n));
+    const double R = std::sqrt((sinSum / n) * (sinSum / n) + (cosSum / n) * (cosSum / n));
+    data.circularSD = static_cast<float>(std::sqrt(-2.0 * std::log(std::max(R, 1.0e-10))));
+
+    // Fixed domain [−π, π].
+    constexpr float kDomainMin = -bx::kPi;
+    constexpr float kDomainMax =  bx::kPi;
+    const uint16_t binCount = bx::max<uint16_t>(requestedBinCount, 1u);
+    data.binWidth = (kDomainMax - kDomainMin) / float(binCount);
+    data.binCounts.assign(binCount, 0.0f);
+    data.binCenters.assign(binCount, 0.0f);
+
+    for (uint16_t i = 0u; i < binCount; ++i)
+    {
+        data.binCenters[i] = kDomainMin + (float(i) + 0.5f) * data.binWidth;
+    }
+
+    const float inverseBinWidth = 1.0f / data.binWidth;
+    for (float angle : angles)
+    {
+        int binIndex = static_cast<int>((angle - kDomainMin) * inverseBinWidth);
         binIndex = std::clamp(binIndex, 0, int(binCount) - 1);
         data.binCounts[static_cast<size_t>(binIndex)] += 1.0f;
     }
@@ -2371,6 +2467,82 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
         }
 
+    }
+
+    if (viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional
+        && (particleFileType == TrajectoryReader::FileType::Polygon
+            || particleFileType == TrajectoryReader::FileType::Patchy2D
+            || particleFileType == TrajectoryReader::FileType::Patchy))
+    {
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Orientation distribution"))
+        {
+            bool useVisibleOnly = viewerState.orientationHistogramUseVisibleOnly;
+            if (ImGui::Checkbox("Visible particles only##OrientationHistogram", &useVisibleOnly))
+            {
+                viewerState.orientationHistogramUseVisibleOnly = useVisibleOnly;
+            }
+
+            int binCount = int(viewerState.orientationHistogramBinCount);
+            if (ImGui::SliderInt("Bins##OrientationHistogram", &binCount, 8, 180))
+            {
+                viewerState.orientationHistogramBinCount =
+                    static_cast<uint16_t>(std::clamp(binCount, 8, 180));
+            }
+
+            const OrientationHistogramData orientationHistogram =
+                buildOrientationHistogramData(particleSystem,
+                                              particleFileType,
+                                              viewerState.orientationHistogramUseVisibleOnly,
+                                              viewerState.orientationHistogramBinCount);
+            if (orientationHistogram.sampleCount == 0u)
+            {
+                ImGui::TextDisabled("No particles available for the current filter.");
+            }
+            else
+            {
+                constexpr float kRadToDeg = 180.0f / bx::kPi;
+                ImGui::Text("Count: %zu", orientationHistogram.sampleCount);
+                ImGui::Text("Mean angle: %.4f rad (%.1f\xc2\xb0)",
+                            orientationHistogram.meanAngle,
+                            orientationHistogram.meanAngle * kRadToDeg);
+                ImGui::Text("Circular SD: %.4f rad (%.1f\xc2\xb0)",
+                            orientationHistogram.circularSD,
+                            orientationHistogram.circularSD * kRadToDeg);
+
+                const float plotWidth =
+                    bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                if (ImPlot::GetCurrentContext() != nullptr
+                    && ImPlot::BeginPlot("##OrientationDistributionPlot",
+                                         ImVec2(plotWidth, 180.0f),
+                                         ImPlotFlags_NoLegend))
+                {
+                    ImPlot::SetupAxes("Angle (rad)", "Count",
+                                      ImPlotAxisFlags_None,
+                                      ImPlotAxisFlags_AutoFit);
+                    ImPlot::SetupAxisLimits(ImAxis_X1,
+                                            static_cast<double>(-bx::kPi),
+                                            static_cast<double>(bx::kPi),
+                                            ImGuiCond_Always);
+                    ImPlot::PlotLine("Count",
+                                     orientationHistogram.binCenters.data(),
+                                     orientationHistogram.binCounts.data(),
+                                     static_cast<int>(orientationHistogram.binCounts.size()));
+                    ImPlot::EndPlot();
+                }
+                else
+                {
+                    std::string overlayText = std::to_string(orientationHistogram.sampleCount)
+                                              + " particles";
+                    ImGui::PlotLines("##OrientationDistributionPlotFallback",
+                                     orientationHistogram.binCounts.data(),
+                                     static_cast<int>(orientationHistogram.binCounts.size()),
+                                     0, overlayText.c_str(), 0.0f,
+                                     bx::max(1.0f, orientationHistogram.maxBinCount),
+                                     ImVec2(plotWidth, 160.0f));
+                }
+            }
+        }
     }
 
     ImGui::Spacing();
