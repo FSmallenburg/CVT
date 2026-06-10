@@ -549,6 +549,33 @@ float lammpsCoordinateToPosition(float value,
     return value;
 }
 
+bx::Vec3 lammpsCoordinatesToPosition(const LammpsBoundsData &bounds,
+                                     float rawX,
+                                     float rawY,
+                                     float rawZ,
+                                     LammpsCoordinateMode mode)
+{
+    if (mode == LammpsCoordinateMode::Scaled)
+    {
+        // For triclinic cells, map scaled coordinates through the full cell basis.
+        if (bounds.isTriclinic)
+        {
+            return bounds.cellOrigin
+                   + bounds.cellVectors[0] * rawX
+                   + bounds.cellVectors[1] * rawY
+                   + bounds.cellVectors[2] * rawZ;
+        }
+
+        return {
+            lammpsCoordinateToPosition(rawX, bounds.minBounds.x, bounds.maxBounds.x, mode),
+            lammpsCoordinateToPosition(rawY, bounds.minBounds.y, bounds.maxBounds.y, mode),
+            lammpsCoordinateToPosition(rawZ, bounds.minBounds.z, bounds.maxBounds.z, mode),
+        };
+    }
+
+    return {rawX, rawY, rawZ};
+}
+
 bool parseLammpsParticleLine(const std::string &line,
                              const LammpsAtomColumns &columns,
                              const LammpsBoundsData &bounds,
@@ -605,14 +632,11 @@ bool parseLammpsParticleLine(const std::string &line,
 
     particle.id = static_cast<uint32_t>(id);
     particle.typeLabel = lammpsTypeLabel(numericType);
-    particle.position = {
-        lammpsCoordinateToPosition(rawX, bounds.minBounds.x, bounds.maxBounds.x,
-                                   columns.coordinateMode),
-        lammpsCoordinateToPosition(rawY, bounds.minBounds.y, bounds.maxBounds.y,
-                                   columns.coordinateMode),
-        lammpsCoordinateToPosition(rawZ, bounds.minBounds.z, bounds.maxBounds.z,
-                                   columns.coordinateMode),
-    };
+    particle.position = lammpsCoordinatesToPosition(bounds,
+                                                    rawX,
+                                                    rawY,
+                                                    rawZ,
+                                                    columns.coordinateMode);
     particle.baseColor = colorFromLetter(particle.typeLabel);
     particle.color = particle.baseColor;
     particle.setUniformScale(radius);
