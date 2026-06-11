@@ -14,15 +14,13 @@ float wrapAxis(float value, float minBound, float maxBound)
         return value;
     }
 
-    while (value < minBound)
+    value -= minBound;
+    value = std::fmod(value, extent);
+    if (value < 0.0f)
     {
         value += extent;
     }
-    while (value > maxBound)
-    {
-        value -= extent;
-    }
-    return value;
+    return value + minBound;
 }
 
 float nearestAxis(float delta, float extent)
