@@ -376,6 +376,7 @@ struct ViewerState
     bool hasPreviousFramePositions = false;
     std::vector<bx::Vec3> previousRawPositions;
     std::vector<uint32_t> previousRawPositionIds;
+    bx::Vec3 previousFrameParticleTranslation{0.0f, 0.0f, 0.0f};
 };
 
 struct PickResources

@@ -498,6 +498,7 @@ void snapshotCurrentParticlePositions(const ParticleSystem &particleSystem,
         viewerState.previousRawPositionIds.push_back(particle.id);
     }
     viewerState.hasPreviousFramePositions = hasPreviousFrame;
+    viewerState.previousFrameParticleTranslation = viewerState.particleTranslation;
 }
 
 float particleRadius(const Particle &particle)
@@ -2005,6 +2006,7 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
 
     std::vector<bx::Vec3> previousRawPositions;
     std::vector<uint32_t> previousRawPositionIds;
+    const bx::Vec3 previousFrameParticleTranslation = viewerState.particleTranslation;
     previousRawPositions.reserve(particleSystem.particles().size());
     previousRawPositionIds.reserve(particleSystem.particles().size());
     for (const Particle &particle : particleSystem.particles())
@@ -2018,6 +2020,7 @@ static void handleTrajectoryFrameChange(ViewerState &viewerState, size_t &curren
         currentFrame = requestedFrame;
         viewerState.previousRawPositions = std::move(previousRawPositions);
         viewerState.previousRawPositionIds = std::move(previousRawPositionIds);
+        viewerState.previousFrameParticleTranslation = previousFrameParticleTranslation;
         viewerState.hasPreviousFramePositions = true;
         viewerState.particleColorStatsCache = {};
         viewerState.mobilityColorStatsCache = {};
@@ -2279,7 +2282,8 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
 }
 
 static void updateMouseDrivenInteraction(ViewerState &viewerState, uint16_t width,
-                                         uint16_t height, float zoomedHalfWidth,
+                                         uint16_t height,
+                                         float zoomedHalfWidth,
                                          float zoomedHalfHeight)
 {
     if (viewerState.leftMouseDown)
@@ -2316,6 +2320,10 @@ static void updateMouseDrivenInteraction(ViewerState &viewerState, uint16_t widt
                     viewerState.particleTranslation.x += modelTranslation.x;
                     viewerState.particleTranslation.y += modelTranslation.y;
                     viewerState.particleTranslation.z += modelTranslation.z;
+                    if (viewerState.mobilityModeEnabled)
+                    {
+                        markMobilitySystemDirty(viewerState);
+                    }
                     markBondLikeHelperSystemsDirty(viewerState);
                 }
             }

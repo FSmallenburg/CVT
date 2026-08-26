@@ -945,6 +945,17 @@ void rebuildMobilitySystem(const ParticleSystem &particleSystem,
     }
 
     mobilitySystem.reserve(particles.size());
+    const bx::Vec3 translationOffsetDelta = {
+        viewerState.particleTranslation.x - viewerState.previousFrameParticleTranslation.x,
+        viewerState.particleTranslation.y - viewerState.previousFrameParticleTranslation.y,
+        viewerState.particleTranslation.z - viewerState.previousFrameParticleTranslation.z,
+    };
+    const bx::Vec3 previousFrameToCurrentFrameOffset = {
+        viewerState.previousFrameParticleTranslation.x - viewerState.particleTranslation.x,
+        viewerState.previousFrameParticleTranslation.y - viewerState.particleTranslation.y,
+        viewerState.previousFrameParticleTranslation.z - viewerState.particleTranslation.z,
+    };
+
     for (const Particle &particle : particles)
     {
         if (!particle.visible)
@@ -962,15 +973,15 @@ void rebuildMobilitySystem(const ParticleSystem &particleSystem,
         const bx::Vec3 rawDelta = {particle.position.x - previousPosition.x,
                                    particle.position.y - previousPosition.y,
                                    particle.position.z - previousPosition.z};
-        const bx::Vec3 displacement = simulationBox.nearestImage(rawDelta);
+        const bx::Vec3 displacement = simulationBox.nearestImage(
+            rawDelta + translationOffsetDelta);
         const float displacementLength = bx::length(displacement);
         if (displacementLength <= 1.0e-6f)
         {
             continue;
         }
 
-        bx::Vec3 displayPreviousPosition = previousPosition;
-        simulationBox.wrapPosition(displayPreviousPosition);
+        bx::Vec3 displayPreviousPosition = previousPosition + previousFrameToCurrentFrameOffset;
 
         const float diameter = 2.0f * particleRadius(particle);
         const float desiredTipLength = 0.5f * diameter;
