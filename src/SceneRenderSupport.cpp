@@ -1052,7 +1052,8 @@ void updateAuxiliaryRenderSystemsIfNeeded(ViewerState &viewerState,
                                  bondRenderSystems);
         viewerState.bondRenderSystemsDirty = false;
     }
-    if (viewerState.nearestNeighborRenderSystemsDirty)
+    if (viewerState.nearestNeighborRenderSystemsDirty
+        && viewerState.nearestNeighborModeEnabled)
     {
         ensureBondRenderSystems(layout, sphereStacks, sphereSlices, nearestNeighborRenderSystems);
         if (viewerState.neighborAnalysisValid)

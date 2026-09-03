@@ -695,6 +695,25 @@ void applyAnalysisColorMode(ParticleSystem &particleSystem, const ViewerState &v
     }
 
     std::vector<Particle> &particles = particleSystem.particles();
+    if (viewerState.analysisColorMode == AnalysisColorMode::NeighborCount)
+    {
+        if (!particleSystem.hasNeighborAnalysis())
+        {
+            return;
+        }
+
+        const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+            particleSystem.neighborAnalysis();
+        const size_t particleCount = bx::min(particles.size(), neighborLists.size());
+        for (size_t index = 0u; index < particleCount; ++index)
+        {
+            particles[index].color = colorFromLetter(
+                static_cast<char>('A' + (neighborLists[index].size()
+                                         % kParticlePaletteColorCount)));
+        }
+        return;
+    }
+
     if (!particleSystem.hasAnalysisResults(clampedBondOrientationalOrder(viewerState)))
     {
         return;

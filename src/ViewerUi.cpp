@@ -159,6 +159,14 @@ AnalysisColorMode analysisColorModeFromComboIndex(int comboIndex, bool isTwoDime
     }
 }
 
+bool analysisColorModeUsesBondOrientationalOrder(AnalysisColorMode analysisColorMode)
+{
+    return analysisColorMode == AnalysisColorMode::BondOrientationalOrderMagnitude
+           || analysisColorMode == AnalysisColorMode::BondOrientationalOrderPhase
+           || analysisColorMode == AnalysisColorMode::BondOrientationalQLMagnitude
+           || analysisColorMode == AnalysisColorMode::BondOrientationalQBarLMagnitude;
+}
+
 std::string rdfPairLabel(uint8_t typeA, uint8_t typeB)
 {
     const char labelA[] = {
@@ -986,7 +994,8 @@ void drawBondOrderScatterPanel(ViewerState &viewerState,
     if (!particleSystem.hasAnalysisResults(viewerState.bondOrderScatterXAxisOrder)
         || !particleSystem.hasAnalysisResults(viewerState.bondOrderScatterYAxisOrder))
     {
-        ImGui::TextDisabled("Bond-order values are not available yet.");
+        viewerState.pendingRefreshAnalysisResults = true;
+        ImGui::TextDisabled("Computing bond-order values...");
     }
     else
     {
@@ -2169,6 +2178,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 {
                     viewerState.bondModeEnabled = false;
                     viewerState.mobilityModeEnabled = false;
+                    markNearestNeighborRenderSystemsDirty(viewerState);
                 }
                 markPickDirty = true;
             }
@@ -2193,6 +2203,9 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 {
                     viewerState.analysisColorMode =
                         analysisColorModeFromComboIndex(analysisColorModeIndex, true);
+                    viewerState.pendingRefreshAnalysisResults =
+                        analysisColorModeUsesBondOrientationalOrder(
+                            viewerState.analysisColorMode);
                     markColorDependentHelperSystemsDirty(viewerState);
                 }
             }
@@ -2210,6 +2223,9 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 {
                     viewerState.analysisColorMode =
                         analysisColorModeFromComboIndex(analysisColorModeIndex, false);
+                    viewerState.pendingRefreshAnalysisResults =
+                        analysisColorModeUsesBondOrientationalOrder(
+                            viewerState.analysisColorMode);
                     markColorDependentHelperSystemsDirty(viewerState);
                 }
             }
@@ -2247,6 +2263,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             if (ImGui::Button("Print selected bond-order values"))
             {
                 viewerState.pendingDescribeSelectedBondOrder = true;
+                viewerState.pendingRefreshAnalysisResults = true;
             }
             ImGui::EndDisabled();
 

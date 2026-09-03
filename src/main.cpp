@@ -847,21 +847,13 @@ void processAnalysisAndFrankKasperPendingActions(ViewerState &viewerState,
         viewerState.neighborAnalysisValid = particleSystem.hasNeighborAnalysis();
         markNearestNeighborRenderSystemsDirty(viewerState);
         markBondDiagramGeometryDirty(viewerState);
-        if (viewerState.neighborAnalysisValid)
-        {
-            computeAnalysisResults(viewerState, particleSystem);
-            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
-            {
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
-        }
-        else
+        if (!viewerState.neighborAnalysisValid)
         {
             particleSystem.clearAnalysisResults();
-            if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
-            {
-                markColorDependentHelperSystemsDirty(viewerState);
-            }
+        }
+        if (viewerState.analysisColorMode != AnalysisColorMode::Disabled)
+        {
+            markColorDependentHelperSystemsDirty(viewerState);
         }
         viewerState.pendingFindNeighbors = false;
         viewerState.pendingRefreshAnalysisResults = false;
