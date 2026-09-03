@@ -853,6 +853,10 @@ void findNearestNeighbors(const ViewerState &viewerState,
     const bool isThreeDimensional =
         viewerState.fileDimensionality == TrajectoryReader::Dimensionality::ThreeDimensional;
     const bool periodicGrid = usesPeriodicNeighborGrid(viewerState, simulationBox);
+    const float cutoffFactorMax = bx::max(viewerState.neighborCutoffFactor, 0.0f);
+    const float cutoffFactorMin = std::clamp(viewerState.neighborCutoffFactorMin,
+                                             0.0f,
+                                             cutoffFactorMax);
 
     float maxDiameter = 0.0f;
     bx::Vec3 minPosition = particles.front().position;
@@ -871,7 +875,7 @@ void findNearestNeighbors(const ViewerState &viewerState,
         }
     }
 
-    const float minimumCellSize = bx::max(maxDiameter * viewerState.neighborCutoffFactor,
+    const float minimumCellSize = bx::max(maxDiameter * cutoffFactorMax,
                                           1.0e-6f);
     const bx::Vec3 periodicMinBounds = simulationBox.minBounds();
     const bx::Vec3 periodicBoxSize = simulationBox.size();
@@ -1022,11 +1026,12 @@ void findNearestNeighbors(const ViewerState &viewerState,
                     displacement = simulationBox.nearestImage(displacement);
                 }
 
-                const float cutoffDistance = viewerState.neighborCutoffFactor
-                                             * (particleRadius(particle)
-                                                + particleRadius(neighborParticle));
+                const float radiusSum = particleRadius(particle)
+                                        + particleRadius(neighborParticle);
+                const float minimumDistance = cutoffFactorMin * radiusSum;
+                const float cutoffDistance = cutoffFactorMax * radiusSum;
                 const float distance = bx::length(displacement);
-                if (distance >= cutoffDistance)
+                if (distance < minimumDistance || distance >= cutoffDistance)
                 {
                     continue;
                 }

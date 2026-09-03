@@ -14,6 +14,7 @@ constexpr uint32_t kColorFloatCount = 4u;
 constexpr uint32_t kInstanceFloatCount = kTransformFloatCount + kColorFloatCount;
 constexpr uint16_t kInstanceStrideBytes =
     static_cast<uint16_t>(kInstanceFloatCount * sizeof(float));
+constexpr uint32_t kMaxInstanceBatchCount = 65536u;
 
 struct PreparedRenderParticle
 {
@@ -336,15 +337,17 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
         while (submittedInstanceCount < visibleCount)
         {
             const uint32_t remainingInstanceCount = visibleCount - submittedInstanceCount;
-            const uint32_t availableInstanceCount =
-                bgfx::getAvailInstanceDataBuffer(remainingInstanceCount, kInstanceStrideBytes);
+            const uint32_t requestedInstanceCount =
+                bx::min<uint32_t>(remainingInstanceCount, kMaxInstanceBatchCount);
+            const uint32_t availableInstanceCount = bgfx::getAvailInstanceDataBuffer(
+                requestedInstanceCount, kInstanceStrideBytes);
             if (availableInstanceCount == 0)
             {
                 break;
             }
 
             const uint32_t batchInstanceCount =
-                bx::min<uint32_t>(remainingInstanceCount, availableInstanceCount);
+                bx::min<uint32_t>(requestedInstanceCount, availableInstanceCount);
             bgfx::InstanceDataBuffer idb;
             bgfx::allocInstanceDataBuffer(&idb, batchInstanceCount, kInstanceStrideBytes);
             std::memcpy(idb.data,

@@ -219,6 +219,7 @@ struct ViewerState
     bool wrapParticlesToBox = true;
     TrajectoryReader::Dimensionality fileDimensionality =
         TrajectoryReader::Dimensionality::ThreeDimensional;
+    float neighborCutoffFactorMin = 0.0f;
     float neighborCutoffFactor = 1.3f;
     bool autoFindNeighbors = false;
     bool neighborAnalysisValid = false;
@@ -252,6 +253,10 @@ struct ViewerState
     uint16_t orderParameterCount = 0u;
     bool sizeDistributionUseVisibleOnly = true;
     uint16_t sizeDistributionBinCount = 32u;
+    bool bondAngleDistributionUseVisibleOnly = true;
+    uint16_t bondAngleDistributionBinCount = 36u;
+    bool bondOrientationDistributionUseVisibleOnly = true;
+    uint16_t bondOrientationDistributionBinCount = 36u;
     bool orientationHistogramUseVisibleOnly = true;
     uint16_t orientationHistogramBinCount = 36u;
     std::unordered_set<uint32_t> selectedIds;

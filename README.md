@@ -104,6 +104,18 @@ cmake --build build-release
 ./build-release/cvt TestInputFiles/polydisperse.osph
 ```
 
+#### Update
+
+From the existing CVT checkout, pull the latest source and update the nested
+submodules before reconfiguring and rebuilding:
+
+```bash
+git pull --recurse-submodules
+git submodule update --init --recursive
+cmake --preset release
+cmake --build --preset release
+```
+
 
 ## Windows build notes
 
@@ -130,6 +142,19 @@ cmake --build --preset build-mingw-release
 
 ```powershell
 .\build-release\cvt.exe TestInputFiles\polydisperse.osph
+```
+
+#### Update
+
+From the existing CVT checkout in an MSYS2 MinGW64 shell or PowerShell, pull
+the latest source and update the nested submodules before reconfiguring and
+rebuilding:
+
+```powershell
+git pull --recurse-submodules
+git submodule update --init --recursive
+cmake --preset mingw-release
+cmake --build --preset build-mingw-release
 ```
 
 ---
@@ -177,6 +202,18 @@ cmake --build build-mac-release
 
 ```bash
 ./build-mac-release/cvt TestInputFiles/polydisperse.osph
+```
+
+#### Update
+
+From the existing CVT checkout, pull the latest source and update the nested
+submodules before reconfiguring and rebuilding:
+
+```bash
+git pull --recurse-submodules
+git submodule update --init --recursive
+cmake --preset macos-release
+cmake --build --preset build-macos-release
 ```
 
 ---

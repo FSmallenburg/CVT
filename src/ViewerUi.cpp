@@ -234,6 +234,30 @@ struct OrientationHistogramData
     size_t sampleCount = 0u;
 };
 
+struct BondAngleDistributionData
+{
+    std::vector<float> binCenters;
+    std::vector<float> binCounts;
+    size_t sampleCount = 0u;
+    float minAngle = 0.0f;
+    float maxAngle = 0.0f;
+    float meanAngle = 0.0f;
+    float standardDeviation = 0.0f;
+    float maxBinCount = 0.0f;
+    float binWidth = 0.0f;
+};
+
+struct BondOrientationDistributionData
+{
+    std::vector<float> binCenters;
+    std::vector<float> binCounts;
+    size_t sampleCount = 0u;
+    float minAngle = 0.0f;
+    float maxAngle = 0.0f;
+    float maxBinCount = 0.0f;
+    float binWidth = 0.0f;
+};
+
 struct BondOrderBasedBondHistogramData
 {
     size_t pairCount = 0u;
@@ -243,6 +267,135 @@ struct BondOrderBasedBondHistogramData
     std::vector<float> binCounts;
     std::vector<BondOrderBasedBondPair> pairs;
 };
+
+bool dualHandleRangeSliderFloat(const char *label,
+                                float *rangeMin,
+                                float *rangeMax,
+                                float absoluteMin,
+                                float absoluteMax)
+{
+    if (rangeMin == nullptr || rangeMax == nullptr)
+    {
+        return false;
+    }
+
+    if (absoluteMax <= absoluteMin)
+    {
+        return false;
+    }
+
+    float minValue = std::clamp(*rangeMin, absoluteMin, absoluteMax);
+    float maxValue = std::clamp(*rangeMax, absoluteMin, absoluteMax);
+    if (minValue > maxValue)
+    {
+        std::swap(minValue, maxValue);
+    }
+
+    const float width = ImGui::CalcItemWidth();
+    const float height = ImGui::GetFrameHeight();
+    const ImVec2 position = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(label, ImVec2(width, height));
+
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+    const ImGuiID itemId = ImGui::GetItemID();
+    ImGuiStorage *storage = ImGui::GetStateStorage();
+    int activeHandle = storage->GetInt(itemId, 0);
+
+    const ImVec2 frameMin = position;
+    const ImVec2 frameMax = ImVec2(position.x + width, position.y + height);
+    const float handleRadius = bx::max(4.0f, height * 0.28f);
+    const float trackPadding = handleRadius + 2.0f;
+    const float trackMinX = frameMin.x + trackPadding;
+    const float trackMaxX = frameMax.x - trackPadding;
+    const float trackWidth = bx::max(1.0f, trackMaxX - trackMinX);
+    const float trackCenterY = 0.5f * (frameMin.y + frameMax.y);
+    const float rangeSpan = absoluteMax - absoluteMin;
+
+    const auto valueToPixel = [&](float value) {
+        const float t = (value - absoluteMin) / rangeSpan;
+        return trackMinX + std::clamp(t, 0.0f, 1.0f) * trackWidth;
+    };
+    const auto pixelToValue = [&](float pixelX) {
+        const float t = std::clamp((pixelX - trackMinX) / trackWidth, 0.0f, 1.0f);
+        return absoluteMin + t * rangeSpan;
+    };
+
+    float minHandleX = valueToPixel(minValue);
+    float maxHandleX = valueToPixel(maxValue);
+
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        const float mouseX = ImGui::GetIO().MousePos.x;
+        const float minDistance = std::abs(mouseX - minHandleX);
+        const float maxDistance = std::abs(mouseX - maxHandleX);
+        activeHandle = minDistance <= maxDistance ? 1 : 2;
+        storage->SetInt(itemId, activeHandle);
+    }
+
+    bool changed = false;
+    if (active && ImGui::IsMouseDown(ImGuiMouseButton_Left) && activeHandle != 0)
+    {
+        const float mouseValue = pixelToValue(ImGui::GetIO().MousePos.x);
+        if (activeHandle == 1)
+        {
+            const float newMin = std::clamp(mouseValue, absoluteMin, maxValue);
+            if (newMin != minValue)
+            {
+                minValue = newMin;
+                changed = true;
+            }
+        }
+        else
+        {
+            const float newMax = std::clamp(mouseValue, minValue, absoluteMax);
+            if (newMax != maxValue)
+            {
+                maxValue = newMax;
+                changed = true;
+            }
+        }
+    }
+
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && activeHandle != 0)
+    {
+        activeHandle = 0;
+        storage->SetInt(itemId, 0);
+    }
+
+    minHandleX = valueToPixel(minValue);
+    maxHandleX = valueToPixel(maxValue);
+
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    const ImU32 frameColor = ImGui::GetColorU32(ImGuiCol_FrameBg);
+    const ImU32 trackColor = ImGui::GetColorU32(ImGuiCol_SliderGrab);
+    const ImU32 rangeColor = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+    const ImU32 handleColor = ImGui::GetColorU32(active ? ImGuiCol_SliderGrabActive
+                                                        : ImGuiCol_ButtonHovered);
+    const ImU32 handleOutlineColor = ImGui::GetColorU32(ImGuiCol_Border);
+
+    drawList->AddRectFilled(frameMin, frameMax, frameColor, 4.0f);
+    drawList->AddRectFilled(ImVec2(trackMinX, trackCenterY - 2.0f),
+                            ImVec2(trackMaxX, trackCenterY + 2.0f),
+                            trackColor,
+                            2.0f);
+    drawList->AddRectFilled(ImVec2(minHandleX, trackCenterY - 3.0f),
+                            ImVec2(maxHandleX, trackCenterY + 3.0f),
+                            rangeColor,
+                            2.0f);
+    drawList->AddCircleFilled(ImVec2(minHandleX, trackCenterY), handleRadius, handleColor);
+    drawList->AddCircleFilled(ImVec2(maxHandleX, trackCenterY), handleRadius, handleColor);
+    drawList->AddCircle(ImVec2(minHandleX, trackCenterY), handleRadius, handleOutlineColor);
+    drawList->AddCircle(ImVec2(maxHandleX, trackCenterY), handleRadius, handleOutlineColor);
+
+    if (changed)
+    {
+        *rangeMin = minValue;
+        *rangeMax = maxValue;
+    }
+
+    return changed;
+}
 
 using BondOrderComplex = std::complex<float>;
 
@@ -1140,6 +1293,234 @@ SizeDistributionData buildSizeDistributionData(const ParticleSystem &particleSys
     return data;
 }
 
+BondAngleDistributionData buildBondAngleDistributionData(const ParticleSystem &particleSystem,
+                                                         bool visibleOnly,
+                                                         uint16_t requestedBinCount)
+{
+    BondAngleDistributionData data;
+
+    if (!particleSystem.hasNeighborAnalysis())
+    {
+        return data;
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    if (particles.empty() || neighborLists.size() != particles.size())
+    {
+        return data;
+    }
+
+    std::vector<float> angles;
+    angles.reserve(particles.size() * 6u);
+
+    constexpr float kLengthEpsilon = 1.0e-12f;
+    for (size_t centerIndex = 0u; centerIndex < particles.size(); ++centerIndex)
+    {
+        if (visibleOnly && !particles[centerIndex].visible)
+        {
+            continue;
+        }
+
+        std::vector<bx::Vec3> neighborDisplacements;
+        neighborDisplacements.reserve(neighborLists[centerIndex].size());
+        for (const NearestNeighborData &neighbor : neighborLists[centerIndex])
+        {
+            const size_t neighborIndex = size_t(neighbor.neighborIndex);
+            if (neighborIndex >= particles.size())
+            {
+                continue;
+            }
+            if (visibleOnly && !particles[neighborIndex].visible)
+            {
+                continue;
+            }
+
+            const float dx = neighbor.displacement.x;
+            const float dy = neighbor.displacement.y;
+            const float lengthSquared = dx * dx + dy * dy;
+            if (lengthSquared <= kLengthEpsilon)
+            {
+                continue;
+            }
+
+            neighborDisplacements.push_back({dx, dy, 0.0f});
+        }
+
+        if (neighborDisplacements.size() < 2u)
+        {
+            continue;
+        }
+
+        for (size_t first = 0u; first + 1u < neighborDisplacements.size(); ++first)
+        {
+            const bx::Vec3 &a = neighborDisplacements[first];
+            const float aLength = std::sqrt(a.x * a.x + a.y * a.y);
+            if (aLength <= 1.0e-6f)
+            {
+                continue;
+            }
+
+            for (size_t second = first + 1u;
+                 second < neighborDisplacements.size();
+                 ++second)
+            {
+                const bx::Vec3 &b = neighborDisplacements[second];
+                const float bLength = std::sqrt(b.x * b.x + b.y * b.y);
+                if (bLength <= 1.0e-6f)
+                {
+                    continue;
+                }
+
+                const float cosine = std::clamp((a.x * b.x + a.y * b.y)
+                                                    / (aLength * bLength),
+                                                -1.0f,
+                                                1.0f);
+                angles.push_back(std::acos(cosine));
+            }
+        }
+    }
+
+    data.sampleCount = angles.size();
+    if (angles.empty())
+    {
+        return data;
+    }
+
+    data.minAngle = *std::min_element(angles.begin(), angles.end());
+    data.maxAngle = *std::max_element(angles.begin(), angles.end());
+
+    double sum = 0.0;
+    for (float angle : angles)
+    {
+        sum += static_cast<double>(angle);
+    }
+    data.meanAngle = static_cast<float>(sum / static_cast<double>(angles.size()));
+
+    double squaredDifferenceSum = 0.0;
+    for (float angle : angles)
+    {
+        const double delta = static_cast<double>(angle)
+                             - static_cast<double>(data.meanAngle);
+        squaredDifferenceSum += delta * delta;
+    }
+    data.standardDeviation = static_cast<float>(
+        std::sqrt(squaredDifferenceSum / static_cast<double>(angles.size())));
+
+    constexpr float kDomainMin = 0.0f;
+    constexpr float kDomainMax = bx::kPi;
+    const uint16_t binCount = bx::max<uint16_t>(requestedBinCount, 1u);
+    data.binWidth = (kDomainMax - kDomainMin) / float(binCount);
+    data.binCounts.assign(binCount, 0.0f);
+    data.binCenters.assign(binCount, 0.0f);
+
+    for (uint16_t binIndex = 0u; binIndex < binCount; ++binIndex)
+    {
+        data.binCenters[binIndex] = kDomainMin + (float(binIndex) + 0.5f) * data.binWidth;
+    }
+
+    const float inverseBinWidth = 1.0f / data.binWidth;
+    for (float angle : angles)
+    {
+        int binIndex = static_cast<int>((angle - kDomainMin) * inverseBinWidth);
+        binIndex = std::clamp(binIndex, 0, int(binCount) - 1);
+        data.binCounts[static_cast<size_t>(binIndex)] += 1.0f;
+    }
+
+    data.maxBinCount = *std::max_element(data.binCounts.begin(), data.binCounts.end());
+    return data;
+}
+
+BondOrientationDistributionData buildBondOrientationDistributionData(
+    const ParticleSystem &particleSystem,
+    bool visibleOnly,
+    uint16_t requestedBinCount)
+{
+    BondOrientationDistributionData data;
+
+    if (!particleSystem.hasNeighborAnalysis())
+    {
+        return data;
+    }
+
+    const std::vector<Particle> &particles = particleSystem.particles();
+    const std::vector<std::vector<NearestNeighborData>> &neighborLists =
+        particleSystem.neighborAnalysis();
+    if (particles.empty() || neighborLists.size() != particles.size())
+    {
+        return data;
+    }
+
+    std::vector<float> angles;
+    angles.reserve(particles.size() * 6u);
+
+    constexpr float kLengthSquaredEpsilon = 1.0e-12f;
+    for (size_t particleIndex = 0u; particleIndex < particles.size(); ++particleIndex)
+    {
+        if (visibleOnly && !particles[particleIndex].visible)
+        {
+            continue;
+        }
+
+        for (const NearestNeighborData &neighbor : neighborLists[particleIndex])
+        {
+            const size_t neighborIndex = size_t(neighbor.neighborIndex);
+            if (neighborIndex >= particles.size() || neighborIndex <= particleIndex)
+            {
+                continue;
+            }
+            if (visibleOnly && !particles[neighborIndex].visible)
+            {
+                continue;
+            }
+
+            const float dx = neighbor.displacement.x;
+            const float dy = neighbor.displacement.y;
+            const float lengthSquared = dx * dx + dy * dy;
+            if (lengthSquared <= kLengthSquaredEpsilon)
+            {
+                continue;
+            }
+
+            angles.push_back(std::atan2(dy, dx));
+        }
+    }
+
+    data.sampleCount = angles.size();
+    if (angles.empty())
+    {
+        return data;
+    }
+
+    data.minAngle = *std::min_element(angles.begin(), angles.end());
+    data.maxAngle = *std::max_element(angles.begin(), angles.end());
+
+    constexpr float kDomainMin = -bx::kPi;
+    constexpr float kDomainMax =  bx::kPi;
+    const uint16_t binCount = bx::max<uint16_t>(requestedBinCount, 1u);
+    data.binWidth = (kDomainMax - kDomainMin) / float(binCount);
+    data.binCounts.assign(binCount, 0.0f);
+    data.binCenters.assign(binCount, 0.0f);
+
+    for (uint16_t binIndex = 0u; binIndex < binCount; ++binIndex)
+    {
+        data.binCenters[binIndex] = kDomainMin
+                                    + (float(binIndex) + 0.5f) * data.binWidth;
+    }
+
+    const float inverseBinWidth = 1.0f / data.binWidth;
+    for (float angle : angles)
+    {
+        int binIndex = static_cast<int>((angle - kDomainMin) * inverseBinWidth);
+        binIndex = std::clamp(binIndex, 0, int(binCount) - 1);
+        data.binCounts[static_cast<size_t>(binIndex)] += 1.0f;
+    }
+
+    data.maxBinCount = *std::max_element(data.binCounts.begin(), data.binCounts.end());
+    return data;
+}
+
 OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &particleSystem,
                                                        TrajectoryReader::FileType particleFileType,
                                                        bool visibleOnly,
@@ -1743,11 +2124,17 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 markColorDependentHelperSystemsDirty(viewerState);
             }
 
-            float neighborCutoffFactor = viewerState.neighborCutoffFactor;
-            if (ImGui::SliderFloat("Neighbor cutoff factor", &neighborCutoffFactor,
-                                1.0f, 2.0f, "%.2f"))
+            float neighborCutoffFactorMin = viewerState.neighborCutoffFactorMin;
+            float neighborCutoffFactorMax = viewerState.neighborCutoffFactor;
+            ImGui::TextUnformatted("Neighbor distance cutoff factor range");
+            if (dualHandleRangeSliderFloat("##NeighborCutoffFactorRange",
+                                           &neighborCutoffFactorMin,
+                                           &neighborCutoffFactorMax,
+                                           0.0f,
+                                           2.0f))
             {
-                viewerState.neighborCutoffFactor = neighborCutoffFactor;
+                viewerState.neighborCutoffFactorMin = neighborCutoffFactorMin;
+                viewerState.neighborCutoffFactor = neighborCutoffFactorMax;
                 viewerState.neighborAnalysisValid = false;
                 particleSystem.clearNeighborAnalysis();
                 markNearestNeighborRenderSystemsDirty(viewerState);
@@ -1759,6 +2146,9 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 viewerState.pendingFindNeighbors = viewerState.autoFindNeighbors;
                 markPickDirty = true;
             }
+            ImGui::Text("Range: [%.2f, %.2f] * (r_i + r_j)",
+                        viewerState.neighborCutoffFactorMin,
+                        viewerState.neighborCutoffFactor);
 
             if (ImGui::Button("Find neighbors"))
             {
@@ -1896,6 +2286,171 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 {
                     viewerState.bondDiagramPointScale = bondDiagramPointScale;
                     markBondDiagramGeometryDirty(viewerState);
+                }
+            }
+
+            if (isTwoDimensional
+                && viewerState.neighborAnalysisValid
+                && ImGui::CollapsingHeader("Bond angle distribution"))
+            {
+                bool useVisibleOnly = viewerState.bondAngleDistributionUseVisibleOnly;
+                if (ImGui::Checkbox("Visible particles only##BondAngleDistribution",
+                                    &useVisibleOnly))
+                {
+                    viewerState.bondAngleDistributionUseVisibleOnly = useVisibleOnly;
+                }
+
+                int binCount = int(viewerState.bondAngleDistributionBinCount);
+                if (ImGui::SliderInt("Bins##BondAngleDistribution", &binCount, 4, 128))
+                {
+                    viewerState.bondAngleDistributionBinCount =
+                        static_cast<uint16_t>(std::clamp(binCount, 4, 128));
+                }
+
+                const BondAngleDistributionData bondAngleDistribution =
+                    buildBondAngleDistributionData(
+                        particleSystem,
+                        viewerState.bondAngleDistributionUseVisibleOnly,
+                        viewerState.bondAngleDistributionBinCount);
+                if (bondAngleDistribution.sampleCount == 0u)
+                {
+                    ImGui::TextDisabled(
+                        "No bond angles available for the current filter.");
+                }
+                else
+                {
+                    constexpr float kRadToDeg = 180.0f / bx::kPi;
+                    ImGui::Text("Count: %zu", bondAngleDistribution.sampleCount);
+                    ImGui::Text("Mean angle: %.4f rad (%.1f\xc2\xb0)",
+                                bondAngleDistribution.meanAngle,
+                                bondAngleDistribution.meanAngle * kRadToDeg);
+                    ImGui::Text("SD: %.4f rad (%.1f\xc2\xb0)",
+                                bondAngleDistribution.standardDeviation,
+                                bondAngleDistribution.standardDeviation * kRadToDeg);
+                    ImGui::Text("Range: [%.4f, %.4f] rad", bondAngleDistribution.minAngle,
+                                bondAngleDistribution.maxAngle);
+
+                    const float plotWidth =
+                        bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                    if (ImPlot::GetCurrentContext() != nullptr
+                        && ImPlot::BeginPlot("##BondAngleDistributionPlot",
+                                             ImVec2(plotWidth, 180.0f),
+                                             ImPlotFlags_NoLegend))
+                    {
+                        ImPlot::SetupAxes("Angle (rad)", "Count",
+                                          ImPlotAxisFlags_None,
+                                          ImPlotAxisFlags_AutoFit);
+                        ImPlot::SetupAxisLimits(ImAxis_X1,
+                                                0.0,
+                                                static_cast<double>(bx::kPi),
+                                                ImGuiCond_Always);
+                        ImPlot::PlotBars("Count",
+                                         bondAngleDistribution.binCenters.data(),
+                                         bondAngleDistribution.binCounts.data(),
+                                         static_cast<int>(bondAngleDistribution.binCounts.size()),
+                                         static_cast<double>(bondAngleDistribution.binWidth)
+                                             * 0.95);
+                        ImPlot::EndPlot();
+                    }
+                    else
+                    {
+                        std::string overlayText =
+                            std::to_string(bondAngleDistribution.sampleCount)
+                            + " angles";
+                        ImGui::PlotHistogram("##BondAngleDistributionPlotFallback",
+                                             bondAngleDistribution.binCounts.data(),
+                                             static_cast<int>(bondAngleDistribution.binCounts.size()),
+                                             0,
+                                             overlayText.c_str(),
+                                             0.0f,
+                                             bx::max(1.0f,
+                                                     bondAngleDistribution.maxBinCount),
+                                             ImVec2(plotWidth, 160.0f));
+                    }
+                    ImGui::TextDisabled(
+                        "Angles are computed between all neighbor-pair vectors around each central particle.");
+                }
+            }
+
+            if (isTwoDimensional
+                && viewerState.neighborAnalysisValid
+                && ImGui::CollapsingHeader("Bond orientation distribution"))
+            {
+                bool useVisibleOnly = viewerState.bondOrientationDistributionUseVisibleOnly;
+                if (ImGui::Checkbox("Visible particles only##BondOrientationDistribution",
+                                    &useVisibleOnly))
+                {
+                    viewerState.bondOrientationDistributionUseVisibleOnly = useVisibleOnly;
+                }
+
+                int binCount = int(viewerState.bondOrientationDistributionBinCount);
+                if (ImGui::SliderInt("Bins##BondOrientationDistribution", &binCount, 4, 128))
+                {
+                    viewerState.bondOrientationDistributionBinCount =
+                        static_cast<uint16_t>(std::clamp(binCount, 4, 128));
+                }
+
+                const BondOrientationDistributionData bondOrientationDistribution =
+                    buildBondOrientationDistributionData(
+                        particleSystem,
+                        viewerState.bondOrientationDistributionUseVisibleOnly,
+                        viewerState.bondOrientationDistributionBinCount);
+                if (bondOrientationDistribution.sampleCount == 0u)
+                {
+                    ImGui::TextDisabled(
+                        "No bond orientations available for the current filter.");
+                }
+                else
+                {
+                    constexpr float kRadToDeg = 180.0f / bx::kPi;
+                    ImGui::Text("Count: %zu", bondOrientationDistribution.sampleCount);
+                    ImGui::Text("Range: [%.4f, %.4f] rad", bondOrientationDistribution.minAngle,
+                                bondOrientationDistribution.maxAngle);
+                    ImGui::Text("Range: [%.1f, %.1f]\xc2\xb0",
+                                bondOrientationDistribution.minAngle * kRadToDeg,
+                                bondOrientationDistribution.maxAngle * kRadToDeg);
+
+                    const float plotWidth =
+                        bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+                    if (ImPlot::GetCurrentContext() != nullptr
+                        && ImPlot::BeginPlot("##BondOrientationDistributionPlot",
+                                             ImVec2(plotWidth, 180.0f),
+                                             ImPlotFlags_NoLegend))
+                    {
+                        ImPlot::SetupAxes("Angle (rad)", "Count",
+                                          ImPlotAxisFlags_None,
+                                          ImPlotAxisFlags_AutoFit);
+                        ImPlot::SetupAxisLimits(ImAxis_X1,
+                                                static_cast<double>(-bx::kPi),
+                                                static_cast<double>(bx::kPi),
+                                                ImGuiCond_Always);
+                        ImPlot::PlotBars(
+                            "Count",
+                            bondOrientationDistribution.binCenters.data(),
+                            bondOrientationDistribution.binCounts.data(),
+                            static_cast<int>(bondOrientationDistribution.binCounts.size()),
+                            static_cast<double>(bondOrientationDistribution.binWidth) * 0.95);
+                        ImPlot::EndPlot();
+                    }
+                    else
+                    {
+                        std::string overlayText =
+                            std::to_string(bondOrientationDistribution.sampleCount)
+                            + " bonds";
+                        ImGui::PlotHistogram(
+                            "##BondOrientationDistributionPlotFallback",
+                            bondOrientationDistribution.binCounts.data(),
+                            static_cast<int>(bondOrientationDistribution.binCounts.size()),
+                            0,
+                            overlayText.c_str(),
+                            0.0f,
+                            bx::max(1.0f,
+                                    bondOrientationDistribution.maxBinCount),
+                            ImVec2(plotWidth, 160.0f));
+                    }
+                    ImGui::TextDisabled(
+                        "Histogram of bond-vector directions using atan2(dy, dx). "
+                        "Each neighbor pair is counted once.");
                 }
             }
 

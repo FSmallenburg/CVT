@@ -2590,7 +2590,7 @@ int main(int argc, char **argv)
     init.resolution.height = static_cast<uint32_t>(height);
     init.resolution.reset = BGFX_RESET_VSYNC;
     // Large ImPlot scatter plots can exhaust bgfx transient buffers with default limits.
-    init.limits.maxTransientVbSize = 16u * 1024u * 1024u;
+    init.limits.maxTransientVbSize = 256u * 1024u * 1024u;
     init.limits.maxTransientIbSize = 8u * 1024u * 1024u;
 
     BgfxLibraryGuard bgfxGuard;
