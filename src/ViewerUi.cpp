@@ -60,6 +60,7 @@ double computePackingFraction(const ParticleSystem &particleSystem,
         case FileType::Sphere:
         case FileType::BondedSphere:
         case FileType::OrderedSphere:
+        case FileType::LammpsTrajectory:
         {
             const double r = static_cast<double>(p.sizeParams[0]);
             contrib = (4.0 / 3.0) * bx::kPi * r * r * r;

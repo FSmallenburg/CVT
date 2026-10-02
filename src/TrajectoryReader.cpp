@@ -630,7 +630,10 @@ bool parseLammpsParticleLine(const std::string &line,
         }
     }
 
-    particle.id = static_cast<uint32_t>(id);
+    // Internal ids are 1-based like the other formats (0 marks "no particle" in
+    // the pick buffer, and ids are displayed as id - 1), so shift atom ids by one.
+    // The shift keeps ids stable across frames even if LAMMPS reorders atoms.
+    particle.id = static_cast<uint32_t>(id) + 1u;
     particle.typeLabel = lammpsTypeLabel(numericType);
     particle.position = lammpsCoordinatesToPosition(bounds,
                                                     rawX,
@@ -956,7 +959,7 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
             {
                 std::ostringstream message;
                 message << "particle " << (particleIndex + 1u)
-                        << ": duplicate LAMMPS atom id " << particle.id;
+                        << ": duplicate LAMMPS atom id " << (particle.id - 1u);
                 return setParseError(message.str());
             }
 

@@ -66,6 +66,19 @@ Compile the runtime shaders manually before the first run only if you are not us
 > tool build is required. You can override the binary path with the `SHADERC`
 > environment variable.
 
+### Unit tests
+
+A small Catch2 test suite (Catch2 is bundled with bx, so nothing extra to install)
+covers the simulation box, trajectory parsing, and the bond-order analysis. It is
+not part of the default build; build and run it with:
+
+```bash
+cmake --build --preset release --target check
+```
+
+Test sources live in `tests/`. To run a subset directly, e.g. only the analysis
+tests: `./build-release/cvt_tests "[Analysis]"`.
+
 ---
 
 ## Linux build notes

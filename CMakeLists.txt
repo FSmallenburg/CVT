@@ -313,3 +313,53 @@ if(CVT_BUILD_SHADERS)
             "Build will continue without shader compilation; run compileshaders.sh manually.")
     endif()
 endif()
+# ---------------------------------------------------------------------------
+# Unit tests (Catch2, bundled with bx). Not built by default:
+#   cmake --build --preset release --target check
+# builds cvt_tests and runs it through CTest.
+# ---------------------------------------------------------------------------
+option(CVT_BUILD_TESTS "Define the cvt_tests unit-test target" ON)
+
+if(CVT_BUILD_TESTS)
+    enable_testing()
+
+    set(CVT_CATCH_DIR ${BX_DIR}/3rdparty/catch)
+    add_library(cvt_catch2 STATIC EXCLUDE_FROM_ALL ${CVT_CATCH_DIR}/catch_amalgamated.cpp)
+    target_include_directories(cvt_catch2 PUBLIC ${CVT_CATCH_DIR})
+
+    add_executable(cvt_tests EXCLUDE_FROM_ALL
+        tests/AnalysisTests.cpp
+        tests/SimulationBoxTests.cpp
+        tests/TrajectoryReaderTests.cpp
+        src/AnalysisSupport.cpp
+        src/ColorPalette.cpp
+        src/Mesh.cpp
+        src/Particle.cpp
+        src/ParticleSystem.cpp
+        src/ParticleType.cpp
+        src/PatchPlacement.cpp
+        src/SimulationBox.cpp
+        src/TrajectoryReader.cpp
+        src/ViewerSupport.cpp
+    )
+    target_include_directories(cvt_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${BGFX_DIR}/3rdparty
+        ${BGFX_DIR}/examples/common/imgui
+    )
+    target_compile_definitions(cvt_tests PRIVATE
+        IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
+        $<$<CXX_COMPILER_ID:MSVC>:_USE_MATH_DEFINES>
+    )
+    target_link_libraries(cvt_tests PRIVATE cvt_catch2 bgfx bx bimg implot)
+
+    add_test(NAME cvt_tests COMMAND cvt_tests)
+    add_custom_target(check
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
+        DEPENDS cvt_tests
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Running unit tests"
+        USES_TERMINAL
+    )
+endif()
