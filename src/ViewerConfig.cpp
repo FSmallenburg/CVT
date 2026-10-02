@@ -44,6 +44,20 @@ int parseInt(const std::string &value, int fallback)
     }
 }
 
+float parseFloat(const std::string &value, float fallback)
+{
+    try
+    {
+        size_t pos = 0u;
+        const float result = std::stof(value, &pos);
+        return (pos > 0u) ? result : fallback;
+    }
+    catch (...)
+    {
+        return fallback;
+    }
+}
+
 /// Parses a hex color string of the form RRGGBB or #RRGGBB (alpha = 1.0),
 /// or RRGGBBAA / #RRGGBBAA (with explicit alpha). Returns std::nullopt on failure.
 std::optional<std::array<float, 4>> parseHexColor(const std::string &value)
@@ -126,6 +140,22 @@ ViewerConfig loadViewerConfig(const std::filesystem::path &path)
             config.basicControlsOpen = parseBool(value, config.basicControlsOpen);
         else if (key == "lighting_level")
             config.lightingLevel = std::clamp(parseInt(value, config.lightingLevel), 0, 29);
+        else if (key == "screenshot_scale")
+            config.screenshotScale =
+                std::clamp(parseFloat(value, config.screenshotScale), 0.05f, 8.0f);
+        else if (key == "screenshot_small_scale")
+            config.screenshotSmallScale =
+                std::clamp(parseFloat(value, config.screenshotSmallScale), 0.05f, 8.0f);
+        else if (key == "screenshot_directory")
+        {
+            std::string lower = value;
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (lower == "cwd")
+                config.screenshotNextToLoadedFile = false;
+            else if (lower == "file")
+                config.screenshotNextToLoadedFile = true;
+        }
         else if (key == "sf_use_gpu")
             config.structureFactorUseGpu = parseBool(value, config.structureFactorUseGpu);
         else if (key == "sf_suppress_central_peak")

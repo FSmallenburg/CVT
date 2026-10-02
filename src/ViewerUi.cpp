@@ -216,7 +216,7 @@ float rdfAutoRadiusFromBox(const SimulationBox &simulationBox,
     return 0.0f;
 }
 
-struct SizeDistributionData
+struct ValueHistogramData
 {
     std::vector<float> binCounts;
     std::vector<float> binCenters;
@@ -716,6 +716,76 @@ void applyBondOrderBasedBondsFromSelectedRange(ViewerState &viewerState,
     markPickBufferDirty(viewerState);
 }
 
+/// Draws the stored x-range of @p selection over the current ImPlot plot and
+/// lets the user left-drag horizontally to choose a new one. Call between
+/// ImPlot::BeginPlot() and ImPlot::EndPlot(), after plotting the data.
+/// Returns true on the frame a new range is committed to @p selection.
+bool updateHistogramRangeSelection(HistogramRangeSelectionState &selection)
+{
+    constexpr float kMinimumDragPixels = 3.0f;
+    const ImVec2 plotPos = ImPlot::GetPlotPos();
+    const ImVec2 plotSize = ImPlot::GetPlotSize();
+    const float plotMinX = plotPos.x;
+    const float plotMaxX = plotPos.x + plotSize.x;
+    const float plotMinY = plotPos.y;
+    const float plotMaxY = plotPos.y + plotSize.y;
+    const auto clampPlotX = [&](float value) {
+        return std::clamp(value, plotMinX, plotMaxX);
+    };
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+
+    if (selection.hasSelectedRange)
+    {
+        const ImVec2 minPixel =
+            ImPlot::PlotToPixels(ImPlotPoint(double(selection.selectedMin), 0.0));
+        const ImVec2 maxPixel =
+            ImPlot::PlotToPixels(ImPlotPoint(double(selection.selectedMax), 0.0));
+        const float leftX = clampPlotX(std::min(minPixel.x, maxPixel.x));
+        const float rightX = clampPlotX(std::max(minPixel.x, maxPixel.x));
+        drawList->AddRectFilled(ImVec2(leftX, plotMinY), ImVec2(rightX, plotMaxY),
+                                IM_COL32(80, 160, 255, 50));
+        drawList->AddRect(ImVec2(leftX, plotMinY), ImVec2(rightX, plotMaxY),
+                          IM_COL32(80, 160, 255, 220));
+    }
+
+    if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        selection.dragActive = true;
+        selection.dragStartX = clampPlotX(ImGui::GetIO().MousePos.x);
+    }
+
+    if (!selection.dragActive)
+    {
+        return false;
+    }
+
+    const float dragCurrentX = clampPlotX(ImGui::GetIO().MousePos.x);
+    const float minPixelX = std::min(selection.dragStartX, dragCurrentX);
+    const float maxPixelX = std::max(selection.dragStartX, dragCurrentX);
+    const bool dragIsLongEnough = maxPixelX - minPixelX > kMinimumDragPixels;
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    {
+        if (dragIsLongEnough)
+        {
+            drawList->AddRectFilled(ImVec2(minPixelX, plotMinY), ImVec2(maxPixelX, plotMaxY),
+                                    IM_COL32(80, 160, 255, 40));
+            drawList->AddRect(ImVec2(minPixelX, plotMinY), ImVec2(maxPixelX, plotMaxY),
+                              IM_COL32(80, 160, 255, 220));
+        }
+        return false;
+    }
+
+    selection.dragActive = false;
+    if (!dragIsLongEnough)
+    {
+        return false;
+    }
+    selection.selectedMin = float(ImPlot::PixelsToPlot(ImVec2(minPixelX, plotPos.y)).x);
+    selection.selectedMax = float(ImPlot::PixelsToPlot(ImVec2(maxPixelX, plotPos.y)).x);
+    selection.hasSelectedRange = true;
+    return true;
+}
+
 void drawBondOrderBasedBondsPanel(ViewerState &viewerState,
                                   ParticleSystem &particleSystem,
                                   bool isTwoDimensional)
@@ -815,7 +885,7 @@ void drawBondOrderBasedBondsPanel(ViewerState &viewerState,
         return;
     }
 
-    BondOrderBasedBondInteractionState &interaction =
+    HistogramRangeSelectionState &interaction =
         viewerState.bondOrderBasedBondInteraction;
 
     ImGui::Text("Neighbor pairs: %zu", cache.pairCount);
@@ -841,76 +911,14 @@ void drawBondOrderBasedBondsPanel(ViewerState &viewerState,
                          static_cast<int>(cache.binCounts.size()),
                          binWidth * 0.95);
 
-        const ImVec2 plotPos = ImPlot::GetPlotPos();
-        const ImVec2 plotSize = ImPlot::GetPlotSize();
-        const float plotMinX = plotPos.x;
-        const float plotMaxX = plotPos.x + plotSize.x;
-        const float plotMinY = plotPos.y;
-        const float plotMaxY = plotPos.y + plotSize.y;
-        const auto clampPlotX = [&](float value) {
-            return std::clamp(value, plotMinX, plotMaxX);
-        };
-
-        if (interaction.hasSelectedRange)
+        if (updateHistogramRangeSelection(interaction))
         {
-            const ImPlotPoint minPoint = ImPlotPoint(double(interaction.selectedMin), 0.0);
-            const ImPlotPoint maxPoint = ImPlotPoint(double(interaction.selectedMax), 0.0);
-            const ImVec2 minPixel = ImPlot::PlotToPixels(minPoint);
-            const ImVec2 maxPixel = ImPlot::PlotToPixels(maxPoint);
-            const float leftX = clampPlotX(std::min(minPixel.x, maxPixel.x));
-            const float rightX = clampPlotX(std::max(minPixel.x, maxPixel.x));
-            ImDrawList *drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(ImVec2(leftX, plotMinY),
-                                    ImVec2(rightX, plotMaxY),
-                                    IM_COL32(80, 160, 255, 50));
-            drawList->AddRect(ImVec2(leftX, plotMinY),
-                              ImVec2(rightX, plotMaxY),
-                              IM_COL32(80, 160, 255, 220));
-        }
-
-        if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        {
-            interaction.dragActive = true;
-            interaction.dragStartX = clampPlotX(ImGui::GetIO().MousePos.x);
-        }
-
-        if (interaction.dragActive)
-        {
-            const float dragCurrentX = clampPlotX(ImGui::GetIO().MousePos.x);
-            const float minPixelX = std::min(interaction.dragStartX, dragCurrentX);
-            const float maxPixelX = std::max(interaction.dragStartX, dragCurrentX);
-            const float dragDistance = maxPixelX - minPixelX;
-            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
-            {
-                if (dragDistance > 3.0f)
-                {
-                    ImDrawList *drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRectFilled(ImVec2(minPixelX, plotMinY),
-                                            ImVec2(maxPixelX, plotMaxY),
-                                            IM_COL32(80, 160, 255, 40));
-                    drawList->AddRect(ImVec2(minPixelX, plotMinY),
-                                      ImVec2(maxPixelX, plotMaxY),
-                                      IM_COL32(80, 160, 255, 220));
-                }
-            }
-            else
-            {
-                if (dragDistance > 3.0f)
-                {
-                    const ImPlotPoint minPoint =
-                        ImPlot::PixelsToPlot(ImVec2(minPixelX, plotPos.y));
-                    const ImPlotPoint maxPoint =
-                        ImPlot::PixelsToPlot(ImVec2(maxPixelX, plotPos.y));
-                    interaction.selectedMin = std::clamp(float(minPoint.x), -1.0f, 1.0f);
-                    interaction.selectedMax = std::clamp(float(maxPoint.x), -1.0f, 1.0f);
-                    interaction.hasSelectedRange = true;
-                    applyBondOrderBasedBondsFromSelectedRange(viewerState,
-                                                              particleSystem,
-                                                              interaction.selectedMin,
-                                                              interaction.selectedMax);
-                }
-                interaction.dragActive = false;
-            }
+            interaction.selectedMin = std::clamp(interaction.selectedMin, -1.0f, 1.0f);
+            interaction.selectedMax = std::clamp(interaction.selectedMax, -1.0f, 1.0f);
+            applyBondOrderBasedBondsFromSelectedRange(viewerState,
+                                                      particleSystem,
+                                                      interaction.selectedMin,
+                                                      interaction.selectedMax);
         }
 
         ImPlot::EndPlot();
@@ -1002,6 +1010,7 @@ void drawBondOrderScatterPanel(ViewerState &viewerState,
         const bool usePcaMode = bondOrderScatterModeUsesPca(viewerState.bondOrderScatterMode);
         const bool useAveragedValues =
             bondOrderScatterModeUsesAveragedValues(viewerState.bondOrderScatterMode);
+        BondOrderScatterCache &scatterCache = viewerState.bondOrderScatterCache;
         BondOrderScatterData &scatterData =
             getBondOrderScatterData(particleSystem, viewerState);
         const std::string xAxisLabel =
@@ -1037,8 +1046,26 @@ void drawBondOrderScatterPanel(ViewerState &viewerState,
                                  ImPlotFlags_NoLegend | ImPlotFlags_NoBoxSelect))
         {
             ImPlot::SetupAxes(xAxisLabel.c_str(), yAxisLabel.c_str(),
-                              ImPlotAxisFlags_AutoFit,
-                              ImPlotAxisFlags_AutoFit);
+                              ImPlotAxisFlags_None,
+                              ImPlotAxisFlags_None);
+            if (scatterCache.plotLimitsPending && !scatterData.xValues.empty())
+            {
+                const auto paddedLimits = [](float minimum, float maximum) {
+                    const float span = maximum - minimum;
+                    const float padding = span > 1.0e-6f
+                                              ? 0.05f * span
+                                              : 0.05f * bx::max(std::abs(minimum), 1.0f);
+                    return std::array<double, 2>{double(minimum - padding),
+                                                 double(maximum + padding)};
+                };
+                const std::array<double, 2> xLimits =
+                    paddedLimits(scatterData.minX, scatterData.maxX);
+                const std::array<double, 2> yLimits =
+                    paddedLimits(scatterData.minY, scatterData.maxY);
+                ImPlot::SetupAxisLimits(ImAxis_X1, xLimits[0], xLimits[1], ImGuiCond_Always);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, yLimits[0], yLimits[1], ImGuiCond_Always);
+                scatterCache.plotLimitsPending = false;
+            }
             const size_t scatterPointCount = scatterData.xValues.size();
             const bool useLightweightMarkers = scatterPointCount > 10000u;
             ImPlotSpec scatterSpec;
@@ -1053,6 +1080,22 @@ void drawBondOrderScatterPanel(ViewerState &viewerState,
                                 scatterData.yValues.data(),
                                 static_cast<int>(scatterPointCount),
                                 scatterSpec);
+            if (!scatterData.selectedXValues.empty())
+            {
+                ImPlotSpec selectedSpec;
+                selectedSpec.Marker = ImPlotMarker_Circle;
+                selectedSpec.MarkerSize = 3.0f;
+                // No outline: in dense clusters overlapping dark edges hide the fill.
+                const ImVec4 selectedColor(1.0f, 0.85f, 0.1f, 1.0f);
+                selectedSpec.MarkerFillColor = selectedColor;
+                selectedSpec.MarkerLineColor = selectedColor;
+                selectedSpec.LineWeight = 0.0f;
+                ImPlot::PlotScatter("Selected",
+                                    scatterData.selectedXValues.data(),
+                                    scatterData.selectedYValues.data(),
+                                    static_cast<int>(scatterData.selectedXValues.size()),
+                                    selectedSpec);
+            }
 
             const ImVec2 plotPos = ImPlot::GetPlotPos();
             const ImVec2 plotSize = ImPlot::GetPlotSize();
@@ -1220,23 +1263,11 @@ const char *sizeDistributionQuantityLabel(TrajectoryReader::FileType particleFil
                : "Diameter";
 }
 
-SizeDistributionData buildSizeDistributionData(const ParticleSystem &particleSystem,
-                                               TrajectoryReader::FileType particleFileType,
-                                               bool visibleOnly,
-                                               uint16_t requestedBinCount)
+/// Bins @p values into a histogram spanning their range, with summary statistics.
+ValueHistogramData buildValueHistogram(const std::vector<float> &values,
+                                       uint16_t requestedBinCount)
 {
-    SizeDistributionData data;
-
-    std::vector<float> values;
-    values.reserve(particleSystem.particles().size());
-    for (const Particle &particle : particleSystem.particles())
-    {
-        if (visibleOnly && !particle.visible)
-        {
-            continue;
-        }
-        values.push_back(sizeDistributionValue(particle, particleFileType));
-    }
+    ValueHistogramData data;
 
     data.sampleCount = values.size();
     if (values.empty())
@@ -1300,6 +1331,201 @@ SizeDistributionData buildSizeDistributionData(const ParticleSystem &particleSys
 
     data.maxBinCount = *std::max_element(data.binCounts.begin(), data.binCounts.end());
     return data;
+}
+
+ValueHistogramData buildSizeDistributionData(const ParticleSystem &particleSystem,
+                                             TrajectoryReader::FileType particleFileType,
+                                             bool visibleOnly,
+                                             uint16_t requestedBinCount)
+{
+    std::vector<float> values;
+    values.reserve(particleSystem.particles().size());
+    for (const Particle &particle : particleSystem.particles())
+    {
+        if (visibleOnly && !particle.visible)
+        {
+            continue;
+        }
+        values.push_back(sizeDistributionValue(particle, particleFileType));
+    }
+    return buildValueHistogram(values, requestedBinCount);
+}
+
+/// Returns true when @p particle has a value in extra-data column @p column and
+/// passes the visibility filter; the value is written to @p value.
+bool extraParticleDataValue(const Particle &particle, uint16_t column, bool visibleOnly,
+                            float &value)
+{
+    if ((visibleOnly && !particle.visible) || column >= particle.orderParameters.size())
+    {
+        return false;
+    }
+    value = particle.orderParameters[column];
+    return true;
+}
+
+/// Selects every particle whose value in the active extra-data column lies in
+/// the stored range. Replaces the selection unless @p addToSelection is set.
+void selectParticlesInExtraDataRange(ViewerState &viewerState,
+                                     const ParticleSystem &particleSystem,
+                                     bool addToSelection)
+{
+    const HistogramRangeSelectionState &interaction =
+        viewerState.extraParticleDataInteraction;
+    if (!addToSelection)
+    {
+        viewerState.selectedIds.clear();
+    }
+    for (const Particle &particle : particleSystem.particles())
+    {
+        float value = 0.0f;
+        if (extraParticleDataValue(particle, viewerState.extraParticleDataColumn,
+                                   viewerState.extraParticleDataUseVisibleOnly, value)
+            && value >= interaction.selectedMin && value <= interaction.selectedMax)
+        {
+            viewerState.selectedIds.insert(particle.id);
+        }
+    }
+}
+
+void drawExtraParticleDataPanel(ViewerState &viewerState,
+                                const ParticleSystem &particleSystem,
+                                bool &markPickDirty)
+{
+    if (viewerState.orderParameterCount == 0u
+        || !ImGui::CollapsingHeader("Extra particle data"))
+    {
+        return;
+    }
+
+    HistogramRangeSelectionState &interaction = viewerState.extraParticleDataInteraction;
+    if (viewerState.extraParticleDataColumn >= viewerState.orderParameterCount)
+    {
+        viewerState.extraParticleDataColumn = 0u;
+        interaction = {};
+    }
+
+    if (viewerState.orderParameterCount > 1u)
+    {
+        const std::string previewLabel =
+            "Column " + std::to_string(viewerState.extraParticleDataColumn + 1u);
+        if (ImGui::BeginCombo("Data column##ExtraParticleData", previewLabel.c_str()))
+        {
+            for (uint16_t column = 0u; column < viewerState.orderParameterCount; ++column)
+            {
+                const std::string label = "Column " + std::to_string(column + 1u);
+                const bool isSelected = column == viewerState.extraParticleDataColumn;
+                if (ImGui::Selectable(label.c_str(), isSelected) && !isSelected)
+                {
+                    viewerState.extraParticleDataColumn = column;
+                    interaction = {};
+                }
+                if (isSelected)
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+
+    bool useVisibleOnly = viewerState.extraParticleDataUseVisibleOnly;
+    if (ImGui::Checkbox("Visible particles only##ExtraParticleData", &useVisibleOnly))
+    {
+        viewerState.extraParticleDataUseVisibleOnly = useVisibleOnly;
+    }
+
+    int binCount = int(viewerState.extraParticleDataBinCount);
+    if (ImGui::SliderInt("Bins##ExtraParticleData", &binCount, 4, 128))
+    {
+        viewerState.extraParticleDataBinCount = static_cast<uint16_t>(std::clamp(binCount, 4, 128));
+    }
+
+    std::vector<float> values;
+    values.reserve(particleSystem.particles().size());
+    for (const Particle &particle : particleSystem.particles())
+    {
+        float value = 0.0f;
+        if (extraParticleDataValue(particle, viewerState.extraParticleDataColumn,
+                                   viewerState.extraParticleDataUseVisibleOnly, value))
+        {
+            values.push_back(value);
+        }
+    }
+    const ValueHistogramData histogram =
+        buildValueHistogram(values, viewerState.extraParticleDataBinCount);
+    if (histogram.sampleCount == 0u)
+    {
+        interaction.dragActive = false;
+        ImGui::TextDisabled("No particles with data in this column for the current filter.");
+        return;
+    }
+
+    ImGui::Text("Count: %zu", histogram.sampleCount);
+    ImGui::Text("Mean: %.4f | SD: %.4f", histogram.meanValue, histogram.standardDeviation);
+    ImGui::Text("Range: [%.4f, %.4f]", histogram.minValue, histogram.maxValue);
+
+    const float plotWidth = bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
+    if (ImPlot::GetCurrentContext() != nullptr
+        && ImPlot::BeginPlot("##ExtraParticleDataHistogram",
+                             ImVec2(plotWidth, 180.0f),
+                             ImPlotFlags_NoLegend))
+    {
+        const std::string axisLabel =
+            "Column " + std::to_string(viewerState.extraParticleDataColumn + 1u);
+        ImPlot::SetupAxes(axisLabel.c_str(), "Count",
+                          ImPlotAxisFlags_AutoFit,
+                          ImPlotAxisFlags_AutoFit);
+        ImPlot::PlotBars("Count",
+                         histogram.binCenters.data(),
+                         histogram.binCounts.data(),
+                         static_cast<int>(histogram.binCounts.size()),
+                         static_cast<double>(histogram.binWidth) * 0.95);
+
+        if (updateHistogramRangeSelection(interaction))
+        {
+            selectParticlesInExtraDataRange(viewerState, particleSystem,
+                                            ImGui::GetIO().KeyShift);
+            markPickDirty = true;
+        }
+
+        ImPlot::EndPlot();
+    }
+    else
+    {
+        interaction.dragActive = false;
+        std::string overlayText = std::to_string(histogram.sampleCount) + " particles";
+        ImGui::PlotHistogram("##ExtraParticleDataHistogramFallback",
+                             histogram.binCounts.data(),
+                             static_cast<int>(histogram.binCounts.size()),
+                             0, overlayText.c_str(), 0.0f,
+                             bx::max(1.0f, histogram.maxBinCount),
+                             ImVec2(plotWidth, 160.0f));
+    }
+
+    if (interaction.hasSelectedRange)
+    {
+        ImGui::Text("Selected range: [%.4f, %.4f]", interaction.selectedMin,
+                    interaction.selectedMax);
+        if (ImGui::Button("Reselect range##ExtraParticleData"))
+        {
+            selectParticlesInExtraDataRange(viewerState, particleSystem, false);
+            markPickDirty = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Select the particles in this range again, e.g. after changing frame.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear range##ExtraParticleData"))
+        {
+            interaction.hasSelectedRange = false;
+        }
+    }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("Left-drag horizontally in the plot to select particles in that range "
+                        "(Shift adds to the selection).");
+    ImGui::PopTextWrapPos();
 }
 
 BondAngleDistributionData buildBondAngleDistributionData(const ParticleSystem &particleSystem,
@@ -2047,6 +2273,13 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         if (ImGui::Button("Screenshot (p)"))
         {
             viewerState.pendingScreenshotRequest = true;
+            viewerState.pendingScreenshotSmall = false;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Small screenshot (Ctrl+p)"))
+        {
+            viewerState.pendingScreenshotRequest = true;
+            viewerState.pendingScreenshotSmall = true;
         }
         if (ImGui::Checkbox("Enable cut plane", &cutPlaneEnabled))
         {
@@ -2516,6 +2749,11 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 ImGui::EndDisabled();
             }
         }           
+
+        if (viewerState.orderParameterCount > 0u)
+        {
+            drawExtraParticleDataPanel(viewerState, particleSystem, markPickDirty);
+        }
         ImGui::Unindent();
 
         ImGui::Spacing();
@@ -2984,7 +3222,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     static_cast<uint16_t>(std::clamp(binCount, 4, 128));
             }
 
-            const SizeDistributionData sizeDistribution =
+            const ValueHistogramData sizeDistribution =
                 buildSizeDistributionData(particleSystem,
                                           particleFileType,
                                           viewerState.sizeDistributionUseVisibleOnly,
@@ -3181,6 +3419,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 ImGui::Spacing();
                 ImGui::TextUnformatted("Capture");
                 ImGui::BulletText("P: Screenshot");
+                ImGui::BulletText("Ctrl+P: Small screenshot (scales set in cvt.ini)");
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();

@@ -75,6 +75,12 @@ struct BondOrderScatterData
     std::vector<float> yValues;
     std::vector<uint32_t> pointColors;
     std::vector<uint32_t> particleIds;
+    std::vector<float> selectedXValues;
+    std::vector<float> selectedYValues;
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
 };
 
 struct BondOrderScatterCache
@@ -88,6 +94,7 @@ struct BondOrderScatterCache
     uint32_t dataRevision = 0u;
     uint64_t selectedIdsHash = 0u;
     size_t selectedIdsCount = 0u;
+    bool plotLimitsPending = true;
     std::array<bool, kParticlePaletteColorCount> enabledSpecies{};
     BondOrderScatterData data;
 };
@@ -106,13 +113,15 @@ struct BondOrderBasedBondPair
     float value = 0.0f;
 };
 
-struct BondOrderBasedBondInteractionState
+/// State of a drag-to-select x-range on a histogram plot. The range is stored
+/// in plot (data) units; drag positions are in screen pixels.
+struct HistogramRangeSelectionState
 {
     bool dragActive = false;
     float dragStartX = 0.0f;
     bool hasSelectedRange = false;
-    float selectedMin = -1.0f;
-    float selectedMax = 1.0f;
+    float selectedMin = 0.0f;
+    float selectedMax = 0.0f;
 };
 
 struct BondOrderBasedBondHistogramCache
@@ -253,6 +262,12 @@ struct ViewerState
     uint16_t orderParameterCount = 0u;
     bool sizeDistributionUseVisibleOnly = true;
     uint16_t sizeDistributionBinCount = 32u;
+    /// Zero-based index into Particle::orderParameters shown in the
+    /// "Extra particle data" panel.
+    uint16_t extraParticleDataColumn = 0u;
+    bool extraParticleDataUseVisibleOnly = true;
+    uint16_t extraParticleDataBinCount = 32u;
+    HistogramRangeSelectionState extraParticleDataInteraction{};
     bool bondAngleDistributionUseVisibleOnly = true;
     uint16_t bondAngleDistributionBinCount = 36u;
     bool bondOrientationDistributionUseVisibleOnly = true;
@@ -307,6 +322,10 @@ struct ViewerState
     uint32_t cachedPickRevision = 0;
     uint32_t lastPickedId = 0;
     bool pendingScreenshotRequest = false;
+    bool pendingScreenshotSmall = false;
+    float screenshotScale = 1.0f;
+    float screenshotSmallScale = 0.5f;
+    bool screenshotNextToLoadedFile = false;
     ColorMode colorMode = ColorMode::FileDefault;
     AnalysisColorMode analysisColorMode = AnalysisColorMode::Disabled;
     BondOrderScatterMode bondOrderScatterMode = BondOrderScatterMode::PrincipalComponentsQBar;
@@ -321,7 +340,7 @@ struct ViewerState
     BondOrderScatterInteractionState bondOrderScatterInteraction{};
     BondOrderScatterCache bondOrderScatterCache{};
     uint16_t bondOrderBasedBondHistogramBinCount = 64u;
-    BondOrderBasedBondInteractionState bondOrderBasedBondInteraction{};
+    HistogramRangeSelectionState bondOrderBasedBondInteraction{};
     BondOrderBasedBondHistogramCache bondOrderBasedBondHistogramCache{};
     bool mobilityModeEnabled = false;
     bool bondModeEnabled = false;

@@ -386,6 +386,9 @@ constexpr bgfx::ViewId kPickView = 1;
 constexpr bgfx::ViewId kBlitView = 2;
 constexpr bgfx::ViewId kBondDiagramView = 3;
 constexpr bgfx::ViewId kUiView = 4;
+// Views 5 and 6 are used by the structure-factor pipeline.
+constexpr bgfx::ViewId kScreenshotView = 7;
+constexpr bgfx::ViewId kScreenshotBlitView = 8;
 constexpr uint16_t kDefaultArrowSlices = 12;
 constexpr uint16_t kDefaultSphereStacks = 10;
 constexpr uint16_t kDefaultSphereSlices = 10;
@@ -469,6 +472,8 @@ void applyViewerBackgroundClearColor(const ViewerState &viewerState)
     bgfx::setViewClear(kPickView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
                        0x00000000, 1.0f, 0);
     bgfx::setViewClear(kBondDiagramView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                       backgroundColor, 1.0f, 0);
+    bgfx::setViewClear(kScreenshotView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
                        backgroundColor, 1.0f, 0);
 }
 
@@ -1375,6 +1380,7 @@ static void glfw_keyCallback(GLFWwindow *window, int key, int scancode, int acti
             if (action == GLFW_PRESS)
             {
                 state->pendingScreenshotRequest = true;
+                state->pendingScreenshotSmall = (mods & GLFW_MOD_CONTROL) != 0;
             }
             break;
         case GLFW_KEY_SLASH:
@@ -1904,6 +1910,8 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.fileDimensionality = trajectoryReader->dimensionality();
     viewerState.maxSeenParticleTypeIndex = 0u;
     viewerState.orderParameterCount = 0u;
+    viewerState.extraParticleDataColumn = 0u;
+    viewerState.extraParticleDataInteraction = {};
     viewerState.particleTypeVisible.fill(true);
     viewerState.bondOrderScatterTypeEnabled.fill(true);
     viewerState.bondOrderScatterInteraction = {};
@@ -2531,6 +2539,9 @@ int main(int argc, char **argv)
             viewerState.showBox                             = config.showBox;
             viewerState.basicControlsDefaultOpen            = config.basicControlsOpen;
             viewerState.lightingLevelIndex                  = static_cast<uint8_t>(config.lightingLevel);
+            viewerState.screenshotScale                     = config.screenshotScale;
+            viewerState.screenshotSmallScale                = config.screenshotSmallScale;
+            viewerState.screenshotNextToLoadedFile          = config.screenshotNextToLoadedFile;
             viewerState.structureFactorUseGpu               = config.structureFactorUseGpu;
             viewerState.structureFactorSuppressCentralPeak  = config.structureFactorSuppressCentralPeak;
             viewerState.structureFactorBatchModesPerStep    = config.structureFactorCpuModesPerStep;
@@ -2617,6 +2628,7 @@ int main(int argc, char **argv)
         StructureFactorResources structureFactorResources;
         TrajectoryReader::FileType particleFileType = TrajectoryReader::FileType::Sphere;
         PickResources pickResources;
+        OffscreenScreenshot offscreenScreenshot;
         AppProgramHandles gpuResources;
         ImGuiGuard imGuiGuard;
 
@@ -2783,7 +2795,8 @@ int main(int argc, char **argv)
                     (now - lastBackgroundRenderTime) >= kBackgroundFrameIntervalSeconds;
                 const bool requiresImmediateFrame = viewerState.pendingPickReadback
                                                     || viewerState.pendingPickRequest
-                                                    || viewerState.pendingScreenshotRequest;
+                                                    || viewerState.pendingScreenshotRequest
+                                                    || offscreenScreenshot.active();
                 shouldRenderFrame = backgroundFrameDue || requiresImmediateFrame;
                 if (shouldRenderFrame)
                 {
@@ -2955,19 +2968,75 @@ int main(int argc, char **argv)
             ImGuiBgfx::endFrame();
             if (viewerState.pendingScreenshotRequest)
             {
-                const std::string screenshotPath = makeTimestampedScreenshotPath(loadedPath);
-                cvt::log::infof("Screenshot requested: output=%s viewportWidth=%u\n",
+                const std::string screenshotPath = makeTimestampedScreenshotPath(
+                    loadedPath, viewerState.screenshotNextToLoadedFile);
+                const float requestedScale = viewerState.pendingScreenshotSmall
+                                                 ? viewerState.screenshotSmallScale
+                                                 : viewerState.screenshotScale;
+                cvt::log::infof("Screenshot requested: output=%s viewportWidth=%u scale=%g\n",
                                 screenshotPath.c_str(),
-                                static_cast<unsigned>(viewerState.renderViewportWidth));
-                screenshotCallback.queueViewportCrop(screenshotPath,
-                                                     viewerState.renderViewportWidth);
-                bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath.c_str());
+                                static_cast<unsigned>(viewerState.renderViewportWidth),
+                                static_cast<double>(requestedScale));
+                if (requestedScale <= 1.0f)
+                {
+                    // Capture the back buffer and shrink it on the CPU if needed.
+                    screenshotCallback.queueScreenshot(screenshotPath,
+                                                       viewerState.renderViewportWidth,
+                                                       requestedScale);
+                    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath.c_str());
+                }
+                else
+                {
+                    // Re-render the scene offscreen at the larger size.
+                    const float maxScale =
+                        OffscreenScreenshot::maxScale(viewerState.renderViewportWidth,
+                                                      viewerState.renderViewportHeight);
+                    if (requestedScale > maxScale)
+                    {
+                        cvt::log::errorf("Screenshot scale %g exceeds GPU texture limit; "
+                                         "using %g\n",
+                                         static_cast<double>(requestedScale),
+                                         static_cast<double>(maxScale));
+                    }
+                    const float scale = bx::min(requestedScale, maxScale);
+                    const auto scaledSize = [scale](uint16_t size) {
+                        return static_cast<uint16_t>(
+                            bx::max(1.0f, std::round(float(size) * scale)));
+                    };
+                    if (offscreenScreenshot.begin(
+                            screenshotPath, scaledSize(viewerState.renderViewportWidth),
+                            scaledSize(viewerState.renderViewportHeight)))
+                    {
+                        bgfx::setViewRect(kScreenshotView, 0, 0, offscreenScreenshot.width(),
+                                          offscreenScreenshot.height());
+                        bgfx::setViewFrameBuffer(kScreenshotView,
+                                                 offscreenScreenshot.frameBuffer());
+                        bgfx::setViewTransform(kScreenshotView, view, proj);
+                        renderActiveScene(kScreenshotView, gpuResources.mainProgram,
+                                          viewerState, particleFileType, simulationBox,
+                                          sceneTransform, particleSystem, mobilitySystem,
+                                          patchRenderSystems, bondRenderSystems,
+                                          nearestNeighborRenderSystems,
+                                          polygonRenderSystems, false);
+                        if (viewerState.showBox)
+                        {
+                            renderSimulationBoxWireframe(kScreenshotView,
+                                                         gpuResources.lineProgram,
+                                                         lineLayout, simulationBox,
+                                                         sceneTransform);
+                        }
+                        offscreenScreenshot.requestReadback(kScreenshotBlitView);
+                    }
+                }
                 viewerState.pendingScreenshotRequest = false;
+                viewerState.pendingScreenshotSmall = false;
             }
 
             lastSubmittedFrame = bgfx::frame();
+            offscreenScreenshot.poll(lastSubmittedFrame);
         }
 
+        offscreenScreenshot.cancel();
         destroyPickResources(pickResources);
         destroyBondDiagramResources(bondDiagramResources);
         destroyStructureFactorResources(structureFactorResources);

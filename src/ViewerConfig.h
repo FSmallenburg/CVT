@@ -19,6 +19,13 @@ struct ViewerConfig
     bool basicControlsOpen                = false;
     int  lightingLevel                    = 14;
 
+    // Screenshots: image size relative to the render viewport, applied to both
+    // width and height (1 = screen resolution, 0.5 = half, 2 = double).
+    float screenshotScale                 = 1.0f;
+    float screenshotSmallScale            = 0.5f;
+    // false: save in the current working directory; true: next to the loaded file.
+    bool  screenshotNextToLoadedFile      = false;
+
     // Structure-factor computation
     bool     structureFactorUseGpu              = true;
     bool     structureFactorSuppressCentralPeak = true;

@@ -110,7 +110,6 @@ std::vector<double> dominantEigenvector(const std::vector<double> &matrix,
 BondOrderScatterData buildBondOrderScatterData(
     const ParticleSystem &particleSystem,
     const std::array<bool, kParticlePaletteColorCount> &enabledSpecies,
-    const std::unordered_set<uint32_t> &selectedIds,
     bool isTwoDimensional,
     BondOrderScatterMode scatterMode,
     uint8_t xOrder,
@@ -155,11 +154,7 @@ BondOrderScatterData buildBondOrderScatterData(
             data.yValues.push_back(
                 bondOrderComponentValue(analysis, isTwoDimensional, useAveragedValues,
                                         yOrderIndex));
-            std::array<float, 4> pointColor = particle.color;
-            if (selectedIds.contains(particle.id))
-            {
-                pointColor = highlightColor(pointColor);
-            }
+            const std::array<float, 4> &pointColor = particle.color;
             data.pointColors.push_back(
                 ImGui::ColorConvertFloat4ToU32(ImVec4(pointColor[0],
                                                       pointColor[1],
@@ -178,7 +173,7 @@ BondOrderScatterData buildBondOrderScatterData(
     const uint8_t maximumBondOrder = isTwoDimensional ? 6u : 12u;
     const size_t featureCount = size_t(maximumBondOrder - kMinBondOrder + 1u);
     std::vector<double> means(featureCount, 0.0);
-    std::vector<double> centeredFeatures(particleCount * featureCount, 0.0);
+    std::vector<double> covariance(featureCount * featureCount, 0.0);
 
     for (size_t includedIndex = 0u; includedIndex < particleCount; ++includedIndex)
     {
@@ -189,7 +184,6 @@ BondOrderScatterData buildBondOrderScatterData(
             const double value =
                 double(bondOrderComponentValue(analysis, isTwoDimensional,
                                                useAveragedValues, featureIndex));
-            centeredFeatures[includedIndex * featureCount + featureIndex] = value;
             means[featureIndex] += value;
         }
     }
@@ -200,27 +194,30 @@ BondOrderScatterData buildBondOrderScatterData(
         mean *= inverseParticleCount;
     }
 
-    for (size_t includedIndex = 0u; includedIndex < particleCount; ++includedIndex)
-    {
-        for (size_t featureIndex = 0u; featureIndex < featureCount; ++featureIndex)
-        {
-            centeredFeatures[includedIndex * featureCount + featureIndex] -= means[featureIndex];
-        }
-    }
-
-    std::vector<double> covariance(featureCount * featureCount, 0.0);
     const double normalization = particleCount > 1u ? 1.0 / double(particleCount - 1u) : 1.0;
     for (size_t includedIndex = 0u; includedIndex < particleCount; ++includedIndex)
     {
+        const ParticleAnalysisData &analysis = analysisResults[includedParticleIndices[includedIndex]];
         for (size_t row = 0u; row < featureCount; ++row)
         {
-            const double rowValue = centeredFeatures[includedIndex * featureCount + row];
+            const double rowValue = double(bondOrderComponentValue(
+                analysis, isTwoDimensional, useAveragedValues, row));
             for (size_t col = 0u; col < featureCount; ++col)
             {
                 covariance[row * featureCount + col] +=
-                    rowValue * centeredFeatures[includedIndex * featureCount + col]
-                    * normalization;
+                    rowValue * double(bondOrderComponentValue(
+                        analysis, isTwoDimensional, useAveragedValues, col));
             }
+        }
+    }
+
+    for (size_t row = 0u; row < featureCount; ++row)
+    {
+        for (size_t col = 0u; col < featureCount; ++col)
+        {
+            covariance[row * featureCount + col] =
+                (covariance[row * featureCount + col]
+                 - double(particleCount) * means[row] * means[col]) * normalization;
         }
     }
 
@@ -249,10 +246,14 @@ BondOrderScatterData buildBondOrderScatterData(
     {
         double projectedX = 0.0;
         double projectedY = 0.0;
+        const ParticleAnalysisData &analysis =
+            analysisResults[includedParticleIndices[includedIndex]];
         for (size_t featureIndex = 0u; featureIndex < featureCount; ++featureIndex)
         {
             const double centeredValue =
-                centeredFeatures[includedIndex * featureCount + featureIndex];
+                double(bondOrderComponentValue(analysis, isTwoDimensional,
+                                               useAveragedValues, featureIndex))
+                - means[featureIndex];
             projectedX += centeredValue * firstEigenvector[featureIndex];
             projectedY += centeredValue * secondEigenvector[featureIndex];
         }
@@ -261,11 +262,7 @@ BondOrderScatterData buildBondOrderScatterData(
         const Particle &particle = particles[particleIndex];
         data.xValues.push_back(float(projectedX));
         data.yValues.push_back(float(projectedY));
-        std::array<float, 4> pointColor = particle.color;
-        if (selectedIds.contains(particle.id))
-        {
-            pointColor = highlightColor(pointColor);
-        }
+        const std::array<float, 4> &pointColor = particle.color;
         data.pointColors.push_back(
             ImGui::ColorConvertFloat4ToU32(ImVec4(pointColor[0],
                                                   pointColor[1],
@@ -289,8 +286,7 @@ uint64_t selectedIdSetHash(const std::unordered_set<uint32_t> &selectedIds)
 }
 
 bool cacheMatches(const BondOrderScatterCache &cache,
-                 const ViewerState &viewerState,
-                 uint64_t selectionHash)
+                 const ViewerState &viewerState)
 {
     return cache.valid
            && cache.mode == viewerState.bondOrderScatterMode
@@ -298,9 +294,37 @@ bool cacheMatches(const BondOrderScatterCache &cache,
            && cache.xOrder == viewerState.bondOrderScatterXAxisOrder
            && cache.yOrder == viewerState.bondOrderScatterYAxisOrder
            && cache.dataRevision == viewerState.bondOrderScatterDataRevision
-           && cache.selectedIdsHash == selectionHash
-           && cache.selectedIdsCount == viewerState.selectedIds.size()
            && cache.enabledSpecies == viewerState.bondOrderScatterTypeEnabled;
+}
+
+void updateScatterBounds(BondOrderScatterData &data)
+{
+    if (data.xValues.empty())
+    {
+        return;
+    }
+
+    data.minX = *std::min_element(data.xValues.begin(), data.xValues.end());
+    data.maxX = *std::max_element(data.xValues.begin(), data.xValues.end());
+    data.minY = *std::min_element(data.yValues.begin(), data.yValues.end());
+    data.maxY = *std::max_element(data.yValues.begin(), data.yValues.end());
+}
+
+void updateSelectedScatterData(BondOrderScatterData &data,
+                               const std::unordered_set<uint32_t> &selectedIds)
+{
+    data.selectedXValues.clear();
+    data.selectedYValues.clear();
+    data.selectedXValues.reserve(selectedIds.size());
+    data.selectedYValues.reserve(selectedIds.size());
+    for (size_t pointIndex = 0u; pointIndex < data.particleIds.size(); ++pointIndex)
+    {
+        if (selectedIds.contains(data.particleIds[pointIndex]))
+        {
+            data.selectedXValues.push_back(data.xValues[pointIndex]);
+            data.selectedYValues.push_back(data.yValues[pointIndex]);
+        }
+    }
 }
 
 } // namespace
@@ -366,25 +390,34 @@ BondOrderScatterData &getBondOrderScatterData(const ParticleSystem &particleSyst
 {
     BondOrderScatterCache &cache = viewerState.bondOrderScatterCache;
     const uint64_t selectionHash = selectedIdSetHash(viewerState.selectedIds);
-    if (!cacheMatches(cache, viewerState, selectionHash))
+    bool dataRebuilt = false;
+    if (!cacheMatches(cache, viewerState))
     {
         cache.data = buildBondOrderScatterData(particleSystem,
                                                viewerState.bondOrderScatterTypeEnabled,
-                                               viewerState.selectedIds,
                                                viewerState.fileDimensionality
                                                    == TrajectoryReader::Dimensionality::TwoDimensional,
                                                viewerState.bondOrderScatterMode,
                                                viewerState.bondOrderScatterXAxisOrder,
                                                viewerState.bondOrderScatterYAxisOrder);
+        updateScatterBounds(cache.data);
         cache.valid = true;
         cache.mode = viewerState.bondOrderScatterMode;
         cache.dimensionality = viewerState.fileDimensionality;
         cache.xOrder = viewerState.bondOrderScatterXAxisOrder;
         cache.yOrder = viewerState.bondOrderScatterYAxisOrder;
         cache.dataRevision = viewerState.bondOrderScatterDataRevision;
+        cache.enabledSpecies = viewerState.bondOrderScatterTypeEnabled;
+        cache.plotLimitsPending = true;
+        dataRebuilt = true;
+    }
+    // A rebuild replaces cache.data, which discards the selected-point overlay.
+    if (dataRebuilt || cache.selectedIdsHash != selectionHash
+        || cache.selectedIdsCount != viewerState.selectedIds.size())
+    {
+        updateSelectedScatterData(cache.data, viewerState.selectedIds);
         cache.selectedIdsHash = selectionHash;
         cache.selectedIdsCount = viewerState.selectedIds.size();
-        cache.enabledSpecies = viewerState.bondOrderScatterTypeEnabled;
     }
 
     return cache.data;
