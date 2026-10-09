@@ -152,6 +152,43 @@ TEST_CASE("Disk files are two-dimensional", "[TrajectoryReader]")
     CHECK(particleSystem.particles()[1].position.z == Approx(0.0f));
 }
 
+TEST_CASE("Polygon files: side counts, with 0 meaning a disk", "[TrajectoryReader]")
+{
+    SECTION("Side count 0 (disk) and regular polygons are accepted")
+    {
+        const TemporaryFile file("shapes.gon",
+                                 "2\n"
+                                 "10 10 0\n"
+                                 "A 1 1 0.5 0 0\n"
+                                 "B 3 3 0.5 6 0.3\n");
+        const TrajectoryReader reader(file.path());
+        REQUIRE(reader.isOpen());
+        CHECK(reader.fileType() == TrajectoryReader::FileType::Polygon);
+
+        ParticleSystem particleSystem = makeParticleSystem();
+        SimulationBox box;
+        REQUIRE(reader.loadFrame(0, particleSystem, box));
+        REQUIRE(particleSystem.size() == 2u);
+        CHECK(particleSystem.particles()[0].sizeParams[0] == Approx(0.5f));
+        CHECK(particleSystem.particles()[0].sizeParams[1] == Approx(0.0f));
+        CHECK(particleSystem.particles()[1].sizeParams[1] == Approx(6.0f));
+    }
+
+    SECTION("Side counts of 1 and 2 are rejected")
+    {
+        for (const char *sideCount : {"1", "2", "-1"})
+        {
+            const TemporaryFile file("bad_side_count.gon",
+                                     std::string("1\n10 10 0\nA 1 1 0.5 ") + sideCount + " 0\n");
+            const TrajectoryReader reader(file.path());
+            ParticleSystem particleSystem = makeParticleSystem();
+            SimulationBox box;
+            const bool loaded = reader.isOpen() && reader.loadFrame(0, particleSystem, box);
+            CHECK_FALSE(loaded);
+        }
+    }
+}
+
 TEST_CASE("LAMMPS dumps: bounds, types and diameters", "[TrajectoryReader]")
 {
     const TemporaryFile file("dump.lammpstrj",

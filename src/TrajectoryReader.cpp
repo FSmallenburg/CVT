@@ -1176,9 +1176,12 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 return setParticleError("invalid polygon radius, side count, or angle");
             }
 
-            if (sideCount < 3 || sideCount > std::numeric_limits<uint16_t>::max())
+            // A side count of 0 denotes a disk (a circle of the given radius).
+            if (sideCount != 0
+                && (sideCount < 3 || sideCount > std::numeric_limits<uint16_t>::max()))
             {
-                return setParticleError("polygon side count must be between 3 and 65535");
+                return setParticleError(
+                    "polygon side count must be 0 (disk) or between 3 and 65535");
             }
 
             const float cosine = std::cos(angle);

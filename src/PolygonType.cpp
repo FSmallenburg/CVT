@@ -1,7 +1,8 @@
 #include "PolygonType.h"
 
 PolygonType::PolygonType(const bgfx::VertexLayout &layout, uint16_t sideCount)
-    : m_mesh(Mesh::createRegularPolygon(sideCount, layout))
+    : m_mesh(Mesh::createRegularPolygon(sideCount == 0u ? kDiskSegmentCount : sideCount,
+                                        layout))
 {
     m_parts.push_back(RenderPart{
         .mesh = &m_mesh,

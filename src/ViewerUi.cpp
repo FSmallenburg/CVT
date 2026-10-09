@@ -3,6 +3,7 @@
 #include "BondOrderScatter.h"
 #include "ImGuiBgfx.h"
 #include "Log.h"
+#include "SceneRenderSupport.h"
 
 #include "imgui.h"
 #include <implot.h>
@@ -89,10 +90,15 @@ double computePackingFraction(const ParticleSystem &particleSystem,
         }
         case FileType::Polygon:
         {
-            // Regular n-gon with circumradius r: area = (n * r² * sin(2π/n)) / 2
+            // Regular n-gon with circumradius r: area = (n * r² * sin(2π/n)) / 2;
+            // n = 0 denotes a disk of radius r.
             const double r = static_cast<double>(p.sizeParams[0]);
             const int    n = static_cast<int>(std::round(static_cast<double>(p.sizeParams[1])));
-            if (n >= 3)
+            if (n == 0)
+            {
+                contrib = bx::kPi * r * r;
+            }
+            else if (n >= 3)
             {
                 contrib = 0.5 * n * r * r * std::sin(2.0 * bx::kPi / n);
             }
@@ -1773,7 +1779,8 @@ OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &par
     {
         for (const Particle &particle : particleSystem.particles())
         {
-            if (visibleOnly && !particle.visible)
+            // Disks (side count 0) have no meaningful orientation.
+            if ((visibleOnly && !particle.visible) || polygonSideCount(particle) == 0u)
             {
                 continue;
             }
@@ -3330,11 +3337,16 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 {
                     ImPlot::SetupAxes("Angle (rad)", "Count",
                                       ImPlotAxisFlags_None,
-                                      ImPlotAxisFlags_AutoFit);
+                                      ImPlotAxisFlags_None);
                     ImPlot::SetupAxisLimits(ImAxis_X1,
                                             static_cast<double>(-bx::kPi),
                                             static_cast<double>(bx::kPi),
                                             ImGuiCond_Always);
+                    // Keep the count axis anchored at 0 so the line's shape is not exaggerated.
+                    ImPlot::SetupAxisLimits(
+                        ImAxis_Y1, 0.0,
+                        1.05 * static_cast<double>(bx::max(1.0f, orientationHistogram.maxBinCount)),
+                        ImGuiCond_Always);
                     ImPlot::PlotLine("Count",
                                      orientationHistogram.binCenters.data(),
                                      orientationHistogram.binCounts.data(),

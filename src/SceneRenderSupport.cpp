@@ -538,8 +538,9 @@ void ensurePolygonRenderSystems(const bgfx::VertexLayout &layout,
     std::vector<uint16_t> uniqueSideCounts;
     for (const Particle &particle : particleSystem.particles())
     {
+        // Side count 0 is a disk; 1 and 2 are not valid polygons.
         const uint16_t sideCount = polygonSideCount(particle);
-        if (sideCount < 3u)
+        if (sideCount == 1u || sideCount == 2u)
         {
             continue;
         }

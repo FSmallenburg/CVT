@@ -176,7 +176,8 @@ Rules:
 Rules:
 
 - This will show as regular polygons in 2D. One vertex is always along the positive x-axis.
-- sideCount must be between 3 and 65535.
+- sideCount must be 0 or between 3 and 65535.
+- sideCount 0 draws a disk (circle) of the given radius; its angle is still required but ignored.
 
 ### .voro
 
