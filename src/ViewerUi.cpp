@@ -246,6 +246,12 @@ struct OrientationHistogramData
     float maxBinCount = 0.0f;
     float meanAngle = 0.0f;
     float circularSD = 0.0f;
+    /// False when angles were folded by different symmetries (mixed polygon
+    /// side counts), so no single mean / SD is meaningful.
+    bool hasStatistics = true;
+    /// Histogram x-range: [-π, π], or [0, 2π/n] when folded by symmetry n.
+    float domainMin = -bx::kPi;
+    float domainMax = bx::kPi;
     size_t sampleCount = 0u;
 };
 
@@ -1766,25 +1772,34 @@ BondOrientationDistributionData buildBondOrientationDistributionData(
 OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &particleSystem,
                                                        TrajectoryReader::FileType particleFileType,
                                                        bool visibleOnly,
+                                                       bool reduceBySymmetry,
                                                        uint16_t requestedBinCount)
 {
     using FileType = TrajectoryReader::FileType;
 
     OrientationHistogramData data;
 
-    std::vector<float> angles;
-    angles.reserve(particleSystem.particles().size());
+    // Each sample's angle and its rotational symmetry order (1 = no folding).
+    struct OrientationSample
+    {
+        float angle;
+        uint16_t symmetryOrder;
+    };
+    std::vector<OrientationSample> samples;
+    samples.reserve(particleSystem.particles().size());
 
     if (particleFileType == FileType::Polygon)
     {
         for (const Particle &particle : particleSystem.particles())
         {
             // Disks (side count 0) have no meaningful orientation.
-            if ((visibleOnly && !particle.visible) || polygonSideCount(particle) == 0u)
+            const uint16_t sideCount = polygonSideCount(particle);
+            if ((visibleOnly && !particle.visible) || sideCount == 0u)
             {
                 continue;
             }
-            angles.push_back(std::atan2(particle.direction.y, particle.direction.x));
+            samples.push_back({std::atan2(particle.direction.y, particle.direction.x),
+                               reduceBySymmetry ? sideCount : uint16_t(1u)});
         }
     }
     else if ((particleFileType == FileType::Patchy2D
@@ -1801,46 +1816,77 @@ OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &par
             }
             // Row-major 3×3: [0]=cos θ, [3]=sin θ
             const auto &m = patchyMeta[i].orientationMatrix;
-            angles.push_back(std::atan2(m[3], m[0]));
+            samples.push_back({std::atan2(m[3], m[0]), uint16_t(1u)});
         }
     }
 
-    data.sampleCount = angles.size();
-    if (angles.empty())
+    data.sampleCount = samples.size();
+    if (samples.empty())
     {
         return data;
     }
 
-    // Circular mean and SD.
-    double sinSum = 0.0;
-    double cosSum = 0.0;
-    for (float angle : angles)
+    uint16_t minimumOrder = samples.front().symmetryOrder;
+    bool mixedOrders = false;
+    for (const OrientationSample &sample : samples)
     {
-        sinSum += std::sin(static_cast<double>(angle));
-        cosSum += std::cos(static_cast<double>(angle));
+        minimumOrder = std::min(minimumOrder, sample.symmetryOrder);
+        mixedOrders = mixedOrders || sample.symmetryOrder != samples.front().symmetryOrder;
     }
-    const double n = static_cast<double>(angles.size());
-    data.meanAngle = static_cast<float>(std::atan2(sinSum / n, cosSum / n));
-    const double R = std::sqrt((sinSum / n) * (sinSum / n) + (cosSum / n) * (cosSum / n));
-    data.circularSD = static_cast<float>(std::sqrt(-2.0 * std::log(std::max(R, 1.0e-10))));
+    const bool folded = minimumOrder > 1u || mixedOrders;
 
-    // Fixed domain [−π, π].
-    constexpr float kDomainMin = -bx::kPi;
-    constexpr float kDomainMax =  bx::kPi;
+    // Circular mean and SD of n * angle, mapped back by 1/n. For n = 1 this is
+    // the usual circular statistics; for n > 1 it respects the folding, so
+    // angles just above 0 and just below 2π/n count as close together.
+    if (mixedOrders)
+    {
+        data.hasStatistics = false;
+    }
+    else
+    {
+        const double order = double(minimumOrder);
+        double sinSum = 0.0;
+        double cosSum = 0.0;
+        for (const OrientationSample &sample : samples)
+        {
+            sinSum += std::sin(order * double(sample.angle));
+            cosSum += std::cos(order * double(sample.angle));
+        }
+        const double n = static_cast<double>(samples.size());
+        double meanAngle = std::atan2(sinSum / n, cosSum / n) / order;
+        if (folded && meanAngle < 0.0)
+        {
+            meanAngle += 2.0 * bx::kPi / order;
+        }
+        data.meanAngle = static_cast<float>(meanAngle);
+        const double R = std::sqrt((sinSum / n) * (sinSum / n) + (cosSum / n) * (cosSum / n));
+        data.circularSD =
+            static_cast<float>(std::sqrt(-2.0 * std::log(std::max(R, 1.0e-10))) / order);
+    }
+
+    // Domain [−π, π], or [0, 2π/n] for the smallest symmetry order n when folding.
+    data.domainMin = folded ? 0.0f : -bx::kPi;
+    data.domainMax = folded ? 2.0f * bx::kPi / float(minimumOrder) : bx::kPi;
     const uint16_t binCount = bx::max<uint16_t>(requestedBinCount, 1u);
-    data.binWidth = (kDomainMax - kDomainMin) / float(binCount);
+    data.binWidth = (data.domainMax - data.domainMin) / float(binCount);
     data.binCounts.assign(binCount, 0.0f);
     data.binCenters.assign(binCount, 0.0f);
 
     for (uint16_t i = 0u; i < binCount; ++i)
     {
-        data.binCenters[i] = kDomainMin + (float(i) + 0.5f) * data.binWidth;
+        data.binCenters[i] = data.domainMin + (float(i) + 0.5f) * data.binWidth;
     }
 
     const float inverseBinWidth = 1.0f / data.binWidth;
-    for (float angle : angles)
+    for (const OrientationSample &sample : samples)
     {
-        int binIndex = static_cast<int>((angle - kDomainMin) * inverseBinWidth);
+        float angle = sample.angle;
+        if (folded)
+        {
+            const float period = 2.0f * bx::kPi / float(sample.symmetryOrder);
+            angle -= period * std::floor(angle / period);
+        }
+        int binIndex = static_cast<int>((angle - data.domainMin) * inverseBinWidth);
         binIndex = std::clamp(binIndex, 0, int(binCount) - 1);
         data.binCounts[static_cast<size_t>(binIndex)] += 1.0f;
     }
@@ -3308,10 +3354,25 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     static_cast<uint16_t>(std::clamp(binCount, 8, 180));
             }
 
+            const bool isPolygonFile = particleFileType == TrajectoryReader::FileType::Polygon;
+            if (isPolygonFile)
+            {
+                ImGui::Checkbox("Reduce by polygon symmetry##OrientationHistogram",
+                                &viewerState.orientationHistogramReduceBySymmetry);
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("Fold each n-gon's angle into [0, 2\xcf\x80/n), "
+                                      "since rotating it by 2\xcf\x80/n gives the same shape.");
+                }
+            }
+            const bool reduceBySymmetry =
+                isPolygonFile && viewerState.orientationHistogramReduceBySymmetry;
+
             const OrientationHistogramData orientationHistogram =
                 buildOrientationHistogramData(particleSystem,
                                               particleFileType,
                                               viewerState.orientationHistogramUseVisibleOnly,
+                                              reduceBySymmetry,
                                               viewerState.orientationHistogramBinCount);
             if (orientationHistogram.sampleCount == 0u)
             {
@@ -3321,12 +3382,19 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             {
                 constexpr float kRadToDeg = 180.0f / bx::kPi;
                 ImGui::Text("Count: %zu", orientationHistogram.sampleCount);
-                ImGui::Text("Mean angle: %.4f rad (%.1f\xc2\xb0)",
-                            orientationHistogram.meanAngle,
-                            orientationHistogram.meanAngle * kRadToDeg);
-                ImGui::Text("Circular SD: %.4f rad (%.1f\xc2\xb0)",
-                            orientationHistogram.circularSD,
-                            orientationHistogram.circularSD * kRadToDeg);
+                if (orientationHistogram.hasStatistics)
+                {
+                    ImGui::Text("Mean angle: %.4f rad (%.1f\xc2\xb0)",
+                                orientationHistogram.meanAngle,
+                                orientationHistogram.meanAngle * kRadToDeg);
+                    ImGui::Text("Circular SD: %.4f rad (%.1f\xc2\xb0)",
+                                orientationHistogram.circularSD,
+                                orientationHistogram.circularSD * kRadToDeg);
+                }
+                else
+                {
+                    ImGui::TextDisabled("Mean / SD not shown: polygons have different side counts.");
+                }
 
                 const float plotWidth =
                     bx::max(1.0f, ImGui::GetContentRegionAvail().x - 6.0f);
@@ -3335,12 +3403,14 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                          ImVec2(plotWidth, 180.0f),
                                          ImPlotFlags_NoLegend))
                 {
-                    ImPlot::SetupAxes("Angle (rad)", "Count",
+                    ImPlot::SetupAxes(reduceBySymmetry ? "Angle mod 2\xcf\x80/n (rad)"
+                                                       : "Angle (rad)",
+                                      "Count",
                                       ImPlotAxisFlags_None,
                                       ImPlotAxisFlags_None);
                     ImPlot::SetupAxisLimits(ImAxis_X1,
-                                            static_cast<double>(-bx::kPi),
-                                            static_cast<double>(bx::kPi),
+                                            static_cast<double>(orientationHistogram.domainMin),
+                                            static_cast<double>(orientationHistogram.domainMax),
                                             ImGuiCond_Always);
                     // Keep the count axis anchored at 0 so the line's shape is not exaggerated.
                     ImPlot::SetupAxisLimits(

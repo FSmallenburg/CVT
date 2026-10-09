@@ -274,6 +274,8 @@ struct ViewerState
     uint16_t bondOrientationDistributionBinCount = 36u;
     bool orientationHistogramUseVisibleOnly = true;
     uint16_t orientationHistogramBinCount = 36u;
+    /// Fold polygon angles into [0, 2π/n) for side count n (polygon files only).
+    bool orientationHistogramReduceBySymmetry = true;
     std::unordered_set<uint32_t> selectedIds;
     // Per-particle color overrides applied to individually colored particles.
     std::unordered_map<uint32_t, std::array<float, 4>> particleColorOverrides;

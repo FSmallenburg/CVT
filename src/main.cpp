@@ -1912,6 +1912,8 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.orderParameterCount = 0u;
     viewerState.extraParticleDataColumn = 0u;
     viewerState.extraParticleDataInteraction = {};
+    viewerState.orientationHistogramReduceBySymmetry =
+        trajectoryReader->fileType() == TrajectoryReader::FileType::Polygon;
     viewerState.particleTypeVisible.fill(true);
     viewerState.bondOrderScatterTypeEnabled.fill(true);
     viewerState.bondOrderScatterInteraction = {};
