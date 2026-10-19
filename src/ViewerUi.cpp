@@ -1,5 +1,6 @@
 #include "ViewerUi.h"
 
+#include "AnalysisSupport.h"
 #include "BondOrderScatter.h"
 #include "ImGuiBgfx.h"
 #include "Log.h"
@@ -3357,12 +3358,32 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             const bool isPolygonFile = particleFileType == TrajectoryReader::FileType::Polygon;
             if (isPolygonFile)
             {
-                ImGui::Checkbox("Reduce by polygon symmetry##OrientationHistogram",
-                                &viewerState.orientationHistogramReduceBySymmetry);
+                if (ImGui::Checkbox("Reduce by polygon symmetry##OrientationHistogram",
+                                    &viewerState.orientationHistogramReduceBySymmetry))
+                {
+                    // Orientation colors use the same folding.
+                    markColorDependentHelperSystemsDirty(viewerState);
+                }
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::SetTooltip("Fold each n-gon's angle into [0, 2\xcf\x80/n), "
                                       "since rotating it by 2\xcf\x80/n gives the same shape.");
+                }
+
+                const bool coloringByOrientation = viewerState.colorMode == ColorMode::Orientation;
+                if (ImGui::Button(coloringByOrientation
+                                      ? "Restore file colors##OrientationHistogram"
+                                      : "Color particles by orientation##OrientationHistogram"))
+                {
+                    viewerState.colorMode =
+                        coloringByOrientation ? ColorMode::FileDefault : ColorMode::Orientation;
+                    viewerState.frankKasperViewModeEnabled = false;
+                    markColorDependentHelperSystemsDirty(viewerState);
+                }
+                if (ImGui::IsItemHovered() && !coloringByOrientation)
+                {
+                    ImGui::SetTooltip("Hue wheel over the angle shown on the x-axis below; "
+                                      "disks are gray.");
                 }
             }
             const bool reduceBySymmetry =
@@ -3421,6 +3442,36 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                      orientationHistogram.binCenters.data(),
                                      orientationHistogram.binCounts.data(),
                                      static_cast<int>(orientationHistogram.binCounts.size()));
+
+                    // Color key along the x-axis while polygons are colored by
+                    // orientation (only when one symmetry applies to all of them).
+                    if (isPolygonFile && viewerState.colorMode == ColorMode::Orientation
+                        && orientationHistogram.hasStatistics)
+                    {
+                        constexpr int kKeySegments = 64;
+                        constexpr float kKeyHeight = 6.0f;
+                        const float period =
+                            orientationHistogram.domainMax - orientationHistogram.domainMin;
+                        const uint16_t keySideCount = static_cast<uint16_t>(
+                            std::lround(2.0f * bx::kPi / period));
+                        const float plotBottom = ImPlot::GetPlotPos().y + ImPlot::GetPlotSize().y;
+                        ImDrawList *drawList = ImPlot::GetPlotDrawList();
+                        for (int segment = 0; segment < kKeySegments; ++segment)
+                        {
+                            const float x0 = orientationHistogram.domainMin
+                                             + period * float(segment) / kKeySegments;
+                            const float x1 = orientationHistogram.domainMin
+                                             + period * float(segment + 1) / kKeySegments;
+                            const std::array<float, 4> color = polygonOrientationColor(
+                                0.5f * (x0 + x1), keySideCount, reduceBySymmetry);
+                            const float left = ImPlot::PlotToPixels(ImPlotPoint(x0, 0.0)).x;
+                            const float right = ImPlot::PlotToPixels(ImPlotPoint(x1, 0.0)).x;
+                            drawList->AddRectFilled(
+                                ImVec2(left, plotBottom - kKeyHeight), ImVec2(right, plotBottom),
+                                ImGui::ColorConvertFloat4ToU32(
+                                    ImVec4(color[0], color[1], color[2], 1.0f)));
+                        }
+                    }
                     ImPlot::EndPlot();
                 }
                 else

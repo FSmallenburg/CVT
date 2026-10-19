@@ -104,8 +104,7 @@ bool isSphereLikeFileType(TrajectoryReader::FileType fileType);
 bool isPatchyFileType(TrajectoryReader::FileType fileType);
 /// Returns true for file types that use polygon geometry.
 bool isPolygonFileType(TrajectoryReader::FileType fileType);
-/// Returns the number of polygon sides encoded in @p particle.sizeParams.
-uint16_t polygonSideCount(const Particle &particle);
+// polygonSideCount() is declared in Particle.h.
 
 // ── Render-system update and drawing ─────────────────────────────────────────
 

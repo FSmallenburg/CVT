@@ -848,11 +848,6 @@ bool isPolygonFileType(TrajectoryReader::FileType fileType)
     return fileType == TrajectoryReader::FileType::Polygon;
 }
 
-uint16_t polygonSideCount(const Particle &particle)
-{
-    return static_cast<uint16_t>(std::max(0.0f, std::round(particle.sizeParams[1])));
-}
-
 void selectBondedNeighbors(const ParticleSystem &particleSystem,
                            std::unordered_set<uint32_t> &selectedIds)
 {

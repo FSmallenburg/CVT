@@ -5,15 +5,30 @@
 
 #include <unordered_set>
 
+/// How ColorMode::Orientation colors particles of the current type.
+enum class OrientationColorStyle : uint8_t
+{
+    Unsupported,         ///< No orientation; all particles get one color.
+    DirectionComponents, ///< RGB = |direction| components (rods, mobility arrows).
+    PolygonAngle,        ///< Hue wheel over the in-plane angle; folded by the
+                         ///< polygon's n-fold symmetry when enabled in viewerState.
+};
+
+/// Color for a polygon with in-plane @p angle and @p sideCount sides: a hue
+/// wheel over [0, 2π/n) when @p foldBySymmetry is set, else over [0, 2π).
+/// Disks (side count 0) get a neutral gray.
+std::array<float, 4> polygonOrientationColor(float angle, uint16_t sideCount,
+                                             bool foldBySymmetry);
+
 /// Sets per-particle colors on @p particleSystem according to @p colorMode.
 ///
 /// @p statsCache is updated in-place when the mode requires per-frame
-/// statistics (e.g. ParticleSize). @p supportsOrientationMode and
-/// @p uniformUsesOrientation control whether orientation data drives the
-/// Orientation/Uniform modes for the current particle type.
+/// statistics (e.g. ParticleSize). @p orientationStyle selects how the
+/// Orientation mode is drawn for the current particle type, and
+/// @p uniformUsesOrientation makes the Uniform mode use direction colors.
 void applyColorMode(ParticleSystem &particleSystem,
                     ColorMode colorMode,
-                    bool supportsOrientationMode,
+                    OrientationColorStyle orientationStyle,
                     bool uniformUsesOrientation,
                     ParticleColorStatsCache &statsCache,
                     const ViewerState &viewerState);

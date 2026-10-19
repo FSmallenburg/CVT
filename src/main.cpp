@@ -2882,8 +2882,13 @@ int main(int argc, char **argv)
             float sceneTransform[16];
             bx::mtxMul(sceneTransform, sceneTranslateMtx, viewerState.sceneRotation);
 
-            applyColorMode(particleSystem, viewerState.colorMode,
-                           particleFileType == TrajectoryReader::FileType::Rod, false,
+            const OrientationColorStyle orientationStyle =
+                particleFileType == TrajectoryReader::FileType::Rod
+                    ? OrientationColorStyle::DirectionComponents
+                : particleFileType == TrajectoryReader::FileType::Polygon
+                    ? OrientationColorStyle::PolygonAngle
+                    : OrientationColorStyle::Unsupported;
+            applyColorMode(particleSystem, viewerState.colorMode, orientationStyle, false,
                            viewerState.particleColorStatsCache, viewerState);
             applyAnalysisColorMode(particleSystem, viewerState);
             if (viewerState.mobilitySystemDirty)
@@ -2892,7 +2897,8 @@ int main(int argc, char **argv)
                                       simulationBox);
                 viewerState.mobilitySystemDirty = false;
             }
-            applyColorMode(mobilitySystem, viewerState.colorMode, true, true,
+            applyColorMode(mobilitySystem, viewerState.colorMode,
+                           OrientationColorStyle::DirectionComponents, true,
                            viewerState.mobilityColorStatsCache, viewerState);
             applyAnalysisColorMode(mobilitySystem, particleSystem, viewerState);
             updateAuxiliaryRenderSystemsIfNeeded(viewerState, layout, sphereStacks,

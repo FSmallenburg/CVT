@@ -44,3 +44,11 @@ class Particle
         sizeParams[2] = scale;
     }
 };
+
+/// Returns the side count of a polygon (.gon) particle, stored in sizeParams[1];
+/// 0 denotes a disk.
+inline uint16_t polygonSideCount(const Particle &particle)
+{
+    const float rounded = particle.sizeParams[1] + 0.5f;
+    return rounded > 0.0f ? static_cast<uint16_t>(rounded) : uint16_t(0u);
+}

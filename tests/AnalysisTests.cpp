@@ -172,3 +172,82 @@ TEST_CASE("Hexagonal 2D crystal: 6 neighbors and |psi_6| = 1", "[Analysis]")
         CHECK(analysis.bondOrientationalMagnitudes[orderIndex(4)] == Approx(0.0f).margin(1e-4));
     }
 }
+
+TEST_CASE("Polygon orientation colors respect n-fold symmetry", "[Analysis][Color]")
+{
+    const float pentagonPeriod = 2.0f * bx::kPi / 5.0f;
+
+    SECTION("Angles one symmetry period apart get the same color when folding")
+    {
+        const auto base = polygonOrientationColor(0.3f, 5u, true);
+        const auto shifted = polygonOrientationColor(0.3f + 2.0f * pentagonPeriod, 5u, true);
+        const auto negative = polygonOrientationColor(0.3f - pentagonPeriod, 5u, true);
+        for (int channel = 0; channel < 3; ++channel)
+        {
+            CHECK(shifted[channel] == Approx(base[channel]).margin(1e-4));
+            CHECK(negative[channel] == Approx(base[channel]).margin(1e-4));
+        }
+    }
+
+    SECTION("Without folding, the same angles get different colors")
+    {
+        const auto base = polygonOrientationColor(0.3f, 5u, false);
+        const auto shifted = polygonOrientationColor(0.3f + 2.0f * pentagonPeriod, 5u, false);
+        CHECK_FALSE((shifted[0] == Approx(base[0]).margin(1e-3)
+                     && shifted[1] == Approx(base[1]).margin(1e-3)
+                     && shifted[2] == Approx(base[2]).margin(1e-3)));
+    }
+
+    SECTION("Angle 0 is red; half a period is the opposite hue (cyan)")
+    {
+        const auto zero = polygonOrientationColor(0.0f, 6u, true);
+        CHECK(zero[0] == Approx(1.0f));
+        CHECK(zero[1] == Approx(0.0f));
+        CHECK(zero[2] == Approx(0.0f));
+
+        const auto half = polygonOrientationColor(0.5f * 2.0f * bx::kPi / 6.0f, 6u, true);
+        CHECK(half[0] == Approx(0.0f).margin(1e-4));
+        CHECK(half[1] == Approx(1.0f).margin(1e-4));
+        CHECK(half[2] == Approx(1.0f).margin(1e-4));
+    }
+
+    SECTION("Disks are gray")
+    {
+        const auto disk = polygonOrientationColor(1.0f, 0u, true);
+        CHECK(disk[0] == Approx(disk[1]));
+        CHECK(disk[1] == Approx(disk[2]));
+    }
+}
+
+TEST_CASE("Orientation color mode colors polygons by folded angle", "[Analysis][Color]")
+{
+    ParticleSystem particleSystem(nullptr);
+    const float hexagonPeriod = 2.0f * bx::kPi / 6.0f;
+    for (const float angle : {0.2f, 0.2f + hexagonPeriod})
+    {
+        Particle particle;
+        particle.direction = {std::cos(angle), std::sin(angle), 0.0f};
+        particle.sizeParams[1] = 6.0f;
+        particleSystem.addParticle(particle);
+    }
+
+    ViewerState viewerState;
+    ParticleColorStatsCache statsCache;
+
+    viewerState.orientationHistogramReduceBySymmetry = true;
+    applyColorMode(particleSystem, ColorMode::Orientation, OrientationColorStyle::PolygonAngle,
+                   false, statsCache, viewerState);
+    const auto &first = particleSystem.particles()[0].color;
+    const auto &second = particleSystem.particles()[1].color;
+    for (int channel = 0; channel < 3; ++channel)
+    {
+        CHECK(second[channel] == Approx(first[channel]).margin(1e-4));
+    }
+
+    viewerState.orientationHistogramReduceBySymmetry = false;
+    applyColorMode(particleSystem, ColorMode::Orientation, OrientationColorStyle::PolygonAngle,
+                   false, statsCache, viewerState);
+    CHECK_FALSE((particleSystem.particles()[1].color[0] == Approx(particleSystem.particles()[0].color[0]).margin(1e-3)
+                 && particleSystem.particles()[1].color[1] == Approx(particleSystem.particles()[0].color[1]).margin(1e-3)
+                 && particleSystem.particles()[1].color[2] == Approx(particleSystem.particles()[0].color[2]).margin(1e-3)));
+}

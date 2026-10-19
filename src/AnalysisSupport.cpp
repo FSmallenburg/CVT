@@ -168,7 +168,8 @@ std::array<float, 4> resolveParticleColor(const Particle &particle,
                                           ColorMode colorMode,
                                           const ParticleSizeColorStats &particleSizeColorStats,
                                           const std::vector<PatchyParticleData> *patchMetadata,
-                                          bool supportsOrientationMode,
+                                          OrientationColorStyle orientationStyle,
+                                          bool foldPolygonSymmetry,
                                           bool uniformUsesOrientation)
 {
     switch (colorMode)
@@ -181,8 +182,18 @@ std::array<float, 4> resolveParticleColor(const Particle &particle,
         return uniformUsesOrientation ? orientationColor(particle.direction)
                                       : colorFromLetter('A');
     case ColorMode::Orientation:
-        return supportsOrientationMode ? orientationColor(particle.direction)
-                                       : colorFromLetter('A');
+        switch (orientationStyle)
+        {
+        case OrientationColorStyle::DirectionComponents:
+            return orientationColor(particle.direction);
+        case OrientationColorStyle::PolygonAngle:
+            return polygonOrientationColor(
+                std::atan2(particle.direction.y, particle.direction.x),
+                polygonSideCount(particle), foldPolygonSymmetry);
+        case OrientationColorStyle::Unsupported:
+            break;
+        }
+        return colorFromLetter('A');
     case ColorMode::BondCount:
         if (patchMetadata != nullptr && particleIndex < patchMetadata->size())
         {
@@ -433,9 +444,22 @@ void addNeighborRelation(std::vector<NearestNeighborData> &neighbors,
 
 } // namespace
 
+std::array<float, 4> polygonOrientationColor(float angle, uint16_t sideCount,
+                                             bool foldBySymmetry)
+{
+    if (sideCount == 0u)
+    {
+        return {0.6f, 0.6f, 0.6f, 1.0f};
+    }
+
+    const float period = foldBySymmetry ? 2.0f * bx::kPi / float(sideCount) : 2.0f * bx::kPi;
+    const float folded = angle - period * std::floor(angle / period);
+    return hueColor(folded / period);
+}
+
 void applyColorMode(ParticleSystem &particleSystem,
                     ColorMode colorMode,
-                    bool supportsOrientationMode,
+                    OrientationColorStyle orientationStyle,
                     bool uniformUsesOrientation,
                     ParticleColorStatsCache &statsCache,
                     const ViewerState &viewerState)
@@ -494,7 +518,8 @@ void applyColorMode(ParticleSystem &particleSystem,
                                               colorMode,
                                               statsCache.stats,
                                               patchMetadata,
-                                              supportsOrientationMode,
+                                              orientationStyle,
+                                              viewerState.orientationHistogramReduceBySymmetry,
                                               uniformUsesOrientation);
 
         if (colorModeSupportsOverrides(colorMode))
