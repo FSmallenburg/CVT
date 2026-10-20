@@ -169,7 +169,7 @@ std::array<float, 4> resolveParticleColor(const Particle &particle,
                                           const ParticleSizeColorStats &particleSizeColorStats,
                                           const std::vector<PatchyParticleData> *patchMetadata,
                                           OrientationColorStyle orientationStyle,
-                                          bool foldPolygonSymmetry,
+                                          bool foldBySymmetry,
                                           bool uniformUsesOrientation)
 {
     switch (colorMode)
@@ -187,9 +187,21 @@ std::array<float, 4> resolveParticleColor(const Particle &particle,
         case OrientationColorStyle::DirectionComponents:
             return orientationColor(particle.direction);
         case OrientationColorStyle::PolygonAngle:
-            return polygonOrientationColor(
+            return planarOrientationColor(
                 std::atan2(particle.direction.y, particle.direction.x),
-                polygonSideCount(particle), foldPolygonSymmetry);
+                polygonSideCount(particle), foldBySymmetry);
+        case OrientationColorStyle::PatchyPlanarAngle:
+            if (patchMetadata != nullptr && particleIndex < patchMetadata->size()
+                && (*patchMetadata)[particleIndex].planarPlacement)
+            {
+                // Row-major rotation matrix: [0] = cos θ, [3] = sin θ. Planar
+                // patches are evenly spaced, so n patches give n-fold symmetry.
+                const PatchyParticleData &patchData = (*patchMetadata)[particleIndex];
+                return planarOrientationColor(
+                    std::atan2(patchData.orientationMatrix[3], patchData.orientationMatrix[0]),
+                    static_cast<uint16_t>(patchData.bondIds.size()), foldBySymmetry);
+            }
+            break;
         case OrientationColorStyle::Unsupported:
             break;
         }
@@ -444,15 +456,16 @@ void addNeighborRelation(std::vector<NearestNeighborData> &neighbors,
 
 } // namespace
 
-std::array<float, 4> polygonOrientationColor(float angle, uint16_t sideCount,
-                                             bool foldBySymmetry)
+std::array<float, 4> planarOrientationColor(float angle, uint16_t symmetryOrder,
+                                            bool foldBySymmetry)
 {
-    if (sideCount == 0u)
+    if (symmetryOrder == 0u)
     {
         return {0.6f, 0.6f, 0.6f, 1.0f};
     }
 
-    const float period = foldBySymmetry ? 2.0f * bx::kPi / float(sideCount) : 2.0f * bx::kPi;
+    const float period =
+        foldBySymmetry ? 2.0f * bx::kPi / float(symmetryOrder) : 2.0f * bx::kPi;
     const float folded = angle - period * std::floor(angle / period);
     return hueColor(folded / period);
 }

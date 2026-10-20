@@ -12,13 +12,15 @@ enum class OrientationColorStyle : uint8_t
     DirectionComponents, ///< RGB = |direction| components (rods, mobility arrows).
     PolygonAngle,        ///< Hue wheel over the in-plane angle; folded by the
                          ///< polygon's n-fold symmetry when enabled in viewerState.
+    PatchyPlanarAngle,   ///< Same, for 2-D patchy particles, with n = patch count.
+                         ///< Particles whose patches are not in-plane get one color.
 };
 
-/// Color for a polygon with in-plane @p angle and @p sideCount sides: a hue
-/// wheel over [0, 2π/n) when @p foldBySymmetry is set, else over [0, 2π).
-/// Disks (side count 0) get a neutral gray.
-std::array<float, 4> polygonOrientationColor(float angle, uint16_t sideCount,
-                                             bool foldBySymmetry);
+/// Color for a particle with in-plane @p angle and n-fold rotational symmetry
+/// (@p symmetryOrder = n): a hue wheel over [0, 2π/n) when @p foldBySymmetry is
+/// set, else over [0, 2π). Order 0 (no orientation, e.g. disks) gives gray.
+std::array<float, 4> planarOrientationColor(float angle, uint16_t symmetryOrder,
+                                            bool foldBySymmetry);
 
 /// Sets per-particle colors on @p particleSystem according to @p colorMode.
 ///

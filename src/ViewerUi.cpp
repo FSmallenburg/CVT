@@ -1811,13 +1811,17 @@ OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &par
         const auto &patchyMeta = particleSystem.patchyMetadata();
         for (size_t i = 0u; i < particles.size(); ++i)
         {
-            if (visibleOnly && !particles[i].visible)
+            // Particles without patches have no meaningful orientation.
+            const uint16_t patchCount = static_cast<uint16_t>(patchyMeta[i].bondIds.size());
+            if ((visibleOnly && !particles[i].visible) || patchCount == 0u)
             {
                 continue;
             }
-            // Row-major 3×3: [0]=cos θ, [3]=sin θ
+            // Row-major 3×3: [0]=cos θ, [3]=sin θ. Planar patches are evenly
+            // spaced, so n patches give n-fold symmetry.
             const auto &m = patchyMeta[i].orientationMatrix;
-            samples.push_back({std::atan2(m[3], m[0]), uint16_t(1u)});
+            const bool canFold = reduceBySymmetry && patchyMeta[i].planarPlacement;
+            samples.push_back({std::atan2(m[3], m[0]), canFold ? patchCount : uint16_t(1u)});
         }
     }
 
@@ -3355,10 +3359,14 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                     static_cast<uint16_t>(std::clamp(binCount, 8, 180));
             }
 
-            const bool isPolygonFile = particleFileType == TrajectoryReader::FileType::Polygon;
-            if (isPolygonFile)
+            // Polygons (n sides) and 2-D patchy particles (n evenly spaced patches)
+            // have n-fold symmetry, used for folding angles and orientation colors.
+            const bool supportsSymmetry = particleFileType == TrajectoryReader::FileType::Polygon
+                                          || particleFileType == TrajectoryReader::FileType::Patchy
+                                          || particleFileType == TrajectoryReader::FileType::Patchy2D;
+            if (supportsSymmetry)
             {
-                if (ImGui::Checkbox("Reduce by polygon symmetry##OrientationHistogram",
+                if (ImGui::Checkbox("Reduce by particle symmetry##OrientationHistogram",
                                     &viewerState.orientationHistogramReduceBySymmetry))
                 {
                     // Orientation colors use the same folding.
@@ -3366,8 +3374,9 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 }
                 if (ImGui::IsItemHovered())
                 {
-                    ImGui::SetTooltip("Fold each n-gon's angle into [0, 2\xcf\x80/n), "
-                                      "since rotating it by 2\xcf\x80/n gives the same shape.");
+                    ImGui::SetTooltip("Fold each angle into [0, 2\xcf\x80/n) for an n-gon or a particle "
+                                      "with n patches,\nsince rotating it by 2\xcf\x80/n gives the "
+                                      "same particle.");
                 }
 
                 const bool coloringByOrientation = viewerState.colorMode == ColorMode::Orientation;
@@ -3383,11 +3392,11 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 if (ImGui::IsItemHovered() && !coloringByOrientation)
                 {
                     ImGui::SetTooltip("Hue wheel over the angle shown on the x-axis below; "
-                                      "disks are gray.");
+                                      "disks and particles without patches are gray.");
                 }
             }
             const bool reduceBySymmetry =
-                isPolygonFile && viewerState.orientationHistogramReduceBySymmetry;
+                supportsSymmetry && viewerState.orientationHistogramReduceBySymmetry;
 
             const OrientationHistogramData orientationHistogram =
                 buildOrientationHistogramData(particleSystem,
@@ -3414,7 +3423,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 }
                 else
                 {
-                    ImGui::TextDisabled("Mean / SD not shown: polygons have different side counts.");
+                    ImGui::TextDisabled("Mean / SD not shown: particles have different symmetries.");
                 }
 
                 const float plotWidth =
@@ -3445,14 +3454,14 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
 
                     // Color key along the x-axis while polygons are colored by
                     // orientation (only when one symmetry applies to all of them).
-                    if (isPolygonFile && viewerState.colorMode == ColorMode::Orientation
+                    if (supportsSymmetry && viewerState.colorMode == ColorMode::Orientation
                         && orientationHistogram.hasStatistics)
                     {
                         constexpr int kKeySegments = 64;
                         constexpr float kKeyHeight = 6.0f;
                         const float period =
                             orientationHistogram.domainMax - orientationHistogram.domainMin;
-                        const uint16_t keySideCount = static_cast<uint16_t>(
+                        const uint16_t keySymmetryOrder = static_cast<uint16_t>(
                             std::lround(2.0f * bx::kPi / period));
                         const float plotBottom = ImPlot::GetPlotPos().y + ImPlot::GetPlotSize().y;
                         ImDrawList *drawList = ImPlot::GetPlotDrawList();
@@ -3462,8 +3471,8 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                              + period * float(segment) / kKeySegments;
                             const float x1 = orientationHistogram.domainMin
                                              + period * float(segment + 1) / kKeySegments;
-                            const std::array<float, 4> color = polygonOrientationColor(
-                                0.5f * (x0 + x1), keySideCount, reduceBySymmetry);
+                            const std::array<float, 4> color = planarOrientationColor(
+                                0.5f * (x0 + x1), keySymmetryOrder, reduceBySymmetry);
                             const float left = ImPlot::PlotToPixels(ImPlotPoint(x0, 0.0)).x;
                             const float right = ImPlot::PlotToPixels(ImPlotPoint(x1, 0.0)).x;
                             drawList->AddRectFilled(

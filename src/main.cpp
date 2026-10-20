@@ -1913,7 +1913,9 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.extraParticleDataColumn = 0u;
     viewerState.extraParticleDataInteraction = {};
     viewerState.orientationHistogramReduceBySymmetry =
-        trajectoryReader->fileType() == TrajectoryReader::FileType::Polygon;
+        trajectoryReader->fileType() == TrajectoryReader::FileType::Polygon
+        || trajectoryReader->fileType() == TrajectoryReader::FileType::Patchy
+        || trajectoryReader->fileType() == TrajectoryReader::FileType::Patchy2D;
     viewerState.particleTypeVisible.fill(true);
     viewerState.bondOrderScatterTypeEnabled.fill(true);
     viewerState.bondOrderScatterInteraction = {};
@@ -2887,6 +2889,9 @@ int main(int argc, char **argv)
                     ? OrientationColorStyle::DirectionComponents
                 : particleFileType == TrajectoryReader::FileType::Polygon
                     ? OrientationColorStyle::PolygonAngle
+                : particleFileType == TrajectoryReader::FileType::Patchy
+                        || particleFileType == TrajectoryReader::FileType::Patchy2D
+                    ? OrientationColorStyle::PatchyPlanarAngle
                     : OrientationColorStyle::Unsupported;
             applyColorMode(particleSystem, viewerState.colorMode, orientationStyle, false,
                            viewerState.particleColorStatsCache, viewerState);
