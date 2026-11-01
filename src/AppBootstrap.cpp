@@ -1,6 +1,7 @@
 #include "AppBootstrap.h"
 
 #include "ImGuiBgfx.h"
+#include "Version.h"
 #include "ViewerSupport.h"
 
 #if BX_PLATFORM_LINUX
@@ -77,7 +78,7 @@ GlfwWindowHandle createViewerWindow(ViewerState &viewerState,
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GlfwWindowHandle window(
         glfwCreateWindow(kDefaultWindowWidth, kDefaultWindowHeight,
-                         "Colloid Visualization Tool", nullptr, nullptr),
+                         CVT_WINDOW_TITLE, nullptr, nullptr),
         &glfwDestroyWindow);
     if (!window)
     {

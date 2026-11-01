@@ -6,11 +6,13 @@ This page describes the currently supported command-line interface for CVT.
 
 ```bash
 cvt [trajectory_file]
+cvt --version
 ```
 
 ## Arguments
 
 - trajectory_file: Optional path to a trajectory file.
+- --version (or -v): Print the CVT version and exit. The version is also shown in the window title.
 
 If omitted, CVT starts with an empty scene and shows a status message asking you to drop a trajectory file into the window.
 
@@ -26,7 +28,7 @@ If omitted, CVT starts with an empty scene and shows a status message asking you
 
 ## Current limitations
 
-- No long-form flags are currently supported (for example, no --help or --version yet).
+- --version is the only flag; there is no --help yet.
 - If an unsupported extension is supplied, the open status displays the parser error.
 
 ## Validation checklist

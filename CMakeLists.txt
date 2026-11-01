@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
-project(ColloidVisualizationTool DESCRIPTION "Colloid Visualization Tool")
+# Single source of truth for the version: the window title, `cvt --version`, the
+# Windows file properties, and the MSIX package (build-msix.local.ps1) all use it.
+# Keep four components; the Store requires the last one to be 0.
+project(ColloidVisualizationTool VERSION 1.0.3.0 DESCRIPTION "Colloid Visualization Tool")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,6 +13,10 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
                  Debug Release RelWithDebInfo MinSizeRel)
 endif()
+
+# Link the MSVC C/C++ runtime statically so cvt.exe runs without the VC++
+# redistributable (the MSIX package neither ships nor declares it).
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Build only the bgfx library; skip tools, examples, and install targets.
 set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -95,9 +102,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
+configure_file(src/Version.h.in ${CMAKE_BINARY_DIR}/generated/Version.h @ONLY)
+if(WIN32)
+    configure_file(src/cvt.rc.in ${CMAKE_BINARY_DIR}/generated/cvt.rc @ONLY)
+    target_sources(cvt PRIVATE ${CMAKE_BINARY_DIR}/generated/cvt.rc)
+endif()
+
 target_include_directories(cvt PRIVATE
     ${BGFX_DIR}/3rdparty
     ${BGFX_DIR}/examples/common/imgui
+    ${CMAKE_BINARY_DIR}/generated
 )
 
 # On MSVC, skip automatic system discovery: MinGW/MSYS2 packages are unusable with cl.exe.
@@ -134,6 +148,9 @@ if(NOT GLFW_TARGET)
         set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
         set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
         set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        # Keep GLFW headers/CMake files out of `cmake --install` (and the MSIX stage).
+        set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+        set(USE_MSVC_RUNTIME_LIBRARY_DLL OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(glfw3_src)
         set(GLFW_TARGET glfw)
     endif()

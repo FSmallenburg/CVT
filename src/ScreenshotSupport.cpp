@@ -17,6 +17,14 @@
 #include <sstream>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shlobj.h>
+#endif
+
 namespace
 {
 
@@ -71,6 +79,65 @@ bool writePngFile(const char *filePath, uint32_t width, uint32_t height, uint32_
                                                      yflip, &error);
     writer.close();
     return bytesWritten > 0 && error.isOk();
+}
+
+/// Returns the user's Documents folder, or an empty path if it cannot be determined.
+std::filesystem::path documentsDirectory()
+{
+#if defined(_WIN32)
+    PWSTR widePath = nullptr;
+    std::filesystem::path result;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &widePath)))
+    {
+        result = widePath;
+    }
+    CoTaskMemFree(widePath);
+    return result;
+#else
+    const char *home = std::getenv("HOME");
+    if (home == nullptr || *home == '\0')
+    {
+        return {};
+    }
+    std::error_code error;
+    const std::filesystem::path documents = std::filesystem::path(home) / "Documents";
+    return std::filesystem::is_directory(documents, error) ? documents
+                                                           : std::filesystem::path(home);
+#endif
+}
+
+/// Writes the PNG to @p filePath; if that location is not writable (e.g. the
+/// read-only install folder of a Store package), retries in the Documents folder.
+/// Returns the path actually written, or an empty string on failure.
+std::string writePngFileWithFallback(const std::string &filePath, uint32_t width,
+                                     uint32_t height, uint32_t pitch,
+                                     bgfx::TextureFormat::Enum format, const void *data,
+                                     bool yflip)
+{
+    if (writePngFile(filePath.c_str(), width, height, pitch, format, data, yflip))
+    {
+        return filePath;
+    }
+
+    const std::filesystem::path fallbackDirectory = documentsDirectory();
+    if (fallbackDirectory.empty())
+    {
+        return {};
+    }
+    const std::filesystem::path requestedPath(filePath);
+    const std::filesystem::path fallbackPath = fallbackDirectory / requestedPath.filename();
+    if (fallbackPath == requestedPath)
+    {
+        return {};
+    }
+
+    cvt::log::infof("Cannot write %s; saving to Documents folder instead\n", filePath.c_str());
+    const std::string fallback = fallbackPath.string();
+    if (writePngFile(fallback.c_str(), width, height, pitch, format, data, yflip))
+    {
+        return fallback;
+    }
+    return {};
 }
 
 /// One source sample contributing to an output pixel along a single axis.
@@ -269,7 +336,11 @@ void ScreenshotCallback::screenShot(const char *filePath, uint32_t width, uint32
         }
     }
 
-    if (!writePngFile(filePath, imageWidth, imageHeight, imagePitch, format, imageBytes, yflip))
+    const std::string writtenPath =
+        filePath != nullptr ? writePngFileWithFallback(filePath, imageWidth, imageHeight,
+                                                       imagePitch, format, imageBytes, yflip)
+                            : std::string();
+    if (writtenPath.empty())
     {
         cvt::log::errorf("Failed to write screenshot: %s\n",
                          filePath != nullptr ? filePath : "<unknown>");
@@ -279,7 +350,7 @@ void ScreenshotCallback::screenShot(const char *filePath, uint32_t width, uint32
     cvt::log::infof("Saved snapshot (%ux%u): %s\n",
                     static_cast<unsigned>(imageWidth),
                     static_cast<unsigned>(imageHeight),
-                    filePath != nullptr ? filePath : "<unknown>");
+                    writtenPath.c_str());
 }
 
 void ScreenshotCallback::captureBegin(uint32_t, uint32_t, uint32_t, bgfx::TextureFormat::Enum,
@@ -443,11 +514,13 @@ void OffscreenScreenshot::poll(uint32_t submittedFrame)
     }
 
     const bool yflip = bgfx::getCaps()->originBottomLeft;
-    if (writePngFile(m_filePath.c_str(), m_width, m_height, uint32_t(m_width) * 4u,
-                     m_colorFormat, m_readbackData.data(), yflip))
+    const std::string writtenPath =
+        writePngFileWithFallback(m_filePath, m_width, m_height, uint32_t(m_width) * 4u,
+                                 m_colorFormat, m_readbackData.data(), yflip);
+    if (!writtenPath.empty())
     {
         cvt::log::infof("Saved snapshot (%ux%u): %s\n", static_cast<unsigned>(m_width),
-                        static_cast<unsigned>(m_height), m_filePath.c_str());
+                        static_cast<unsigned>(m_height), writtenPath.c_str());
     }
     else
     {

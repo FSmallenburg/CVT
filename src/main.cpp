@@ -22,6 +22,7 @@
 #include "SphereType.h"
 #include "StructureFactor.h"
 #include "TrajectoryReader.h"
+#include "Version.h"
 #include "ViewerSupport.h"
 #include "ViewerUi.h"
 
@@ -2525,6 +2526,12 @@ static void renderSimulationBoxWireframe(bgfx::ViewId viewId,
 
 int main(int argc, char **argv)
 {
+    if (argc > 1 && (std::strcmp(argv[1], "--version") == 0 || std::strcmp(argv[1], "-v") == 0))
+    {
+        std::cout << "Colloid Visualization Tool " << CVT_VERSION << std::endl;
+        return 0;
+    }
+
     ViewerState viewerState;
     ScreenshotCallback screenshotCallback;
     int exitCode = 0;
