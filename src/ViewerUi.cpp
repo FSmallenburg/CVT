@@ -250,6 +250,8 @@ struct OrientationHistogramData
     /// False when angles were folded by different symmetries (mixed polygon
     /// side counts), so no single mean / SD is meaningful.
     bool hasStatistics = true;
+    /// Side / patch count shared by all sampled particles; 0 if they differ.
+    uint16_t commonNaturalOrder = 0u;
     /// Histogram x-range: [-π, π], or [0, 2π/n] when folded by symmetry n.
     float domainMin = -bx::kPi;
     float domainMax = bx::kPi;
@@ -1773,14 +1775,14 @@ BondOrientationDistributionData buildBondOrientationDistributionData(
 OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &particleSystem,
                                                        TrajectoryReader::FileType particleFileType,
                                                        bool visibleOnly,
-                                                       bool reduceBySymmetry,
+                                                       uint16_t symmetrySetting,
                                                        uint16_t requestedBinCount)
 {
     using FileType = TrajectoryReader::FileType;
 
     OrientationHistogramData data;
 
-    // Each sample's angle and its rotational symmetry order (1 = no folding).
+    // Each sample's angle and the symmetry order it is folded by (1 = no folding).
     struct OrientationSample
     {
         float angle;
@@ -1788,6 +1790,21 @@ OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &par
     };
     std::vector<OrientationSample> samples;
     samples.reserve(particleSystem.particles().size());
+
+    // Track whether all particles share one natural order (side / patch count).
+    bool naturalOrderSeen = false;
+    bool naturalOrdersMixed = false;
+    const auto noteNaturalOrder = [&](uint16_t naturalOrder) {
+        if (!naturalOrderSeen)
+        {
+            data.commonNaturalOrder = naturalOrder;
+            naturalOrderSeen = true;
+        }
+        else if (naturalOrder != data.commonNaturalOrder)
+        {
+            naturalOrdersMixed = true;
+        }
+    };
 
     if (particleFileType == FileType::Polygon)
     {
@@ -1799,8 +1816,9 @@ OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &par
             {
                 continue;
             }
+            noteNaturalOrder(sideCount);
             samples.push_back({std::atan2(particle.direction.y, particle.direction.x),
-                               reduceBySymmetry ? sideCount : uint16_t(1u)});
+                               effectiveSymmetryOrder(symmetrySetting, sideCount)});
         }
     }
     else if ((particleFileType == FileType::Patchy2D
@@ -1818,11 +1836,17 @@ OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &par
                 continue;
             }
             // Row-major 3×3: [0]=cos θ, [3]=sin θ. Planar patches are evenly
-            // spaced, so n patches give n-fold symmetry.
+            // spaced, so n patches give n-fold symmetry; otherwise there is none.
             const auto &m = patchyMeta[i].orientationMatrix;
-            const bool canFold = reduceBySymmetry && patchyMeta[i].planarPlacement;
-            samples.push_back({std::atan2(m[3], m[0]), canFold ? patchCount : uint16_t(1u)});
+            const uint16_t naturalOrder = patchyMeta[i].planarPlacement ? patchCount : uint16_t(1u);
+            noteNaturalOrder(naturalOrder);
+            samples.push_back({std::atan2(m[3], m[0]),
+                               effectiveSymmetryOrder(symmetrySetting, naturalOrder)});
         }
+    }
+    if (naturalOrdersMixed)
+    {
+        data.commonNaturalOrder = 0u;
     }
 
     data.sampleCount = samples.size();
@@ -3364,19 +3388,61 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             const bool supportsSymmetry = particleFileType == TrajectoryReader::FileType::Polygon
                                           || particleFileType == TrajectoryReader::FileType::Patchy
                                           || particleFileType == TrajectoryReader::FileType::Patchy2D;
+
+            // Built before the symmetry selector so its "Auto" entry can show the
+            // particles' own side / patch count; a new selection applies next frame.
+            const OrientationHistogramData orientationHistogram =
+                buildOrientationHistogramData(particleSystem,
+                                              particleFileType,
+                                              viewerState.orientationHistogramUseVisibleOnly,
+                                              viewerState.orientationSymmetryOrder,
+                                              viewerState.orientationHistogramBinCount);
+
             if (supportsSymmetry)
             {
-                if (ImGui::Checkbox("Reduce by particle symmetry##OrientationHistogram",
-                                    &viewerState.orientationHistogramReduceBySymmetry))
+                constexpr uint16_t kMaxSelectableSymmetryOrder = 12u;
+                const char *naturalOrderSource =
+                    particleFileType == TrajectoryReader::FileType::Polygon ? "side count"
+                                                                            : "patch count";
+                const auto symmetryLabel = [&](uint16_t order) -> std::string {
+                    if (order != 0u)
+                    {
+                        return order == 1u ? std::string("1-fold (no folding)")
+                                           : std::to_string(order) + "-fold";
+                    }
+                    if (orientationHistogram.commonNaturalOrder != 0u)
+                    {
+                        return "Auto (" + std::to_string(orientationHistogram.commonNaturalOrder)
+                               + "-fold, " + naturalOrderSource + ")";
+                    }
+                    return std::string("Auto (per-particle ") + naturalOrderSource + ")";
+                };
+
+                const std::string previewLabel = symmetryLabel(viewerState.orientationSymmetryOrder);
+                if (ImGui::BeginCombo("Symmetry##OrientationHistogram", previewLabel.c_str()))
                 {
-                    // Orientation colors use the same folding.
-                    markColorDependentHelperSystemsDirty(viewerState);
+                    for (uint16_t order = 0u; order <= kMaxSelectableSymmetryOrder; ++order)
+                    {
+                        const bool isSelected = order == viewerState.orientationSymmetryOrder;
+                        if (ImGui::Selectable(symmetryLabel(order).c_str(), isSelected)
+                            && !isSelected)
+                        {
+                            viewerState.orientationSymmetryOrder = order;
+                            // Orientation colors use the same folding.
+                            markColorDependentHelperSystemsDirty(viewerState);
+                        }
+                        if (isSelected)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
                 }
                 if (ImGui::IsItemHovered())
                 {
-                    ImGui::SetTooltip("Fold each angle into [0, 2\xcf\x80/n) for an n-gon or a particle "
-                                      "with n patches,\nsince rotating it by 2\xcf\x80/n gives the "
-                                      "same particle.");
+                    ImGui::SetTooltip("Angles are taken modulo 2\xcf\x80/n for n-fold symmetry.\n"
+                                      "Auto uses each particle's own %s.",
+                                      naturalOrderSource);
                 }
 
                 const bool coloringByOrientation = viewerState.colorMode == ColorMode::Orientation;
@@ -3395,15 +3461,8 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                       "disks and particles without patches are gray.");
                 }
             }
-            const bool reduceBySymmetry =
-                supportsSymmetry && viewerState.orientationHistogramReduceBySymmetry;
+            const bool foldedAngles = orientationHistogram.domainMin == 0.0f;
 
-            const OrientationHistogramData orientationHistogram =
-                buildOrientationHistogramData(particleSystem,
-                                              particleFileType,
-                                              viewerState.orientationHistogramUseVisibleOnly,
-                                              reduceBySymmetry,
-                                              viewerState.orientationHistogramBinCount);
             if (orientationHistogram.sampleCount == 0u)
             {
                 ImGui::TextDisabled("No particles available for the current filter.");
@@ -3433,7 +3492,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                                          ImVec2(plotWidth, 180.0f),
                                          ImPlotFlags_NoLegend))
                 {
-                    ImPlot::SetupAxes(reduceBySymmetry ? "Angle mod 2\xcf\x80/n (rad)"
+                    ImPlot::SetupAxes(foldedAngles ? "Angle mod 2\xcf\x80/n (rad)"
                                                        : "Angle (rad)",
                                       "Count",
                                       ImPlotAxisFlags_None,
@@ -3472,7 +3531,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                             const float x1 = orientationHistogram.domainMin
                                              + period * float(segment + 1) / kKeySegments;
                             const std::array<float, 4> color = planarOrientationColor(
-                                0.5f * (x0 + x1), keySymmetryOrder, reduceBySymmetry);
+                                0.5f * (x0 + x1), keySymmetryOrder);
                             const float left = ImPlot::PlotToPixels(ImPlotPoint(x0, 0.0)).x;
                             const float right = ImPlot::PlotToPixels(ImPlotPoint(x1, 0.0)).x;
                             drawList->AddRectFilled(

@@ -1913,10 +1913,7 @@ static bool openTrajectoryFile(const std::string &path,
     viewerState.orderParameterCount = 0u;
     viewerState.extraParticleDataColumn = 0u;
     viewerState.extraParticleDataInteraction = {};
-    viewerState.orientationHistogramReduceBySymmetry =
-        trajectoryReader->fileType() == TrajectoryReader::FileType::Polygon
-        || trajectoryReader->fileType() == TrajectoryReader::FileType::Patchy
-        || trajectoryReader->fileType() == TrajectoryReader::FileType::Patchy2D;
+    viewerState.orientationSymmetryOrder = 0u; // automatic: side / patch count
     viewerState.particleTypeVisible.fill(true);
     viewerState.bondOrderScatterTypeEnabled.fill(true);
     viewerState.bondOrderScatterInteraction = {};

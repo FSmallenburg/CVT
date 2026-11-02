@@ -179,9 +179,9 @@ TEST_CASE("Polygon orientation colors respect n-fold symmetry", "[Analysis][Colo
 
     SECTION("Angles one symmetry period apart get the same color when folding")
     {
-        const auto base = planarOrientationColor(0.3f, 5u, true);
-        const auto shifted = planarOrientationColor(0.3f + 2.0f * pentagonPeriod, 5u, true);
-        const auto negative = planarOrientationColor(0.3f - pentagonPeriod, 5u, true);
+        const auto base = planarOrientationColor(0.3f, 5u);
+        const auto shifted = planarOrientationColor(0.3f + 2.0f * pentagonPeriod, 5u);
+        const auto negative = planarOrientationColor(0.3f - pentagonPeriod, 5u);
         for (int channel = 0; channel < 3; ++channel)
         {
             CHECK(shifted[channel] == Approx(base[channel]).margin(1e-4));
@@ -189,10 +189,10 @@ TEST_CASE("Polygon orientation colors respect n-fold symmetry", "[Analysis][Colo
         }
     }
 
-    SECTION("Without folding, the same angles get different colors")
+    SECTION("With 1-fold symmetry (no folding), the same angles get different colors")
     {
-        const auto base = planarOrientationColor(0.3f, 5u, false);
-        const auto shifted = planarOrientationColor(0.3f + 2.0f * pentagonPeriod, 5u, false);
+        const auto base = planarOrientationColor(0.3f, 1u);
+        const auto shifted = planarOrientationColor(0.3f + 2.0f * pentagonPeriod, 1u);
         CHECK_FALSE((shifted[0] == Approx(base[0]).margin(1e-3)
                      && shifted[1] == Approx(base[1]).margin(1e-3)
                      && shifted[2] == Approx(base[2]).margin(1e-3)));
@@ -200,12 +200,12 @@ TEST_CASE("Polygon orientation colors respect n-fold symmetry", "[Analysis][Colo
 
     SECTION("Angle 0 is red; half a period is the opposite hue (cyan)")
     {
-        const auto zero = planarOrientationColor(0.0f, 6u, true);
+        const auto zero = planarOrientationColor(0.0f, 6u);
         CHECK(zero[0] == Approx(1.0f));
         CHECK(zero[1] == Approx(0.0f));
         CHECK(zero[2] == Approx(0.0f));
 
-        const auto half = planarOrientationColor(0.5f * 2.0f * bx::kPi / 6.0f, 6u, true);
+        const auto half = planarOrientationColor(0.5f * 2.0f * bx::kPi / 6.0f, 6u);
         CHECK(half[0] == Approx(0.0f).margin(1e-4));
         CHECK(half[1] == Approx(1.0f).margin(1e-4));
         CHECK(half[2] == Approx(1.0f).margin(1e-4));
@@ -213,7 +213,7 @@ TEST_CASE("Polygon orientation colors respect n-fold symmetry", "[Analysis][Colo
 
     SECTION("Disks are gray")
     {
-        const auto disk = planarOrientationColor(1.0f, 0u, true);
+        const auto disk = planarOrientationColor(1.0f, 0u);
         CHECK(disk[0] == Approx(disk[1]));
         CHECK(disk[1] == Approx(disk[2]));
     }
@@ -234,7 +234,7 @@ TEST_CASE("Orientation color mode colors polygons by folded angle", "[Analysis][
     ViewerState viewerState;
     ParticleColorStatsCache statsCache;
 
-    viewerState.orientationHistogramReduceBySymmetry = true;
+    viewerState.orientationSymmetryOrder = 0u; // automatic: side count
     applyColorMode(particleSystem, ColorMode::Orientation, OrientationColorStyle::PolygonAngle,
                    false, statsCache, viewerState);
     const auto &first = particleSystem.particles()[0].color;
@@ -244,7 +244,7 @@ TEST_CASE("Orientation color mode colors polygons by folded angle", "[Analysis][
         CHECK(second[channel] == Approx(first[channel]).margin(1e-4));
     }
 
-    viewerState.orientationHistogramReduceBySymmetry = false;
+    viewerState.orientationSymmetryOrder = 1u; // no folding
     applyColorMode(particleSystem, ColorMode::Orientation, OrientationColorStyle::PolygonAngle,
                    false, statsCache, viewerState);
     CHECK_FALSE((particleSystem.particles()[1].color[0] == Approx(particleSystem.particles()[0].color[0]).margin(1e-3)
@@ -274,13 +274,13 @@ TEST_CASE("Orientation color mode colors 2D patchy particles by patch symmetry",
     addPatchy(0.4f, false);
 
     ViewerState viewerState;
-    viewerState.orientationHistogramReduceBySymmetry = true;
+    viewerState.orientationSymmetryOrder = 0u; // automatic: patch count
     ParticleColorStatsCache statsCache;
     applyColorMode(particleSystem, ColorMode::Orientation,
                    OrientationColorStyle::PatchyPlanarAngle, false, statsCache, viewerState);
 
     const auto &particles = particleSystem.particles();
-    const auto expected = planarOrientationColor(0.4f, 3u, true);
+    const auto expected = planarOrientationColor(0.4f, 3u);
     for (int channel = 0; channel < 3; ++channel)
     {
         CHECK(particles[0].color[channel] == Approx(expected[channel]).margin(1e-4));
@@ -290,4 +290,44 @@ TEST_CASE("Orientation color mode colors 2D patchy particles by patch symmetry",
     CHECK_FALSE((particles[2].color[0] == Approx(expected[0]).margin(1e-3)
                  && particles[2].color[1] == Approx(expected[1]).margin(1e-3)
                  && particles[2].color[2] == Approx(expected[2]).margin(1e-3)));
+}
+
+TEST_CASE("Symmetry setting: automatic uses the particle's own order, fixed overrides it",
+          "[Analysis][Color]")
+{
+    CHECK(effectiveSymmetryOrder(0u, 4u) == 4u); // auto -> patch / side count
+    CHECK(effectiveSymmetryOrder(2u, 4u) == 2u); // fixed 2-fold overrides 4 patches
+    CHECK(effectiveSymmetryOrder(5u, 4u) == 5u); // even if it does not divide evenly
+    CHECK(effectiveSymmetryOrder(1u, 4u) == 1u); // 1-fold = no folding
+    CHECK(effectiveSymmetryOrder(3u, 0u) == 0u); // no orientation stays unoriented
+
+    // Four-patch particles colored with a fixed 2-fold symmetry: a half turn
+    // gives the same color, a quarter turn (a 4-fold symmetry operation) does not.
+    ParticleSystem particleSystem(nullptr);
+    for (const float angle : {0.3f, 0.3f + bx::kPi, 0.3f + 0.5f * bx::kPi})
+    {
+        particleSystem.addParticle(Particle{});
+        PatchyParticleData patchData;
+        patchData.orientationMatrix = {std::cos(angle), -std::sin(angle), 0.0f,
+                                       std::sin(angle), std::cos(angle), 0.0f,
+                                       0.0f, 0.0f, 1.0f};
+        patchData.planarPlacement = true;
+        patchData.bondIds = {-1, -1, -1, -1};
+        particleSystem.addPatchyMetadata(patchData);
+    }
+
+    ViewerState viewerState;
+    viewerState.orientationSymmetryOrder = 2u;
+    ParticleColorStatsCache statsCache;
+    applyColorMode(particleSystem, ColorMode::Orientation,
+                   OrientationColorStyle::PatchyPlanarAngle, false, statsCache, viewerState);
+
+    const auto &particles = particleSystem.particles();
+    for (int channel = 0; channel < 3; ++channel)
+    {
+        CHECK(particles[1].color[channel] == Approx(particles[0].color[channel]).margin(1e-4));
+    }
+    CHECK_FALSE((particles[2].color[0] == Approx(particles[0].color[0]).margin(1e-3)
+                 && particles[2].color[1] == Approx(particles[0].color[1]).margin(1e-3)
+                 && particles[2].color[2] == Approx(particles[0].color[2]).margin(1e-3)));
 }
