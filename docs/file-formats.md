@@ -206,6 +206,7 @@ Rules:
 Rules:
 
 - Requires coreRadius, cosHalfAngle, capDiameter, and 9 rotation-matrix values.
+- 2D variant: if the box line has only two values (`Lx Ly`), the file is read as 2D and each particle line uses the `.patch` layout instead — `<label> <x> <y> <coreRadius> <cosHalfAngle> <capDiameter> <angle> [bondId ...]`, with no z-coordinate and a rotation angle (radians) instead of the 9 matrix values. Patches are then evenly spaced in the plane, for any patch count.
 - Optional trailing bond ids are integers. The number of these integers indicates the number of patches on the particle
 - For the integers, a value of -1 indicates no bond, otherwise the number indicates a bond to a different particle.
 - Patches are placed evenly around the particle. Not all patch numbers are supported.

@@ -27,6 +27,14 @@ uint16_t effectiveSymmetryOrder(uint16_t symmetrySetting, uint16_t naturalOrder)
 /// circle. Order 0 (no orientation, e.g. disks) gives gray.
 std::array<float, 4> planarOrientationColor(float angle, uint16_t symmetryOrder);
 
+/// Returns the fraction of the box volume (3-D) or area (2-D) covered by the
+/// particles, using each file type's particle shape, or -1 if the box has no
+/// volume / area.
+double computePackingFraction(const ParticleSystem &particleSystem,
+                              const SimulationBox &simulationBox,
+                              TrajectoryReader::FileType fileType,
+                              TrajectoryReader::Dimensionality dimensionality);
+
 /// Sets per-particle colors on @p particleSystem according to @p colorMode.
 ///
 /// @p statsCache is updated in-place when the mode requires per-frame

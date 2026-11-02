@@ -346,6 +346,7 @@ if(CVT_BUILD_TESTS)
 
     add_executable(cvt_tests EXCLUDE_FROM_ALL
         tests/AnalysisTests.cpp
+        tests/PackingFractionTests.cpp
         tests/SimulationBoxTests.cpp
         tests/TrajectoryReaderTests.cpp
         src/AnalysisSupport.cpp
