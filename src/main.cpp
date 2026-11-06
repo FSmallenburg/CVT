@@ -2888,8 +2888,14 @@ int main(int argc, char **argv)
             float sceneTransform[16];
             bx::mtxMul(sceneTransform, sceneTranslateMtx, viewerState.sceneRotation);
 
+            const bool fileIs2D = viewerState.fileDimensionality
+                                  == TrajectoryReader::Dimensionality::TwoDimensional;
             const OrientationColorStyle orientationStyle =
-                particleFileType == TrajectoryReader::FileType::Rod
+                particleFileType == TrajectoryReader::FileType::ActiveSphere
+                    ? (fileIs2D ? OrientationColorStyle::PolarDirectionAngle
+                                : OrientationColorStyle::PolarDirectionGlobe)
+                : particleFileType == TrajectoryReader::FileType::Rod
+                        || particleFileType == TrajectoryReader::FileType::ActiveSphere
                     ? OrientationColorStyle::DirectionComponents
                 : particleFileType == TrajectoryReader::FileType::Polygon
                     ? OrientationColorStyle::PolygonAngle

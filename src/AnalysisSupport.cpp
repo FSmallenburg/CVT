@@ -170,6 +170,7 @@ std::array<float, 4> resolveParticleColor(const Particle &particle,
                                           const std::vector<PatchyParticleData> *patchMetadata,
                                           OrientationColorStyle orientationStyle,
                                           uint16_t symmetrySetting,
+                                          const std::array<float, 9> &globeFrame,
                                           bool uniformUsesOrientation)
 {
     switch (colorMode)
@@ -203,6 +204,24 @@ std::array<float, 4> resolveParticleColor(const Particle &particle,
                                            static_cast<uint16_t>(patchData.bondIds.size())));
             }
             break;
+        case OrientationColorStyle::PolarDirectionAngle:
+            return planarOrientationColor(
+                std::atan2(particle.direction.y, particle.direction.x),
+                effectiveSymmetryOrder(symmetrySetting,
+                                       particle.propulsionMagnitude > 0.0f ? 1u : 0u));
+        case OrientationColorStyle::PolarDirectionGlobe:
+        {
+            if (particle.propulsionMagnitude <= 0.0f)
+            {
+                return globeOrientationColor({0.0f, 0.0f, 0.0f});
+            }
+            const bx::Vec3 &d = particle.direction;
+            const auto row = [&](int r) {
+                return globeFrame[3 * r] * d.x + globeFrame[3 * r + 1] * d.y
+                       + globeFrame[3 * r + 2] * d.z;
+            };
+            return globeOrientationColor({row(0), row(1), row(2)});
+        }
         case OrientationColorStyle::Unsupported:
             break;
         }
@@ -478,6 +497,57 @@ std::array<float, 4> planarOrientationColor(float angle, uint16_t symmetryOrder)
     return hueColor(folded / period);
 }
 
+std::array<float, 4> globeOrientationColor(const bx::Vec3 &local)
+{
+    const float length = bx::length(local);
+    if (length < 1.0e-6f)
+    {
+        return {0.6f, 0.6f, 0.6f, 1.0f};
+    }
+
+    // Lightness spans [0.15, 0.85] rather than [0, 1] so the poles stay
+    // recognisable and do not fight the sphere shading.
+    constexpr float kLightnessHalfRange = 0.35f;
+    const float azimuth = std::atan2(local.y, local.x);
+    const std::array<float, 4> hue = planarOrientationColor(azimuth, 1u);
+    const float axial = std::clamp(local.z / length, -1.0f, 1.0f);
+    const float lightness = 0.5f + kLightnessHalfRange * axial;
+    // Saturation fades toward the poles, where the azimuth is undefined, so the
+    // map stays continuous: +axis is light gray, -axis dark gray.
+    const float saturation = std::sqrt(bx::max(0.0f, 1.0f - axial * axial));
+
+    std::array<float, 4> color = hue;
+    for (int channel = 0; channel < 3; ++channel)
+    {
+        const float base = 0.5f + saturation * (hue[channel] - 0.5f);
+        color[channel] = lightness <= 0.5f
+                             ? base * 2.0f * lightness
+                             : base + (1.0f - base) * (2.0f * lightness - 1.0f);
+    }
+    color[3] = 1.0f;
+    return color;
+}
+
+std::array<float, 9> orientationColorFrame(OrientationColorAxis axis, const float *sceneRotation)
+{
+    switch (axis)
+    {
+    case OrientationColorAxis::X: // azimuth measured from +y toward +z
+        return {0, 1, 0, 0, 0, 1, 1, 0, 0};
+    case OrientationColorAxis::Y: // azimuth measured from +z toward +x
+        return {0, 0, 1, 1, 0, 0, 0, 1, 0};
+    case OrientationColorAxis::View:
+        // Row vectors: v_view_j = sum_i d_i R[4i + j], so frame row j is column j
+        // of R: screen right, screen up, toward the viewer.
+        return {sceneRotation[0], sceneRotation[4], sceneRotation[8],
+                sceneRotation[1], sceneRotation[5], sceneRotation[9],
+                sceneRotation[2], sceneRotation[6], sceneRotation[10]};
+    case OrientationColorAxis::Z:
+        break;
+    }
+    return {1, 0, 0, 0, 1, 0, 0, 0, 1};
+}
+
 double computePackingFraction(const ParticleSystem &particleSystem,
                                const SimulationBox &simulationBox,
                                TrajectoryReader::FileType fileType,
@@ -517,6 +587,13 @@ double computePackingFraction(const ParticleSystem &particleSystem,
         {
             const double r = static_cast<double>(p.sizeParams[0]);
             contrib = bx::kPi * r * r;
+            break;
+        }
+        case FileType::ActiveSphere:
+        {
+            // Disks in 2D files (two-value box line), spheres otherwise.
+            const double r = static_cast<double>(p.sizeParams[0]);
+            contrib = is2D ? bx::kPi * r * r : (4.0 / 3.0) * bx::kPi * r * r * r;
             break;
         }
         case FileType::Rod:
@@ -592,6 +669,8 @@ void applyColorMode(ParticleSystem &particleSystem,
 
     const std::vector<PatchyParticleData> *patchMetadata =
         particleSystem.hasPatchyMetadata() ? &particleSystem.patchyMetadata() : nullptr;
+    const std::array<float, 9> globeFrame =
+        orientationColorFrame(viewerState.orientationColorAxis, viewerState.sceneRotation);
     const std::vector<std::vector<NearestNeighborData>> *neighborLists =
         particleSystem.hasNeighborAnalysis() ? &particleSystem.neighborAnalysis() : nullptr;
     const bool useFrankKasperColoring =
@@ -636,6 +715,7 @@ void applyColorMode(ParticleSystem &particleSystem,
                                               patchMetadata,
                                               orientationStyle,
                                               viewerState.orientationSymmetryOrder,
+                                              globeFrame,
                                               uniformUsesOrientation);
 
         if (colorModeSupportsOverrides(colorMode))

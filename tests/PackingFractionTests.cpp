@@ -58,6 +58,15 @@ TEST_CASE("Packing fraction of spheres and disks", "[Analysis][PackingFraction]"
           == Approx(kExpected2D));
 }
 
+TEST_CASE("Packing fraction of active spheres: spheres in 3D, disks in 2D",
+          "[Analysis][PackingFraction]")
+{
+    CHECK(packingFractionOf("active3d.asph", fourParticles("10 10 10", "0.5 1 0 0", true))
+          == Approx(kExpected3D));
+    CHECK(packingFractionOf("active2d.asph", fourParticles("10 10", "0.5 1 0", false))
+          == Approx(kExpected2D));
+}
+
 TEST_CASE("Packing fraction of patchy particles uses area in 2D", "[Analysis][PackingFraction]")
 {
     SECTION(".ptc in a 3D box counts sphere volumes")

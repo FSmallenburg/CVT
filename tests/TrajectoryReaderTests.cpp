@@ -261,3 +261,91 @@ TEST_CASE("Unknown extensions are rejected", "[TrajectoryReader]")
     CHECK_FALSE(reader.isOpen());
     CHECK_FALSE(reader.error().empty());
 }
+
+TEST_CASE("Active sphere files: propulsion vector, 3D patch and 2D layout",
+          "[TrajectoryReader][Active]")
+{
+    SECTION("3D: unit direction, magnitude and one patch along the propulsion")
+    {
+        const TemporaryFile file("active3d.asph",
+                                 "2\n"
+                                 "10 10 10\n"
+                                 "A 1 2 3 0.5 0 3 4\n"
+                                 "B 4 5 6 0.75 0 0 0\n");
+        const TrajectoryReader reader(file.path());
+        REQUIRE(reader.isOpen());
+        CHECK(reader.fileType() == TrajectoryReader::FileType::ActiveSphere);
+        CHECK(reader.dimensionality() == TrajectoryReader::Dimensionality::ThreeDimensional);
+
+        ParticleSystem particleSystem = makeParticleSystem();
+        SimulationBox box;
+        REQUIRE(reader.loadFrame(0, particleSystem, box));
+        REQUIRE(particleSystem.size() == 2u);
+        const Particle &moving = particleSystem.particles()[0];
+        CHECK(moving.position.z == Approx(3.0f));
+        CHECK(moving.sizeParams[0] == Approx(0.5f));
+        CHECK(moving.propulsionMagnitude == Approx(5.0f));
+        CHECK(moving.direction.x == Approx(0.0f).margin(1e-6));
+        CHECK(moving.direction.y == Approx(0.6f));
+        CHECK(moving.direction.z == Approx(0.8f));
+
+        REQUIRE(particleSystem.hasPatchyMetadata());
+        const PatchyParticleData &patch = particleSystem.patchyMetadata()[0];
+        REQUIRE(patch.bondIds.size() == 1u); // one patch, not bonded
+        CHECK_FALSE(patch.planarPlacement);
+        CHECK(patch.coreRadius == Approx(0.5f));
+        CHECK(patch.capRadius > 0.5f);         // just outside the surface...
+        CHECK(patch.capRadius < 0.5f * 1.1f);  // ...but only slightly
+        // The single reference patch points along +z; the matrix maps it onto
+        // the propulsion direction (third column).
+        CHECK(patch.orientationMatrix[2] == Approx(0.0f).margin(1e-6));
+        CHECK(patch.orientationMatrix[5] == Approx(0.6f));
+        CHECK(patch.orientationMatrix[8] == Approx(0.8f));
+
+        // Zero propulsion: no direction and no patch.
+        CHECK(particleSystem.particles()[1].propulsionMagnitude == Approx(0.0f));
+        CHECK(particleSystem.patchyMetadata()[1].bondIds.empty());
+    }
+
+    SECTION("2D (two-value box line): x y radius px py, no patch metadata")
+    {
+        const TemporaryFile file("active2d.asph",
+                                 "1\n"
+                                 "10 10\n"
+                                 "A 1 2 0.5 0.3 -0.4\n");
+        const TrajectoryReader reader(file.path());
+        REQUIRE(reader.isOpen());
+        CHECK(reader.dimensionality() == TrajectoryReader::Dimensionality::TwoDimensional);
+
+        ParticleSystem particleSystem = makeParticleSystem();
+        SimulationBox box;
+        REQUIRE(reader.loadFrame(0, particleSystem, box));
+        REQUIRE(particleSystem.size() == 1u);
+        const Particle &particle = particleSystem.particles()[0];
+        CHECK(particle.position.x == Approx(1.0f));
+        CHECK(particle.position.y == Approx(2.0f));
+        CHECK(particle.position.z == Approx(0.0f));
+        CHECK(particle.propulsionMagnitude == Approx(0.5f));
+        CHECK(particle.direction.x == Approx(0.6f));
+        CHECK(particle.direction.y == Approx(-0.8f));
+        CHECK(particle.direction.z == Approx(0.0f));
+        CHECK_FALSE(particleSystem.hasPatchyMetadata());
+    }
+
+    SECTION("Wrong number of values is rejected")
+    {
+        for (const char *contents : {
+                 "1\n10 10 10\nA 1 2 3 0.5 1 0\n",     // 3D line missing pz
+                 "1\n10 10 10\nA 1 2 3 0.5 1 0 0 7\n", // 3D line with an extra value
+                 "1\n10 10\nA 1 2 0.5 1 0 0\n",        // 2D line with an extra value
+             })
+        {
+            const TemporaryFile file("bad.asph", contents);
+            const TrajectoryReader reader(file.path());
+            ParticleSystem particleSystem = makeParticleSystem();
+            SimulationBox box;
+            const bool loaded = reader.isOpen() && reader.loadFrame(0, particleSystem, box);
+            CHECK_FALSE(loaded);
+        }
+    }
+}

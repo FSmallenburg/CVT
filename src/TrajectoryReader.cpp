@@ -23,6 +23,23 @@ constexpr float kLegacyPatchyCoreRadius = 0.5f;
 constexpr float kLegacyPatchyInteractionRange = 1.1f;
 constexpr float kLammpsDefaultRadius = 0.5f;
 constexpr float kLammpsDimensionalityEpsilon = 1.0e-5f;
+/// Propulsion marker on 3D active spheres: one patch of half-angle ~26°, whose
+/// cap reaches only slightly beyond the particle surface.
+constexpr float kActiveSpherePatchCosHalfAngle = 0.9f;
+constexpr float kActiveSpherePatchRangeFactor = 1.04f;
+
+/// Row-major rotation matrix that maps the +z axis onto the unit vector @p axis
+/// (its third column is @p axis; the other two complete an orthonormal frame).
+std::array<float, 9> rotationTakingZTo(const bx::Vec3 &axis)
+{
+    const bx::Vec3 reference = std::abs(axis.z) < 0.999f ? bx::Vec3{0.0f, 0.0f, 1.0f}
+                                                          : bx::Vec3{1.0f, 0.0f, 0.0f};
+    const bx::Vec3 xAxis = bx::normalize(bx::cross(reference, axis));
+    const bx::Vec3 yAxis = bx::cross(axis, xAxis);
+    return {xAxis.x, yAxis.x, axis.x,
+            xAxis.y, yAxis.y, axis.y,
+            xAxis.z, yAxis.z, axis.z};
+}
 
 enum class LammpsCoordinateMode
 {
@@ -96,6 +113,10 @@ std::optional<TrajectoryReader::FileType> detectFileType(const std::string &path
     {
         return TrajectoryReader::FileType::OrderedSphere;
     }
+    if (extension == ".asph")
+    {
+        return TrajectoryReader::FileType::ActiveSphere;
+    }
     if (extension == ".lammpstrj")
     {
         return TrajectoryReader::FileType::LammpsTrajectory;
@@ -147,6 +168,7 @@ TrajectoryReader::Dimensionality detectDimensionality(TrajectoryReader::FileType
     case TrajectoryReader::FileType::Sphere:
     case TrajectoryReader::FileType::BondedSphere:
     case TrajectoryReader::FileType::OrderedSphere:
+    case TrajectoryReader::FileType::ActiveSphere: // 2D when the box line has two values
     case TrajectoryReader::FileType::LammpsTrajectory:
     case TrajectoryReader::FileType::Rod:
     case TrajectoryReader::FileType::Cube:
@@ -778,12 +800,12 @@ TrajectoryReader::TrajectoryReader(std::string path) : m_path(std::move(path))
         if (extension.empty())
         {
             m_error = "Unsupported trajectory file extension in " + m_path
-                      + ". Expected one of: .sph, .bsph, .osph, .lammpstrj, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
+                      + ". Expected one of: .sph, .bsph, .osph, .asph, .lammpstrj, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         else
         {
             m_error = "Unsupported trajectory file extension '" + extension + "' in "
-                      + m_path + ". Expected one of: .sph, .bsph, .osph, .lammpstrj, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
+                      + m_path + ". Expected one of: .sph, .bsph, .osph, .asph, .lammpstrj, .dsk, .rod, .cub, .gon, .voro, .ptc, .pat, .patch";
         }
         return;
     }
@@ -1447,6 +1469,53 @@ bool TrajectoryReader::loadFrame(size_t frameIndex, ParticleSystem &particleSyst
                 particleSystem.addParticle(particle);
                 particleSystem.addPatchyMetadata(patchData);
                 continue;
+            }
+            else if (m_fileType == FileType::ActiveSphere)
+            {
+                // Propulsion vector: px py in 2D, px py pz in 3D.
+                bx::Vec3 propulsion{0.0f, 0.0f, 0.0f};
+                if (!(particleStream >> propulsion.x >> propulsion.y)
+                    || (!is2D && !(particleStream >> propulsion.z)))
+                {
+                    return setParticleError(
+                        is2D ? "active sphere particles require a radius and a 2D propulsion "
+                               "vector (px py) after xy"
+                             : "active sphere particles require a radius and a 3D propulsion "
+                               "vector (px py pz) after xyz; for a 2D file (label x y radius "
+                               "px py), give the box line as 'Lx Ly'");
+                }
+                std::string extraToken;
+                if (particleStream >> extraToken)
+                {
+                    return setParticleError(
+                        is2D ? "too many values for a 2D active sphere (label x y radius px py)"
+                             : "too many values for a 3D active sphere (label x y z radius px py "
+                               "pz)");
+                }
+
+                const float magnitude = bx::length(propulsion);
+                particle.propulsionMagnitude = magnitude;
+                particle.direction = magnitude > 1.0e-6f ? propulsion * (1.0f / magnitude)
+                                                         : bx::Vec3{0.0f, 0.0f, 0.0f};
+
+                if (!is2D)
+                {
+                    // Draw the propulsion direction as one small patch: the single
+                    // reference patch points along +z, so the orientation matrix
+                    // maps +z onto the propulsion direction.
+                    PatchyParticleData patchData;
+                    patchData.coreRadius = radius;
+                    patchData.cosHalfAngle = kActiveSpherePatchCosHalfAngle;
+                    patchData.capRadius = kActiveSpherePatchRangeFactor * radius;
+                    if (magnitude > 1.0e-6f)
+                    {
+                        patchData.orientationMatrix = rotationTakingZTo(particle.direction);
+                        patchData.bondIds = {-1};
+                    }
+                    particleSystem.addParticle(particle);
+                    particleSystem.addPatchyMetadata(patchData);
+                    continue;
+                }
             }
         }
 

@@ -24,10 +24,13 @@ struct PatchCapSystem
 
 /// Aggregates all render systems needed to draw patchy-particle geometry:
 /// one cone system for all patches, plus one cap system per distinct half-angle.
+/// For 2D active spheres it also holds the propulsion arrows drawn on top of
+/// the particles (3D active spheres show their propulsion as a single patch).
 struct PatchRenderSystems
 {
     std::unique_ptr<ParticleSystem> coneSystem;
     std::vector<PatchCapSystem> capSystems;
+    std::unique_ptr<ParticleSystem> propulsionArrowSystem;
     uint16_t coneSlices = 0u;   ///< Mesh resolution currently built (0 = not yet built).
     uint16_t capStacks  = 0u;
     uint16_t capSlices  = 0u;
@@ -102,6 +105,9 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
 bool isSphereLikeFileType(TrajectoryReader::FileType fileType);
 /// Returns true for file types that include patchy-particle metadata.
 bool isPatchyFileType(TrajectoryReader::FileType fileType);
+/// Returns true for file types drawn with patches or propulsion markers
+/// (patchy particles and active spheres).
+bool usesPatchRendering(TrajectoryReader::FileType fileType);
 /// Returns true for file types that use polygon geometry.
 bool isPolygonFileType(TrajectoryReader::FileType fileType);
 // polygonSideCount() is declared in Particle.h.

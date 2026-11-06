@@ -1728,6 +1728,20 @@ OrientationHistogramData buildOrientationHistogramData(const ParticleSystem &par
                                effectiveSymmetryOrder(symmetrySetting, sideCount)});
         }
     }
+    else if (particleFileType == FileType::ActiveSphere)
+    {
+        for (const Particle &particle : particleSystem.particles())
+        {
+            // The propulsion direction is polar (1-fold); zero propulsion has none.
+            if ((visibleOnly && !particle.visible) || particle.propulsionMagnitude <= 0.0f)
+            {
+                continue;
+            }
+            noteNaturalOrder(1u);
+            samples.push_back({std::atan2(particle.direction.y, particle.direction.x),
+                               effectiveSymmetryOrder(symmetrySetting, 1u)});
+        }
+    }
     else if ((particleFileType == FileType::Patchy2D
               || particleFileType == FileType::Patchy)
              && particleSystem.hasPatchyMetadata())
@@ -1841,6 +1855,8 @@ const char *particleTypeName(TrajectoryReader::FileType fileType)
         return "disk";
     case TrajectoryReader::FileType::OrderedSphere:
         return "ordered sphere";
+    case TrajectoryReader::FileType::ActiveSphere:
+        return "active sphere";
     case TrajectoryReader::FileType::BondedSphere:
         return "bonded sphere";
     case TrajectoryReader::FileType::Rod:
@@ -2131,6 +2147,30 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             viewerState.colorMode = static_cast<ColorMode>(colorModeIndex);
             viewerState.frankKasperViewModeEnabled = false;
             markColorDependentHelperSystemsDirty(viewerState);
+        }
+
+        // 3-D active spheres: choose the reference axis of the globe colors.
+        if (viewerState.colorMode == ColorMode::Orientation
+            && particleFileType == TrajectoryReader::FileType::ActiveSphere
+            && viewerState.fileDimensionality
+                   != TrajectoryReader::Dimensionality::TwoDimensional)
+        {
+            const char *axisLabels[] = {"x axis", "y axis", "z axis", "View direction"};
+            int axisIndex = static_cast<int>(viewerState.orientationColorAxis);
+            if (ImGui::Combo("Orientation axis", &axisIndex, axisLabels,
+                             static_cast<int>(IM_ARRAYSIZE(axisLabels))))
+            {
+                viewerState.orientationColorAxis = static_cast<OrientationColorAxis>(axisIndex);
+                markColorDependentHelperSystemsDirty(viewerState);
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Hue: direction around the axis (same wheel as 2D).\n"
+                                  "Lightness: light = along +axis, dark = along -axis,\n"
+                                  "fully saturated = perpendicular.\n"
+                                  "View direction: +axis points toward you; colors\n"
+                                  "follow the rotation. Zero propulsion is gray.");
+            }
         }
 
         if (viewerState.maxSeenParticleTypeIndex > 0u)
@@ -3272,7 +3312,8 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
     if (viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional
         && (particleFileType == TrajectoryReader::FileType::Polygon
             || particleFileType == TrajectoryReader::FileType::Patchy2D
-            || particleFileType == TrajectoryReader::FileType::Patchy))
+            || particleFileType == TrajectoryReader::FileType::Patchy
+            || particleFileType == TrajectoryReader::FileType::ActiveSphere))
     {
         ImGui::Spacing();
         if (ImGui::CollapsingHeader("Orientation distribution"))
@@ -3291,10 +3332,12 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
             }
 
             // Polygons (n sides) and 2-D patchy particles (n evenly spaced patches)
-            // have n-fold symmetry, used for folding angles and orientation colors.
+            // have n-fold symmetry, active spheres (polar propulsion) 1-fold; used
+            // for folding angles and orientation colors.
             const bool supportsSymmetry = particleFileType == TrajectoryReader::FileType::Polygon
                                           || particleFileType == TrajectoryReader::FileType::Patchy
-                                          || particleFileType == TrajectoryReader::FileType::Patchy2D;
+                                          || particleFileType == TrajectoryReader::FileType::Patchy2D
+                                          || particleFileType == TrajectoryReader::FileType::ActiveSphere;
 
             // Built before the symmetry selector so its "Auto" entry can show the
             // particles' own side / patch count; a new selection applies next frame.
@@ -3310,7 +3353,9 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 constexpr uint16_t kMaxSelectableSymmetryOrder = 12u;
                 const char *naturalOrderSource =
                     particleFileType == TrajectoryReader::FileType::Polygon ? "side count"
-                                                                            : "patch count";
+                    : particleFileType == TrajectoryReader::FileType::ActiveSphere
+                        ? "polar propulsion"
+                        : "patch count";
                 const auto symmetryLabel = [&](uint16_t order) -> std::string {
                     if (order != 0u)
                     {
@@ -3365,7 +3410,7 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
                 if (ImGui::IsItemHovered() && !coloringByOrientation)
                 {
                     ImGui::SetTooltip("Hue wheel over the angle shown on the x-axis below; "
-                                      "disks and particles without patches are gray.");
+                                      "disks, particles without patches and zero propulsion are gray.");
                 }
             }
             const bool foldedAngles = orientationHistogram.domainMin == 0.0f;

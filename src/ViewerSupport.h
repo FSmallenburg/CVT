@@ -16,6 +16,17 @@
 #include <unordered_set>
 #include <vector>
 
+/// Reference axis for the 3-D "globe" orientation colors (active spheres): hue
+/// is the azimuth around the axis, lightness the component along it. View uses
+/// the camera axis (toward the viewer), so colors follow the scene rotation.
+enum class OrientationColorAxis : uint8_t
+{
+    X,
+    Y,
+    Z,
+    View,
+};
+
 /// Controls how particle colors are assigned each frame.
 enum class ColorMode : uint16_t
 {
@@ -278,6 +289,8 @@ struct ViewerState
     /// histogram and orientation colors: 0 = automatic (each particle's side or
     /// patch count), n >= 1 = n-fold for every particle (1 = no folding).
     uint16_t orientationSymmetryOrder = 0u;
+    /// Reference axis for 3-D polar orientation colors (see OrientationColorAxis).
+    OrientationColorAxis orientationColorAxis = OrientationColorAxis::Z;
     std::unordered_set<uint32_t> selectedIds;
     // Per-particle color overrides applied to individually colored particles.
     std::unordered_map<uint32_t, std::array<float, 4>> particleColorOverrides;

@@ -331,3 +331,61 @@ TEST_CASE("Symmetry setting: automatic uses the particle's own order, fixed over
                  && particles[2].color[1] == Approx(particles[0].color[1]).margin(1e-3)
                  && particles[2].color[2] == Approx(particles[0].color[2]).margin(1e-3)));
 }
+
+TEST_CASE("3D globe orientation colors distinguish opposite directions", "[Analysis][Color]")
+{
+    const auto sameColor = [](const std::array<float, 4> &a, const std::array<float, 4> &b) {
+        return a[0] == Approx(b[0]).margin(1e-3) && a[1] == Approx(b[1]).margin(1e-3)
+               && a[2] == Approx(b[2]).margin(1e-3);
+    };
+
+    SECTION("Equator is fully saturated and matches the 2D hue wheel")
+    {
+        const auto plusX = globeOrientationColor({1.0f, 0.0f, 0.0f});
+        CHECK(sameColor(plusX, planarOrientationColor(0.0f, 1u)));
+        const auto minusX = globeOrientationColor({-1.0f, 0.0f, 0.0f});
+        CHECK(sameColor(minusX, planarOrientationColor(bx::kPi, 1u)));
+        CHECK_FALSE(sameColor(plusX, minusX));
+    }
+
+    SECTION("+axis is light, -axis is dark, zero vector is gray")
+    {
+        const auto up = globeOrientationColor({0.0f, 0.0f, 1.0f});
+        const auto down = globeOrientationColor({0.0f, 0.0f, -1.0f});
+        CHECK(up[0] + up[1] + up[2] > 2.0f);
+        CHECK(down[0] + down[1] + down[2] < 1.0f);
+        CHECK(up[0] == Approx(up[1]).margin(1e-4)); // poles are neutral gray
+        CHECK(down[0] == Approx(down[2]).margin(1e-4));
+        const auto zero = globeOrientationColor({0.0f, 0.0f, 0.0f});
+        CHECK(zero[0] == Approx(zero[1]));
+        CHECK(zero[1] == Approx(zero[2]));
+    }
+
+    SECTION("Axis frames map the chosen axis onto local z")
+    {
+        float identity[16];
+        bx::mtxIdentity(identity);
+        const auto applyFrame = [](const std::array<float, 9> &f, const bx::Vec3 &d) {
+            return bx::Vec3{f[0] * d.x + f[1] * d.y + f[2] * d.z,
+                            f[3] * d.x + f[4] * d.y + f[5] * d.z,
+                            f[6] * d.x + f[7] * d.y + f[8] * d.z};
+        };
+        CHECK(applyFrame(orientationColorFrame(OrientationColorAxis::X, identity),
+                         {1.0f, 0.0f, 0.0f}).z == Approx(1.0f));
+        CHECK(applyFrame(orientationColorFrame(OrientationColorAxis::Y, identity),
+                         {0.0f, 1.0f, 0.0f}).z == Approx(1.0f));
+        CHECK(applyFrame(orientationColorFrame(OrientationColorAxis::Z, identity),
+                         {0.0f, 0.0f, 1.0f}).z == Approx(1.0f));
+
+        // Rotate the scene 90 degrees about y: scene +x now points toward the viewer (+z).
+        float rotation[16];
+        bx::mtxRotateY(rotation, -0.5f * bx::kPi);
+        const bx::Vec3 rotatedX = bx::mul(bx::Vec3{1.0f, 0.0f, 0.0f}, rotation);
+        const bx::Vec3 local = applyFrame(orientationColorFrame(OrientationColorAxis::View, rotation),
+                                          {1.0f, 0.0f, 0.0f});
+        CHECK(local.x == Approx(rotatedX.x).margin(1e-5));
+        CHECK(local.y == Approx(rotatedX.y).margin(1e-5));
+        CHECK(local.z == Approx(rotatedX.z).margin(1e-5));
+        CHECK(std::abs(local.z) == Approx(1.0f).margin(1e-5));
+    }
+}

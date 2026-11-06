@@ -21,6 +21,7 @@ class TrajectoryReader
         Sphere,
         BondedSphere,
         OrderedSphere,
+        ActiveSphere,
       LammpsTrajectory,
         Disk,
         Rod,

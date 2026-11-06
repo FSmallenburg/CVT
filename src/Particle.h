@@ -16,8 +16,11 @@ class Particle
     bx::Vec3 position{0.0f, 0.0f, 0.0f};
     /// Euler-angle rotation (radians, ZXZ convention) — used by some file formats.
     bx::Vec3 rotation{0.0f, 0.0f, 0.0f};
-    /// Unit direction vector, used by rods and disks (principal axis).
+    /// Unit direction vector, used by rods and disks (principal axis), and the
+    /// propulsion direction of active spheres.
     bx::Vec3 direction{0.0f, 0.0f, 1.0f};
+    /// Length of the propulsion vector of an active sphere (`.asph`); 0 otherwise.
+    float propulsionMagnitude = 0.0f;
     /// Row-major 3×3 orientation matrix, used when hasOrientationMatrix is true.
     std::array<float, 9> orientationMatrix{1.0f, 0.0f, 0.0f,
                                            0.0f, 1.0f, 0.0f,

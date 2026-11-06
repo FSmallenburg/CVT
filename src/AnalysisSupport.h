@@ -14,6 +14,10 @@ enum class OrientationColorStyle : uint8_t
                          ///< symmetry chosen in viewerState.orientationSymmetryOrder.
     PatchyPlanarAngle,   ///< Same, for 2-D patchy particles (natural order = patch
                          ///< count). Particles whose patches are not in-plane get one color.
+    PolarDirectionAngle, ///< Same, for 2-D active spheres: the propulsion direction is
+                         ///< polar (natural order 1, full circle). Zero propulsion is gray.
+    PolarDirectionGlobe, ///< 3-D active spheres: globe colors (see globeOrientationColor)
+                         ///< around viewerState.orientationColorAxis. Zero propulsion is gray.
 };
 
 /// Symmetry order to fold a particle's in-plane angle by. @p symmetrySetting is
@@ -26,6 +30,20 @@ uint16_t effectiveSymmetryOrder(uint16_t symmetrySetting, uint16_t naturalOrder)
 /// (@p symmetryOrder = n): a hue wheel over [0, 2π/n), so order 1 spans the full
 /// circle. Order 0 (no orientation, e.g. disks) gives gray.
 std::array<float, 4> planarOrientationColor(float angle, uint16_t symmetryOrder);
+
+/// "Globe" color for a 3-D unit direction @p local, expressed in a frame whose
+/// z-axis is the reference axis: hue = azimuth atan2(y, x) (same wheel as
+/// planarOrientationColor), lightness from z (+axis light gray, -axis dark gray,
+/// equator fully saturated; saturation fades toward the poles so the map is
+/// continuous). Distinct directions get distinct colors. A zero vector gives gray.
+std::array<float, 4> globeOrientationColor(const bx::Vec3 &local);
+
+/// Rows of the 3x3 frame (row-major) that maps a scene direction d onto the
+/// frame used by globeOrientationColor: local = (row0·d, row1·d, row2·d).
+/// For OrientationColorAxis::View this uses @p sceneRotation (bx row-vector
+/// convention, camera on +z looking at the origin, y up).
+std::array<float, 9> orientationColorFrame(OrientationColorAxis axis,
+                                           const float *sceneRotation);
 
 /// Returns the fraction of the box volume (3-D) or area (2-D) covered by the
 /// particles, using each file type's particle shape, or -1 if the box has no

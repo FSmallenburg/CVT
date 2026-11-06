@@ -11,6 +11,7 @@ If a pull request changes extension detection or parsing behavior in `src/Trajec
 - .sph: Sphere
 - .bsph: Bonded sphere
 - .osph: Ordered sphere
+- .asph: Active sphere
 - .lammpstrj: LAMMPS trajectory
 - .dsk: Disk
 - .rod: Rod
@@ -92,6 +93,21 @@ Rules:
 
 - Order parameters are optional; lines with only radius are valid.
 - If order parameters are present, all particles in the same frame must provide the same number of order parameters.
+
+### .asph
+
+```text
+3D: <label> <x> <y> <z> <radius> <px> <py> <pz>
+2D: <label> <x> <y> <radius> <px> <py>
+```
+
+Rules:
+
+- The file is 2D when the box line has only two values (`Lx Ly`); otherwise it is 3D.
+- `(px, py[, pz])` is the propulsion vector. Its direction drives the "Orientation" color mode: in 3D a "globe" coloring around a chosen axis (x, y, z or the view direction; dropdown under "Color mode"): hue = direction around the axis, light = along +axis, dark = along −axis; in 2D a hue wheel over the full 360° in-plane angle (so +x and −x differ), foldable with the orientation-distribution symmetry selector. Zero propulsion is gray in 2D.
+- 3D: the propulsion direction is shown as a single small gray patch on the particle surface (like a one-patch `.ptc` particle). "Colorize patches (k)" recolors it.
+- 2D: an arrow is drawn on top of each particle along the propulsion direction. Its length is 0.9 particle diameters for |p| >= 1 and scales linearly with |p| below that.
+- A zero propulsion vector gives no patch or arrow.
 
 ### .lammpstrj
 

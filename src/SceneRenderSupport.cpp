@@ -37,6 +37,10 @@ constexpr std::array<float, 4> kBondDiagramCoreColor = {0.82f, 0.84f, 0.88f, 1.0
 constexpr std::array<float, 4> kBondDiagramMixedBondGray = {0.65f, 0.65f, 0.65f, 1.0f};
 constexpr float kBondDiagramMixedBondGrayWeight = 0.30f;
 constexpr std::array<float, 4> kPatchColor = {0.65f, 0.65f, 0.65f, 1.0f};
+/// 2D active spheres: arrow color, and arrow length at |propulsion| >= 1 in
+/// units of the particle diameter (shorter arrows scale linearly below that).
+constexpr std::array<float, 4> kPropulsionArrowColor = {0.12f, 0.12f, 0.12f, 1.0f};
+constexpr float kPropulsionArrowMaxLengthInDiameters = 0.9f;
 constexpr bgfx::ViewId kBondDiagramView = 3;
 constexpr uint64_t kParticleRenderState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
                                           | BGFX_STATE_WRITE_Z
@@ -108,8 +112,19 @@ PatchCapSystem *findPatchCapSystem(PatchRenderSystems &patchRenderSystems, float
 
 void ensurePatchRenderSystems(const bgfx::VertexLayout &layout, uint16_t sphereStacks,
                               uint16_t sphereSlices, const ParticleSystem &particleSystem,
+                              bool drawPropulsionArrows,
                               PatchRenderSystems &patchRenderSystems)
 {
+    if (!drawPropulsionArrows)
+    {
+        patchRenderSystems.propulsionArrowSystem.reset();
+    }
+    else if (!patchRenderSystems.propulsionArrowSystem)
+    {
+        patchRenderSystems.propulsionArrowSystem = std::make_unique<ParticleSystem>(
+            std::make_unique<PropulsionArrowType>(layout, sphereSlices));
+    }
+
     if (!particleSystem.hasPatchyMetadata())
     {
         patchRenderSystems.coneSystem.reset();
@@ -173,11 +188,43 @@ void ensurePatchRenderSystems(const bgfx::VertexLayout &layout, uint16_t sphereS
     }
 }
 
+/// Fills the propulsion-arrow system with one arrow per visible 2D active
+/// sphere, of length 0.9 diameters × min(|propulsion|, 1).
+void rebuildPropulsionArrows(const ParticleSystem &particleSystem, ParticleSystem &arrowSystem)
+{
+    arrowSystem.clear();
+    for (const Particle &particle : particleSystem.particles())
+    {
+        const float radius = particle.sizeParams[0];
+        const float length = kPropulsionArrowMaxLengthInDiameters * 2.0f * radius
+                             * bx::min(particle.propulsionMagnitude, 1.0f);
+        if (!particle.visible || length <= 1.0e-6f * radius)
+        {
+            continue;
+        }
+
+        Particle arrow;
+        arrow.id = particle.id;
+        arrow.position = particle.position;
+        arrow.direction = particle.direction;
+        arrow.baseColor = kPropulsionArrowColor;
+        arrow.color = kPropulsionArrowColor;
+        arrow.visible = true;
+        arrow.sizeParams = {radius, length, 0.0f, 0.0f};
+        arrowSystem.addParticle(arrow);
+    }
+}
+
 void rebuildPatchRenderSystems(const ParticleSystem &particleSystem,
                                PatchRenderSystems &patchRenderSystems,
                                bool colorizePatches,
                                const std::array<std::array<float, 4>, kParticlePaletteColorCount> &patchColors)
 {
+    if (patchRenderSystems.propulsionArrowSystem)
+    {
+        rebuildPropulsionArrows(particleSystem, *patchRenderSystems.propulsionArrowSystem);
+    }
+
     if (!particleSystem.hasPatchyMetadata() || !patchRenderSystems.coneSystem)
     {
         return;
@@ -257,6 +304,14 @@ void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::View
                                                             bool sphericalCutEnabled,
                                                             float sphericalCutRadius)
 {
+    if (patchRenderSystems.propulsionArrowSystem)
+    {
+        patchRenderSystems.propulsionArrowSystem->render(
+            viewId, program, parentTransform, renderState, positionOffset, particleSizeScale,
+            simulationBox, wrapToPeriodicBox, selectedParticleIds, nullptr, usePickColors,
+            cutPlaneEnabled, cutPlaneSceneZ, sphericalCutEnabled, sphericalCutRadius);
+    }
+
     if (patchRenderSystems.coneSystem)
     {
         patchRenderSystems.coneSystem->render(viewId, program, parentTransform, renderState,
@@ -794,6 +849,7 @@ std::unique_ptr<ParticleType> createParticleType(const bgfx::VertexLayout &layou
     if (fileType == TrajectoryReader::FileType::Sphere
         || fileType == TrajectoryReader::FileType::BondedSphere
         || fileType == TrajectoryReader::FileType::OrderedSphere
+        || fileType == TrajectoryReader::FileType::ActiveSphere
         || fileType == TrajectoryReader::FileType::LammpsTrajectory
         || fileType == TrajectoryReader::FileType::Disk)
     {
@@ -832,7 +888,8 @@ bool isSphereLikeFileType(TrajectoryReader::FileType fileType)
     return fileType == TrajectoryReader::FileType::Sphere
            || fileType == TrajectoryReader::FileType::BondedSphere
            || fileType == TrajectoryReader::FileType::OrderedSphere
-            || fileType == TrajectoryReader::FileType::LammpsTrajectory
+           || fileType == TrajectoryReader::FileType::ActiveSphere
+           || fileType == TrajectoryReader::FileType::LammpsTrajectory
            || fileType == TrajectoryReader::FileType::Disk;
 }
 
@@ -841,6 +898,11 @@ bool isPatchyFileType(TrajectoryReader::FileType fileType)
     return fileType == TrajectoryReader::FileType::Patchy
            || fileType == TrajectoryReader::FileType::PatchyLegacy
            || fileType == TrajectoryReader::FileType::Patchy2D;
+}
+
+bool usesPatchRendering(TrajectoryReader::FileType fileType)
+{
+    return isPatchyFileType(fileType) || fileType == TrajectoryReader::FileType::ActiveSphere;
 }
 
 bool isPolygonFileType(TrajectoryReader::FileType fileType)
@@ -1029,10 +1091,13 @@ void updateAuxiliaryRenderSystemsIfNeeded(ViewerState &viewerState,
         rebuildPolygonRenderSystems(particleSystem, polygonRenderSystems);
         viewerState.polygonRenderSystemsDirty = false;
     }
-    if (isPatchyFileType(particleFileType) && viewerState.patchRenderSystemsDirty)
+    if (usesPatchRendering(particleFileType) && viewerState.patchRenderSystemsDirty)
     {
+        const bool drawPropulsionArrows =
+            particleFileType == TrajectoryReader::FileType::ActiveSphere
+            && viewerState.fileDimensionality == TrajectoryReader::Dimensionality::TwoDimensional;
         ensurePatchRenderSystems(layout, sphereStacks, sphereSlices, particleSystem,
-                                 patchRenderSystems);
+                                 drawPropulsionArrows, patchRenderSystems);
         rebuildPatchRenderSystems(particleSystem, patchRenderSystems,
                                   viewerState.colorizePatches,
                                   viewerState.patchColors);
@@ -1148,7 +1213,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                               viewerState.sphericalCutRadius);
     }
 
-    if (isPatchyFileType(particleFileType))
+    if (usesPatchRendering(particleFileType))
     {
         renderPatchRenderSystems(patchRenderSystems, viewId, program,
                                  sceneTransform, kParticleRenderState,
