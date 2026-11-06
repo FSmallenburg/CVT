@@ -23,8 +23,13 @@ class ScreenshotCallback final : public bgfx::CallbackI
     /// is consumed once and then discarded.
     void queueScreenshot(const std::string &filePath, uint32_t viewportWidth, float scale);
 
-    /// bgfx fatal-error callback. Logs the error and aborts unless the code is
-    /// DebugCheck, which only logs.
+    /// Function called from fatal() after logging and before aborting, e.g. to
+    /// restart with a different window system. It may not return.
+    using FatalHook = void (*)(bgfx::Fatal::Enum code);
+    void setFatalHook(FatalHook hook) { fatalHook = hook; }
+
+    /// bgfx fatal-error callback. Logs the error, calls the fatal hook (if set),
+    /// and aborts unless the code is DebugCheck, which only logs.
     void fatal(const char *_filePath, uint16_t _line, bgfx::Fatal::Enum _code,
                const char *_str) override;
 
@@ -73,6 +78,8 @@ class ScreenshotCallback final : public bgfx::CallbackI
 
     /// Map from screenshot file path to the requested post-processing.
     std::unordered_map<std::string, ScreenshotRequest> pendingScreenshots;
+
+    FatalHook fatalHook = nullptr;
 };
 
 /// Renders a screenshot into an offscreen framebuffer, so it can be larger than

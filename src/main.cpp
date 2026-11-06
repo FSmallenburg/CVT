@@ -2566,7 +2566,7 @@ int main(int argc, char **argv)
 
     glfwSetErrorCallback(glfw_errorCallback);
     GlfwLibraryGuard glfwGuard;
-    if (!glfwInit())
+    if (!initializeGlfw())
     {
         return 1;
     }
@@ -2591,7 +2591,10 @@ int main(int argc, char **argv)
     bgfx::renderFrame();
 
     bgfx::Init init;
-    configureBgfxPlatformData(init, window.get());
+    if (!configureBgfxPlatformData(init, window.get()))
+    {
+        return 1;
+    }
 
     int width = 0;
     int height = 0;
@@ -2604,8 +2607,24 @@ int main(int argc, char **argv)
     init.limits.maxTransientVbSize = 256u * 1024u * 1024u;
     init.limits.maxTransientIbSize = 8u * 1024u * 1024u;
 
+    // If the GL context or surface cannot be created on native Wayland, bgfx
+    // aborts via the fatal callback; restart on X11 (XWayland) instead.
+    setRestartArguments(argv);
+    screenshotCallback.setFatalHook([](bgfx::Fatal::Enum code) {
+        if (code == bgfx::Fatal::UnableToInitialize)
+        {
+            restartWithX11IfWaylandStartupFailed();
+        }
+    });
     BgfxLibraryGuard bgfxGuard;
-    if (!initializeBgfxRenderer(init))
+    setBgfxStartupInProgress(true);
+    const bool bgfxInitialized = initializeBgfxRenderer(init);
+    if (!bgfxInitialized)
+    {
+        restartWithX11IfWaylandStartupFailed();
+    }
+    setBgfxStartupInProgress(false);
+    if (!bgfxInitialized)
     {
         return 1;
     }

@@ -65,9 +65,31 @@ struct AppProgramHandles
 [[nodiscard]] GlfwWindowHandle createViewerWindow(ViewerState &viewerState,
                                                   const ViewerWindowCallbacks &callbacks);
 
+/// Calls glfwInit(). On Linux with GLFW 3.4+, first requests the X11 platform
+/// when native Wayland is unavailable or disabled (CVT_FORCE_X11=1, CVT built
+/// without Wayland support, or libwayland-egl missing), and falls back to
+/// GLFW's own choice if X11 cannot be used. Returns false if GLFW fails.
+[[nodiscard]] bool initializeGlfw();
+
 /// Populates @p init.platformData with the OS-specific window handles obtained
-/// from @p window, so bgfx can create its rendering context.
-void configureBgfxPlatformData(bgfx::Init &init, GLFWwindow *window);
+/// from @p window, so bgfx can create its rendering context. On Linux this
+/// passes Wayland handles when GLFW runs on Wayland, X11 handles otherwise.
+/// Returns false (after logging) if GLFW provides no usable handle.
+[[nodiscard]] bool configureBgfxPlatformData(bgfx::Init &init, GLFWwindow *window);
+
+/// Stores @p argv (null-terminated, from main) for restartWithX11IfWaylandStartupFailed().
+void setRestartArguments(char **argv);
+
+/// Marks the span around bgfx::init(), during which a fatal bgfx error may
+/// trigger restartWithX11IfWaylandStartupFailed().
+void setBgfxStartupInProgress(bool inProgress);
+
+/// If bgfx is starting up on native Wayland (and X11 was not already forced),
+/// re-executes CVT with CVT_FORCE_X11=1 so it runs on X11/XWayland instead.
+/// Does not return on success; returns without effect otherwise. Called on
+/// bgfx init failure and from the bgfx fatal callback, since bgfx cannot
+/// recover from a failed EGL surface within the process.
+void restartWithX11IfWaylandStartupFailed();
 
 /// Computes a smoothed FPS estimate from @p uiDeltaTime and stores it in
 /// viewerState.currentFps.

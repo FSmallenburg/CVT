@@ -237,6 +237,10 @@ void ScreenshotCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal:
                      message != nullptr ? message : "<no message>");
     if (code != bgfx::Fatal::DebugCheck)
     {
+        if (fatalHook != nullptr)
+        {
+            fatalHook(code);
+        }
         std::abort();
     }
 }

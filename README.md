@@ -111,6 +111,18 @@ cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release
 ```
 
+### Wayland and X11
+
+On a Wayland session, CVT runs natively on Wayland when its GLFW supports
+Wayland (GLFW 3.4 or newer, built with the Wayland backend). Configure prints
+`CVT native Wayland support: ON/OFF`. With older or X11-only GLFW (such as
+Ubuntu 24.04's `libglfw3` 3.3), CVT uses X11, which runs through XWayland on a
+Wayland session.
+
+If graphics initialization fails on native Wayland, CVT restarts itself on
+X11. To skip Wayland from the start, run with `CVT_FORCE_X11=1 ./cvt ...`, or
+configure with `-DCVT_ENABLE_WAYLAND=OFF`.
+
 ### Run
 
 ```bash

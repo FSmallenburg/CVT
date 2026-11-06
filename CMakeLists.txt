@@ -186,6 +186,53 @@ if(GLFW_TARGET)
     target_link_libraries(cvt PRIVATE ${GLFW_TARGET})
 endif()
 
+# Native Wayland support (Linux). GLFW 3.4+ chooses Wayland at runtime on a
+# Wayland session; CVT then has to hand bgfx Wayland window handles instead of
+# X11 ones. That needs a GLFW built with its Wayland backend (glfwGetPlatform,
+# glfwGetWaylandWindow). GLFW 3.3 and X11-only builds fail this check, and CVT
+# then always uses X11 (XWayland on a Wayland session), as before.
+option(CVT_ENABLE_WAYLAND "Use native Wayland when GLFW supports it (Linux)" ON)
+set(CVT_GLFW_HAS_WAYLAND OFF)
+if(CVT_ENABLE_WAYLAND AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(DEFINED glfw3_src_SOURCE_DIR)
+        # Bundled GLFW (FetchContent): Wayland backend follows its own option.
+        if(GLFW_BUILD_WAYLAND)
+            set(CVT_GLFW_HAS_WAYLAND ON)
+        endif()
+    else()
+        include(CheckCXXSourceCompiles)
+        include(CMakePushCheckState)
+        cmake_push_check_state(RESET)
+        if(GLFW_TARGET)
+            set(CMAKE_REQUIRED_LIBRARIES ${GLFW_TARGET})
+        else()
+            set(CMAKE_REQUIRED_INCLUDES ${GLFW_INCLUDE_DIRS})
+            set(CMAKE_REQUIRED_LIBRARIES ${GLFW_LINK_LIBRARIES} ${GLFW_LIBRARIES})
+        endif()
+        set(CMAKE_REQUIRED_QUIET ON)
+        check_cxx_source_compiles([=[
+            #include <GLFW/glfw3.h>
+            #define GLFW_EXPOSE_NATIVE_WAYLAND
+            #include <GLFW/glfw3native.h>
+            int main()
+            {
+                int platform = glfwGetPlatform() == GLFW_PLATFORM_WAYLAND;
+                void *window = (void *)glfwGetWaylandWindow(nullptr);
+                void *display = (void *)glfwGetWaylandDisplay();
+                return platform + (window != nullptr) + (display != nullptr);
+            }
+        ]=] CVT_GLFW_WAYLAND_SYMBOLS_FOUND)
+        cmake_pop_check_state()
+        if(CVT_GLFW_WAYLAND_SYMBOLS_FOUND)
+            set(CVT_GLFW_HAS_WAYLAND ON)
+        endif()
+    endif()
+endif()
+message(STATUS "CVT native Wayland support: ${CVT_GLFW_HAS_WAYLAND}")
+if(CVT_GLFW_HAS_WAYLAND)
+    target_compile_definitions(cvt PRIVATE CVT_GLFW_HAS_WAYLAND=1)
+endif()
+
 option(CVT_BUILD_SHADERS "Compile runtime shaders as part of the build" ON)
 
 if(CVT_BUILD_SHADERS)
