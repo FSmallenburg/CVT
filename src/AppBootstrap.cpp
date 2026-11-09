@@ -201,6 +201,16 @@ GlfwWindowHandle createViewerWindow(ViewerState &viewerState,
 bool configureBgfxPlatformData(bgfx::Init &init, GLFWwindow *window)
 {
 #if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+    // Ask for a backbuffer without alpha. bgfx's EGL backend takes the first
+    // config matching this format, without checking that its X visual matches
+    // the window's. GLFW creates the window with the default 24-bit visual,
+    // but drivers can list RGBA8 configs with a 32-bit visual first (e.g.
+    // NVIDIA 580 on XWayland), and eglCreateWindowSurface then fails with
+    // "Failed to create surface". Requesting alpha 0 makes EGL prefer the
+    // 24-bit configs. CVT never uses destination alpha, and screenshots read
+    // alpha back as opaque.
+    init.resolution.formatColor = bgfx::TextureFormat::RGB8;
+
 #if defined(CVT_GLFW_HAS_WAYLAND)
     if (glfwRunsOnWayland())
     {
