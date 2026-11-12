@@ -74,6 +74,7 @@ add_executable(cvt
     ${BGFX_DIR}/3rdparty/dear-imgui/imgui_draw.cpp
     ${BGFX_DIR}/3rdparty/dear-imgui/imgui_tables.cpp
     ${BGFX_DIR}/3rdparty/dear-imgui/imgui_widgets.cpp
+    ${BGFX_DIR}/3rdparty/dear-imgui/imgui_demo.cpp
 )
 
 target_compile_definitions(cvt PRIVATE

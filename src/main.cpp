@@ -2157,6 +2157,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         viewerState.cutPlaneEnabled = true;
         viewerState.cutPlaneSceneZ = 0.0f;
+        viewerState.cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
         viewerState.pendingEnableCutPlane = false;
         markPickBufferDirty(viewerState);
     }
@@ -2165,6 +2166,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         viewerState.cutPlaneEnabled = false;
         viewerState.cutPlaneSceneZ = cutPlaneMaxSceneZ;
+        viewerState.cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
         viewerState.pendingDisableCutPlane = false;
         markPickBufferDirty(viewerState);
     }
@@ -2191,7 +2193,8 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
             viewerState.cutPlaneSceneZ =
                 std::clamp(viewerState.cutPlaneSceneZ
                                + float(viewerState.pendingCutPlaneStep) * cutPlaneStep,
-                           cutPlaneMinSceneZ, cutPlaneMaxSceneZ);
+                           bx::max(cutPlaneMinSceneZ, viewerState.cutPlaneFarSceneZ),
+                           cutPlaneMaxSceneZ);
             markPickBufferDirty(viewerState);
         }
         viewerState.pendingCutPlaneStep = 0;
@@ -2397,8 +2400,9 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
     const std::string currentColorModeLabel =
         colorModeName(viewerState.colorMode, viewerState);
     bgfx::dbgTextPrintf(0, 6, 0x0f,
-                        "Cut plane: %s  z=%.2f  Sphere cut: %s r=%.2f",
+                        "Cut plane: %s  z=[%.2f, %.2f]  Sphere cut: %s r=%.2f",
                         viewerState.cutPlaneEnabled ? "active" : "off",
+                        viewerState.cutPlaneFarSceneZ,
                         viewerState.cutPlaneSceneZ,
                         viewerState.sphericalCutEnabled ? "active" : "off",
                         viewerState.sphericalCutRadius);
@@ -2888,7 +2892,9 @@ int main(int argc, char **argv)
                                loadedPath, currentFrame, totalFrames,
                                static_cast<uint16_t>(width), static_cast<uint16_t>(height),
                                cutPlaneMinSceneZ, cutPlaneMaxSceneZ);
-
+            // ImGui::Begin("Style Editor");
+            // ImGui::ShowStyleEditor();
+            // ImGui::End();
             const float lightDir[4] = {
                 lightDirection.x,
                 lightDirection.y,

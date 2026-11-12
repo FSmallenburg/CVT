@@ -299,17 +299,14 @@ void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::View
                               float particleSizeScale, const SimulationBox *simulationBox,
                               bool wrapToPeriodicBox,
                               const std::unordered_set<uint32_t> *selectedParticleIds,
-                              bool usePickColors, bool cutPlaneEnabled,
-                                                            float cutPlaneSceneZ,
-                                                            bool sphericalCutEnabled,
-                                                            float sphericalCutRadius)
+                              bool usePickColors, const ParticleCuts &cuts)
 {
     if (patchRenderSystems.propulsionArrowSystem)
     {
         patchRenderSystems.propulsionArrowSystem->render(
             viewId, program, parentTransform, renderState, positionOffset, particleSizeScale,
             simulationBox, wrapToPeriodicBox, selectedParticleIds, nullptr, usePickColors,
-            cutPlaneEnabled, cutPlaneSceneZ, sphericalCutEnabled, sphericalCutRadius);
+            cuts);
     }
 
     if (patchRenderSystems.coneSystem)
@@ -318,8 +315,7 @@ void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::View
                                               positionOffset, particleSizeScale,
                                               simulationBox, wrapToPeriodicBox,
                                               selectedParticleIds, nullptr, usePickColors,
-                                                                                            cutPlaneEnabled, cutPlaneSceneZ,
-                                                                                            sphericalCutEnabled, sphericalCutRadius);
+                                                                                            cuts);
     }
 
     for (PatchCapSystem &capSystem : patchRenderSystems.capSystems)
@@ -328,8 +324,7 @@ void renderPatchRenderSystems(PatchRenderSystems &patchRenderSystems, bgfx::View
                                  positionOffset, particleSizeScale,
                                  simulationBox, wrapToPeriodicBox,
                                  selectedParticleIds, nullptr, usePickColors,
-                                                                cutPlaneEnabled, cutPlaneSceneZ,
-                                                                sphericalCutEnabled, sphericalCutRadius);
+                                                                cuts);
     }
 }
 
@@ -463,10 +458,7 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
                              bgfx::ProgramHandle program, const float *parentTransform,
                              uint64_t renderState, float particleSizeScale,
                              const std::unordered_set<uint32_t> *selectedParticleIds,
-                             bool usePickColors, bool cutPlaneEnabled,
-                             float cutPlaneSceneZ,
-                             bool sphericalCutEnabled,
-                             float sphericalCutRadius)
+                             bool usePickColors, const ParticleCuts &cuts)
 {
     const bx::Vec3 zeroOffset{0.0f, 0.0f, 0.0f};
 
@@ -476,8 +468,7 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
                                                  zeroOffset, 1.0f,
                                                  nullptr, false,
                                                  selectedParticleIds, nullptr, usePickColors,
-                                                cutPlaneEnabled, cutPlaneSceneZ,
-                                                sphericalCutEnabled, sphericalCutRadius);
+                                                cuts);
     }
     if (bondRenderSystems.nodeSystem)
     {
@@ -485,8 +476,7 @@ void renderBondRenderSystems(BondRenderSystems &bondRenderSystems, bgfx::ViewId 
                                              zeroOffset, particleSizeScale,
                                              nullptr, false,
                                              selectedParticleIds, nullptr, usePickColors,
-                                            cutPlaneEnabled, cutPlaneSceneZ,
-                                            sphericalCutEnabled, sphericalCutRadius);
+                                            cuts);
     }
 }
 
@@ -669,10 +659,7 @@ void renderPolygonRenderSystems(PolygonRenderSystems &polygonRenderSystems,
                                 const SimulationBox *simulationBox,
                                 bool wrapToPeriodicBox,
                                 const std::unordered_set<uint32_t> *selectedParticleIds,
-                                bool usePickColors, bool cutPlaneEnabled,
-                                float cutPlaneSceneZ,
-                                bool sphericalCutEnabled,
-                                float sphericalCutRadius)
+                                bool usePickColors, const ParticleCuts &cuts)
 {
     for (PolygonRenderSystem &polygonRenderSystem : polygonRenderSystems.systems)
     {
@@ -680,8 +667,7 @@ void renderPolygonRenderSystems(PolygonRenderSystems &polygonRenderSystems,
                                            positionOffset, particleSizeScale,
                                            simulationBox, wrapToPeriodicBox,
                                            selectedParticleIds, nullptr, usePickColors,
-                                           cutPlaneEnabled, cutPlaneSceneZ,
-                                           sphericalCutEnabled, sphericalCutRadius);
+                                           cuts);
     }
 }
 
@@ -1143,6 +1129,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
 {
     const auto *selectedParticleIds =
         usePickColors ? nullptr : &viewerState.selectedIds;
+    const ParticleCuts cuts = particleCutsFromViewerState(viewerState);
 
     if (viewerState.bondModeEnabled)
     {
@@ -1150,10 +1137,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                 sceneTransform, kParticleRenderState,
                                 viewerState.particleSizeScale,
                                 selectedParticleIds, usePickColors,
-                                viewerState.cutPlaneEnabled,
-                                viewerState.cutPlaneSceneZ,
-                                viewerState.sphericalCutEnabled,
-                                viewerState.sphericalCutRadius);
+                                cuts);
         return;
     }
 
@@ -1163,10 +1147,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                 sceneTransform, kParticleRenderState,
                                 viewerState.particleSizeScale,
                                 selectedParticleIds, usePickColors,
-                                viewerState.cutPlaneEnabled,
-                                viewerState.cutPlaneSceneZ,
-                                viewerState.sphericalCutEnabled,
-                                viewerState.sphericalCutRadius);
+                                cuts);
         return;
     }
 
@@ -1178,10 +1159,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                               1.0f,
                               &simulationBox, viewerState.wrapParticlesToBox,
                               selectedParticleIds, nullptr,
-                              usePickColors, viewerState.cutPlaneEnabled,
-                              viewerState.cutPlaneSceneZ,
-                              viewerState.sphericalCutEnabled,
-                              viewerState.sphericalCutRadius);
+                              usePickColors, cuts);
         return;
     }
 
@@ -1193,10 +1171,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                    viewerState.particleSizeScale, &simulationBox,
                                    viewerState.wrapParticlesToBox,
                                    selectedParticleIds, usePickColors,
-                                   viewerState.cutPlaneEnabled,
-                                   viewerState.cutPlaneSceneZ,
-                                   viewerState.sphericalCutEnabled,
-                                   viewerState.sphericalCutRadius);
+                                   cuts);
     }
     else
     {
@@ -1207,10 +1182,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                               viewerState.wrapParticlesToBox,
                               selectedParticleIds, nullptr,
                               usePickColors,
-                              viewerState.cutPlaneEnabled,
-                              viewerState.cutPlaneSceneZ,
-                              viewerState.sphericalCutEnabled,
-                              viewerState.sphericalCutRadius);
+                              cuts);
     }
 
     if (usesPatchRendering(particleFileType))
@@ -1221,10 +1193,7 @@ void renderActiveScene(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                                  viewerState.particleSizeScale, &simulationBox,
                                  viewerState.wrapParticlesToBox,
                                  selectedParticleIds, usePickColors,
-                                 viewerState.cutPlaneEnabled,
-                                viewerState.cutPlaneSceneZ,
-                                viewerState.sphericalCutEnabled,
-                                viewerState.sphericalCutRadius);
+                                 cuts);
     }
 }
 
@@ -1258,9 +1227,7 @@ void renderBondDiagramPreview(const ViewerState &viewerState,
 
     const bx::Vec3 zeroOffset{0.0f, 0.0f, 0.0f};
     coreSystem.render(kBondDiagramView, program, sceneTransform, kParticleRenderState,
-                      zeroOffset, 1.0f, nullptr, false, nullptr, nullptr, false,
-                      false, 0.0f);
+                      zeroOffset, 1.0f, nullptr, false, nullptr, nullptr, false);
     markerSystem.render(kBondDiagramView, program, sceneTransform, kParticleRenderState,
-                        zeroOffset, 1.0f, nullptr, false, nullptr, nullptr, false,
-                        false, 0.0f);
+                        zeroOffset, 1.0f, nullptr, false, nullptr, nullptr, false);
 }

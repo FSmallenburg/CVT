@@ -2315,16 +2315,36 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         {
             viewerState.cutPlaneEnabled = cutPlaneEnabled;
             viewerState.cutPlaneSceneZ = cutPlaneEnabled ? 0.0f : cutPlaneMaxSceneZ;
+            viewerState.cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
             markPickDirty = true;
         }
         if (viewerState.cutPlaneEnabled)
         {
+            // Left handle: far plane (a handle at the left end cuts nothing).
+            // Right handle: near plane, also moved with the keyboard.
+            float cutPlaneFarSceneZ =
+                bx::max(viewerState.cutPlaneFarSceneZ, cutPlaneMinSceneZ);
             float cutPlaneSceneZ = viewerState.cutPlaneSceneZ;
-            if (ImGui::SliderFloat("Cut plane z", &cutPlaneSceneZ,
-                                   cutPlaneMinSceneZ, cutPlaneMaxSceneZ, "%.2f"))
+            ImGui::TextUnformatted("Cut plane z range (far, near)");
+            if (dualHandleRangeSliderFloat("##CutPlaneRange", &cutPlaneFarSceneZ,
+                                           &cutPlaneSceneZ, cutPlaneMinSceneZ,
+                                           cutPlaneMaxSceneZ))
             {
+                viewerState.cutPlaneFarSceneZ =
+                    cutPlaneFarSceneZ <= cutPlaneMinSceneZ
+                        ? -std::numeric_limits<float>::infinity()
+                        : cutPlaneFarSceneZ;
                 viewerState.cutPlaneSceneZ = cutPlaneSceneZ;
                 markPickDirty = true;
+            }
+            if (viewerState.cutPlaneFarSceneZ > cutPlaneMinSceneZ)
+            {
+                ImGui::Text("Showing z in [%.2f, %.2f]", viewerState.cutPlaneFarSceneZ,
+                            viewerState.cutPlaneSceneZ);
+            }
+            else
+            {
+                ImGui::Text("Showing z <= %.2f", viewerState.cutPlaneSceneZ);
             }
         }        
 

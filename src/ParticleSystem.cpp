@@ -208,10 +208,7 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
                             const SimulationBox *simulationBox, bool wrapToPeriodicBox,
                             const std::unordered_set<uint32_t> *selectedParticleIds,
                             const std::unordered_set<uint32_t> *highlightedParticleIds,
-                            bool usePickColors, bool cutPlaneEnabled,
-                            float cutPlaneSceneZ,
-                            bool sphericalCutEnabled,
-                            float sphericalCutRadius)
+                            bool usePickColors, const ParticleCuts &cuts)
 {
     const std::vector<RenderPart> &parts = m_particleType->renderParts();
     if (parts.empty() || m_particles.empty())
@@ -259,20 +256,9 @@ void ParticleSystem::render(bgfx::ViewId viewId, bgfx::ProgramHandle program,
 
         const bx::Vec3 transformedPosition = transformPoint(parentTransform, prepared.position);
 
-        if (cutPlaneEnabled)
+        if (cuts.culls(transformedPosition))
         {
-            if (transformedPosition.z > cutPlaneSceneZ)
-            {
-                continue;
-            }
-        }
-
-        if (sphericalCutEnabled && sphericalCutRadius > 0.0f)
-        {
-            if (bx::length(transformedPosition) > sphericalCutRadius)
-            {
-                continue;
-            }
+            continue;
         }
 
         preparedParticles.push_back(prepared);

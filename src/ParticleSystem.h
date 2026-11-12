@@ -7,9 +7,35 @@
 #include <bgfx/bgfx.h>
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <unordered_set>
 #include <vector>
+
+/// Scene-space clipping applied while rendering (view space before projection:
+/// the camera sits on +z looking towards -z).
+struct ParticleCuts
+{
+    /// Slab cut: only particles with planeFarSceneZ <= z <= planeNearSceneZ are drawn.
+    bool planeEnabled = false;
+    float planeNearSceneZ = 0.0f;
+    /// -infinity means no far cut (the default: far plane at the end of the box).
+    float planeFarSceneZ = -std::numeric_limits<float>::infinity();
+    /// Spherical cut around the scene-space origin.
+    bool sphereEnabled = false;
+    float sphereRadius = 0.0f;
+
+    /// True when a particle at scene-space position @p position is clipped away.
+    bool culls(const bx::Vec3 &position) const
+    {
+        if (planeEnabled
+            && (position.z > planeNearSceneZ || position.z < planeFarSceneZ))
+        {
+            return true;
+        }
+        return sphereEnabled && sphereRadius > 0.0f && bx::length(position) > sphereRadius;
+    }
+};
 
 /// Per-particle orientation and patch geometry for patchy-particle file types.
 struct PatchyParticleData
@@ -126,10 +152,7 @@ class ParticleSystem
     /// @param highlightedParticleIds When non-null, particles in this set receive an additional highlight.
     /// @param usePickColors       When true, particles are rendered with unique ID-encoded pick colors
     ///                            instead of their normal colors.
-        /// @param cutPlaneEnabled     Enables the horizontal cut-plane clipping.
-        /// @param cutPlaneSceneZ      World-space Z coordinate of the cut plane.
-        /// @param sphericalCutEnabled Enables spherical clipping around scene-space origin.
-        /// @param sphericalCutRadius  Radius of the spherical clipping region.
+    /// @param cuts                Cut-plane slab and spherical clipping in scene space.
     void render(bgfx::ViewId viewId, bgfx::ProgramHandle program, const float *parentTransform,
           uint64_t renderState, const bx::Vec3 &positionOffset = {0.0f, 0.0f, 0.0f},
           float particleSizeScale = 1.0f,
@@ -137,10 +160,7 @@ class ParticleSystem
           bool wrapToPeriodicBox = false,
           const std::unordered_set<uint32_t> *selectedParticleIds = nullptr,
           const std::unordered_set<uint32_t> *highlightedParticleIds = nullptr,
-          bool usePickColors = false, bool cutPlaneEnabled = false,
-            float cutPlaneSceneZ = 0.0f,
-            bool sphericalCutEnabled = false,
-            float sphericalCutRadius = 0.0f);
+          bool usePickColors = false, const ParticleCuts &cuts = {});
 
   private:
     std::unique_ptr<ParticleType> m_particleType;

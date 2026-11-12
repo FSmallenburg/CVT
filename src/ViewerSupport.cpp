@@ -199,6 +199,17 @@ bool structureFactorAllowsInteractionUpdates(StructureFactorUpdateMode mode)
     return mode == StructureFactorUpdateMode::UpdateAlways;
 }
 
+ParticleCuts particleCutsFromViewerState(const ViewerState &state)
+{
+    ParticleCuts cuts;
+    cuts.planeEnabled = state.cutPlaneEnabled;
+    cuts.planeNearSceneZ = state.cutPlaneSceneZ;
+    cuts.planeFarSceneZ = state.cutPlaneFarSceneZ;
+    cuts.sphereEnabled = state.sphericalCutEnabled;
+    cuts.sphereRadius = state.sphericalCutRadius;
+    return cuts;
+}
+
 float computeCutPlaneStep(const SimulationBox &simulationBox)
 {
     const bx::Vec3 boxSize = simulationBox.size();
@@ -434,6 +445,11 @@ bool alignViewToSelectedParticles(ViewerState &state,
     state.structureFactorInteractionLowResActive = false;
     markBondDiagramViewDirty(state);
     markStructureFactorDirty(state);
+    if (state.structureFactorPanelOpen
+        && structureFactorAllowsAutomaticUpdates(state.structureFactorUpdateMode))
+    {
+        state.structureFactorPendingCompute = true;
+    }
     markPickBufferDirty(state);
     return true;
 }

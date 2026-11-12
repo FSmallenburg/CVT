@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -318,7 +319,12 @@ struct ViewerState
     bool pendingIncreaseSphereResolution = false;
     bool pendingDecreaseSphereResolution = false;
     bool cutPlaneEnabled = false;
+    /// Near cut plane: particles closer to the camera (larger scene z) are hidden.
     float cutPlaneSceneZ = 0.0f;
+    /// Far cut plane: particles further away (smaller scene z) are hidden.
+    /// -infinity (the default) means "at the far end": nothing is cut, not even
+    /// particles outside the box.
+    float cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
     bool sphericalCutEnabled = false;
     float sphericalCutRadius = 0.0f;
     // Camera/cut-plane and picking actions.
@@ -487,6 +493,8 @@ struct StructureFactorResources
 };
 
 float computeCutPlaneStep(const SimulationBox &simulationBox);
+/// Bundles the cut-plane slab and spherical cut settings for rendering.
+ParticleCuts particleCutsFromViewerState(const ViewerState &state);
 float computeSphericalCutMaxRadius(const SimulationBox &simulationBox,
                                    TrajectoryReader::Dimensionality dimensionality);
 /// Clamps a raw mouse/window coordinate in [0, extent) to a uint16_t pick coordinate.
