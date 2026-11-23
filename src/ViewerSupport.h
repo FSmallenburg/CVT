@@ -321,10 +321,10 @@ struct ViewerState
     bool cutPlaneEnabled = false;
     /// Near cut plane: particles closer to the camera (larger scene z) are hidden.
     float cutPlaneSceneZ = 0.0f;
-    /// Far cut plane: particles further away (smaller scene z) are hidden.
-    /// -infinity (the default) means "at the far end": nothing is cut, not even
-    /// particles outside the box.
-    float cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
+    /// Thickness of the visible slab behind the cut plane: particles further than
+    /// this from the plane (scene z < cutPlaneSceneZ - thickness) are hidden too.
+    /// Infinity (the default) means no slab: nothing behind the plane is cut.
+    float cutPlaneSlabThickness = std::numeric_limits<float>::infinity();
     bool sphericalCutEnabled = false;
     float sphericalCutRadius = 0.0f;
     // Camera/cut-plane and picking actions.

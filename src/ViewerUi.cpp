@@ -2315,36 +2315,42 @@ void drawViewerControls(ViewerState &viewerState, ParticleSystem &particleSystem
         {
             viewerState.cutPlaneEnabled = cutPlaneEnabled;
             viewerState.cutPlaneSceneZ = cutPlaneEnabled ? 0.0f : cutPlaneMaxSceneZ;
-            viewerState.cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
+            viewerState.cutPlaneSlabThickness = std::numeric_limits<float>::infinity();
             markPickDirty = true;
         }
         if (viewerState.cutPlaneEnabled)
         {
-            // Left handle: far plane (a handle at the left end cuts nothing).
-            // Right handle: near plane, also moved with the keyboard.
-            float cutPlaneFarSceneZ =
-                bx::max(viewerState.cutPlaneFarSceneZ, cutPlaneMinSceneZ);
             float cutPlaneSceneZ = viewerState.cutPlaneSceneZ;
-            ImGui::TextUnformatted("Cut plane z range (far, near)");
-            if (dualHandleRangeSliderFloat("##CutPlaneRange", &cutPlaneFarSceneZ,
-                                           &cutPlaneSceneZ, cutPlaneMinSceneZ,
-                                           cutPlaneMaxSceneZ))
+            if (ImGui::SliderFloat("Cut plane z", &cutPlaneSceneZ,
+                                   cutPlaneMinSceneZ, cutPlaneMaxSceneZ, "%.2f"))
             {
-                viewerState.cutPlaneFarSceneZ =
-                    cutPlaneFarSceneZ <= cutPlaneMinSceneZ
-                        ? -std::numeric_limits<float>::infinity()
-                        : cutPlaneFarSceneZ;
                 viewerState.cutPlaneSceneZ = cutPlaneSceneZ;
                 markPickDirty = true;
             }
-            if (viewerState.cutPlaneFarSceneZ > cutPlaneMinSceneZ)
+
+            // Optional slab: also hide particles more than this far behind the
+            // plane. Moving the plane (slider or , and . keys) moves the slab.
+            const bx::Vec3 boxSize = simulationBox.size();
+            const float maxSlabThickness =
+                bx::max(bx::max(boxSize.x, boxSize.y), boxSize.z);
+            bool slabEnabled = std::isfinite(viewerState.cutPlaneSlabThickness);
+            if (ImGui::Checkbox("Limit slab thickness", &slabEnabled))
             {
-                ImGui::Text("Showing z in [%.2f, %.2f]", viewerState.cutPlaneFarSceneZ,
-                            viewerState.cutPlaneSceneZ);
+                viewerState.cutPlaneSlabThickness =
+                    slabEnabled ? 0.25f * maxSlabThickness
+                                : std::numeric_limits<float>::infinity();
+                markPickDirty = true;
             }
-            else
+            if (slabEnabled && maxSlabThickness > 0.0f)
             {
-                ImGui::Text("Showing z <= %.2f", viewerState.cutPlaneSceneZ);
+                float slabThickness =
+                    std::clamp(viewerState.cutPlaneSlabThickness, 0.0f, maxSlabThickness);
+                if (ImGui::SliderFloat("Slab thickness", &slabThickness, 0.0f,
+                                       maxSlabThickness, "%.2f"))
+                {
+                    viewerState.cutPlaneSlabThickness = slabThickness;
+                    markPickDirty = true;
+                }
             }
         }        
 

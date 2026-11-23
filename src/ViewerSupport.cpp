@@ -204,7 +204,7 @@ ParticleCuts particleCutsFromViewerState(const ViewerState &state)
     ParticleCuts cuts;
     cuts.planeEnabled = state.cutPlaneEnabled;
     cuts.planeNearSceneZ = state.cutPlaneSceneZ;
-    cuts.planeFarSceneZ = state.cutPlaneFarSceneZ;
+    cuts.planeFarSceneZ = state.cutPlaneSceneZ - state.cutPlaneSlabThickness;
     cuts.sphereEnabled = state.sphericalCutEnabled;
     cuts.sphereRadius = state.sphericalCutRadius;
     return cuts;

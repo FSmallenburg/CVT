@@ -2157,7 +2157,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         viewerState.cutPlaneEnabled = true;
         viewerState.cutPlaneSceneZ = 0.0f;
-        viewerState.cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
+        viewerState.cutPlaneSlabThickness = std::numeric_limits<float>::infinity();
         viewerState.pendingEnableCutPlane = false;
         markPickBufferDirty(viewerState);
     }
@@ -2166,7 +2166,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
     {
         viewerState.cutPlaneEnabled = false;
         viewerState.cutPlaneSceneZ = cutPlaneMaxSceneZ;
-        viewerState.cutPlaneFarSceneZ = -std::numeric_limits<float>::infinity();
+        viewerState.cutPlaneSlabThickness = std::numeric_limits<float>::infinity();
         viewerState.pendingDisableCutPlane = false;
         markPickBufferDirty(viewerState);
     }
@@ -2193,8 +2193,7 @@ static void processPendingActions(ViewerState &viewerState, ParticleSystem &part
             viewerState.cutPlaneSceneZ =
                 std::clamp(viewerState.cutPlaneSceneZ
                                + float(viewerState.pendingCutPlaneStep) * cutPlaneStep,
-                           bx::max(cutPlaneMinSceneZ, viewerState.cutPlaneFarSceneZ),
-                           cutPlaneMaxSceneZ);
+                           cutPlaneMinSceneZ, cutPlaneMaxSceneZ);
             markPickBufferDirty(viewerState);
         }
         viewerState.pendingCutPlaneStep = 0;
@@ -2400,10 +2399,10 @@ static void drawDebugOverlay(const ParticleSystem &particleSystem,
     const std::string currentColorModeLabel =
         colorModeName(viewerState.colorMode, viewerState);
     bgfx::dbgTextPrintf(0, 6, 0x0f,
-                        "Cut plane: %s  z=[%.2f, %.2f]  Sphere cut: %s r=%.2f",
+                        "Cut plane: %s  z=%.2f slab=%.2f  Sphere cut: %s r=%.2f",
                         viewerState.cutPlaneEnabled ? "active" : "off",
-                        viewerState.cutPlaneFarSceneZ,
                         viewerState.cutPlaneSceneZ,
+                        viewerState.cutPlaneSlabThickness,
                         viewerState.sphericalCutEnabled ? "active" : "off",
                         viewerState.sphericalCutRadius);
     bgfx::dbgTextPrintf(0, 7, 0x0f,
